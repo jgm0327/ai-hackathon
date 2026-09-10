@@ -1,0 +1,6 @@
+{
+  "company": "가상클라우드",
+  "title": "주니어 백엔드 엔지니어",
+  "required_skills": ["동시성제어", "Spring Boot", "Redis", "성능최적화"],
+  "description": "동시성 이슈를 다뤄본 경험과 Spring 생태계 이해가 있는 주니어를 찾습니다."
+}

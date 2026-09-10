@@ -1,0 +1,11 @@
+streamlit==1.38.0
+plotly==5.24.0
+langchain==0.3.7
+chromadb==0.5.15
+anthropic==0.36.0
+python-dotenv==1.0.1
+pytest==8.3.3
+requests==2.32.3
+
+# Tier 2 푸시 알림 (선택, Track E)
+pywebpush==2.0.3
