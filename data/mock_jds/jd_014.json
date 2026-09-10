@@ -1,0 +1,6 @@
+{
+  "company": "가상소셜",
+  "title": "모바일 개발자 (Android)",
+  "required_skills": ["Kotlin", "메모리최적화", "버그수정", "UI구현"],
+  "description": "Android 앱의 메모리 이슈를 진단하고 개선할 개발자를 찾습니다."
+}

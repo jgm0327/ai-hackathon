@@ -11,12 +11,30 @@ except ImportError:
 
 @dataclass(frozen=True)
 class Settings:
+    # "anthropic"(기본, 배포용) 또는 "ollama"(로컬 무료 검증용 폴백).
+    llm_provider: str = os.getenv("LLM_PROVIDER", "anthropic")
     llm_api_key: str = os.getenv("LLM_API_KEY", "")
-    llm_model: str = os.getenv("LLM_MODEL", "claude-sonnet-4-6")
+    llm_model: str = os.getenv("LLM_MODEL", "claude-sonnet-5")
+    ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    ollama_model: str = os.getenv("OLLAMA_MODEL", "exaone3.5:2.4b")
+    # "chroma_default"(기본, 배포용 — 별도 서버 불필요, 대신 한국어 임베딩 품질이 낮음)
+    # 또는 "ollama"(로컬 개발용 — bge-m3로 한국어 품질 우수, 로컬 Ollama 서버 필요).
+    embedding_provider: str = os.getenv("EMBEDDING_PROVIDER", "chroma_default")
+    ollama_embedding_model: str = os.getenv("OLLAMA_EMBEDDING_MODEL", "bge-m3")
     notion_token: str = os.getenv("NOTION_TOKEN", "")
     notion_mcp_server_url: str = os.getenv("NOTION_MCP_SERVER_URL", "")
     chroma_persist_dir: str = os.getenv("CHROMA_PERSIST_DIR", "./.chroma")
     mock_jd_dir: str = os.getenv("MOCK_JD_DIR", "data/mock_jds")
+    # Tier 2 푸시 알림(Track E). PRIVATE는 서버(push_sender.py)만, PUBLIC은 프론트 JS의
+    # pushManager.subscribe(applicationServerKey=...)에 그대로 노출해도 안전(공개키라서 그렇다).
+    vapid_private_key: str = os.getenv("VAPID_PRIVATE_KEY", "")
+    vapid_public_key: str = os.getenv("VAPID_PUBLIC_KEY", "")
+    vapid_contact_email: str = os.getenv("VAPID_CONTACT_EMAIL", "mailto:example@example.com")
+    # 구독 데이터 저장소. 배포된 Streamlit 앱(쓰기)과 GitHub Actions(읽기)가 서로 다른
+    # 프로세스라 파일시스템을 공유 못 하므로 Upstash Redis(REST API, 무료)를 공용
+    # 저장소로 쓴다. 비어있으면 로컬 JSON 파일로 자동 폴백(로컬 개발용).
+    upstash_redis_rest_url: str = os.getenv("UPSTASH_REDIS_REST_URL", "")
+    upstash_redis_rest_token: str = os.getenv("UPSTASH_REDIS_REST_TOKEN", "")
 
 
 settings = Settings()

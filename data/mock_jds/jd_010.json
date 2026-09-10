@@ -1,0 +1,6 @@
+{
+  "company": "가상AI랩",
+  "title": "머신러닝 엔지니어",
+  "required_skills": ["모델서빙", "데이터전처리", "MLOps", "성능튜닝"],
+  "description": "모델을 프로덕션에 서빙하고 MLOps 파이프라인을 구축할 엔지니어를 찾습니다."
+}

@@ -5,3 +5,5 @@ __pycache__/
 .chroma/
 .streamlit/secrets.toml
 .DS_Store
+# 로컬 폴백 전용 (Upstash 미설정 시에만 쓰임) — 구독자 기기 식별자가 담겨있어 커밋 금지
+data/push_subscriptions.json

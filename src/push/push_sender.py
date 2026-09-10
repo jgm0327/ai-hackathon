@@ -4,27 +4,24 @@
 외부 트리거에서 호출되는 스크립트에서 import해서 쓴다 (docs/04-push-notifications.md 참고).
 """
 import json
-import os
 from datetime import datetime, timedelta
 
 from pywebpush import WebPushException, webpush
 
+from src.config import settings
 from src.push.subscription_store import list_subscriptions
-
-VAPID_PRIVATE_KEY = os.getenv("VAPID_PRIVATE_KEY", "")
-VAPID_CLAIMS = {"sub": os.getenv("VAPID_CONTACT_EMAIL", "mailto:example@example.com")}
 
 
 def send_push(subscription: dict, title: str, body: str) -> None:
     """단일 유저에게 푸시를 발송한다."""
-    if not VAPID_PRIVATE_KEY:
+    if not settings.vapid_private_key:
         raise ValueError("VAPID_PRIVATE_KEY가 설정되어 있지 않습니다 (.env 확인)")
     try:
         webpush(
             subscription_info=subscription,
             data=json.dumps({"title": title, "body": body}),
-            vapid_private_key=VAPID_PRIVATE_KEY,
-            vapid_claims=VAPID_CLAIMS,
+            vapid_private_key=settings.vapid_private_key,
+            vapid_claims={"sub": settings.vapid_contact_email},
         )
     except WebPushException as ex:
         # TODO(Track E): 만료된 구독(410 Gone) 등은 subscription_store에서 정리하는 로직 추가

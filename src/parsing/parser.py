@@ -5,6 +5,10 @@
 """
 import json
 from dataclasses import dataclass, field
+from functools import lru_cache
+
+import anthropic
+import requests
 
 from src.config import settings
 from src.parsing.prompt_templates import SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
@@ -18,13 +22,52 @@ class ParsedEntry:
     confidence: float = 0.0
 
 
-def _call_llm(raw_text: str) -> str:
-    """실제 LLM 호출부. TODO(Track A): Anthropic/OpenAI SDK 클라이언트 초기화 및 호출 구현.
+@lru_cache(maxsize=1)
+def _get_client() -> anthropic.Anthropic:
+    """Anthropic 클라이언트를 지연 초기화하고 재사용한다 (import 시점에 키 검증 안 함)."""
+    return anthropic.Anthropic(api_key=settings.llm_api_key)
 
-    지금은 자리표시자(placeholder)만 있음 — 실제 구현 전까지 parse_note()는
-    이 함수를 모킹해서 테스트한다.
+
+def _call_llm_anthropic(raw_text: str) -> str:
+    response = _get_client().messages.create(
+        model=settings.llm_model,
+        max_tokens=512,
+        system=SYSTEM_PROMPT,
+        messages=[
+            {"role": "user", "content": USER_PROMPT_TEMPLATE.format(raw_text=raw_text)},
+        ],
+    )
+    return response.content[0].text
+
+
+def _call_llm_ollama(raw_text: str) -> str:
+    """로컬 Ollama 서버 호출. LLM_API_KEY 없이 프롬프트를 검증할 때 쓰는 폴백 경로.
+
+    `format: "json"`으로 JSON 강제 출력을 유도한다 (배포용 Anthropic 경로와 별개).
     """
-    raise NotImplementedError("Track A: LLM 클라이언트 연동 필요")
+    response = requests.post(
+        f"{settings.ollama_base_url}/api/chat",
+        json={
+            "model": settings.ollama_model,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": USER_PROMPT_TEMPLATE.format(raw_text=raw_text)},
+            ],
+            "format": "json",
+            "stream": False,
+            "options": {"temperature": 0},
+        },
+        timeout=60,
+    )
+    response.raise_for_status()
+    return response.json()["message"]["content"]
+
+
+def _call_llm(raw_text: str) -> str:
+    """실제 LLM 호출부. `LLM_PROVIDER` 설정에 따라 Anthropic 또는 로컬 Ollama로 분기한다."""
+    if settings.llm_provider == "ollama":
+        return _call_llm_ollama(raw_text)
+    return _call_llm_anthropic(raw_text)
 
 
 def parse_note(raw_text: str) -> ParsedEntry:
