@@ -1,0 +1,6 @@
+{
+  "company": "가상커머스",
+  "title": "데이터 엔지니어",
+  "required_skills": ["데이터파이프라인", "ETL", "Airflow", "SQL최적화"],
+  "description": "커머스 트랜잭션 데이터 파이프라인을 설계하고 운영할 데이터 엔지니어를 찾습니다."
+}

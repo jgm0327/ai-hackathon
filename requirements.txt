@@ -1,11 +1,14 @@
-streamlit==1.38.0
-plotly==5.24.0
+# 버전 상향 참고(9/10): 원래 핀 버전들이 Python 3.14 로컬 개발 환경에서
+# numpy 빌드 실패 등으로 설치 자체가 안 돼서, 실제 설치 검증된 버전으로 올림.
+# 배포 환경(Track D)의 Python 버전이 다르면 재검증 필요.
+streamlit==1.63.0
+plotly==7.0.0
 langchain==0.3.7
-chromadb==0.5.15
-anthropic==0.36.0
-python-dotenv==1.0.1
-pytest==8.3.3
-requests==2.32.3
+chromadb==1.5.9
+anthropic==1.4.0
+python-dotenv==1.2.3
+pytest==9.1.1
+requests==2.34.2
 
 # Tier 2 푸시 알림 (선택, Track E)
 pywebpush==2.0.3

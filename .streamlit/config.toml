@@ -1,0 +1,5 @@
+# Tier 2 푸시 알림(Track E)용 정적 파일 서빙 활성화.
+# 파일 위치 규칙: <메인 스크립트 디렉토리>/static/ (= src/frontend/static/),
+# URL: /app/static/<파일명>. (docs/04-push-notifications.md 참고)
+[server]
+enableStaticServing = true

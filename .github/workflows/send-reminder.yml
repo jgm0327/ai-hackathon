@@ -1,11 +1,8 @@
 name: send-reminder
 
-# TODO(Track E): 이 워크플로가 저장소에 push된 data/push_subscriptions.json을
-# 읽으려면, 구독 저장을 배포된 앱이 아니라 이 저장소(혹은 접근 가능한 스토리지)에
-# 반영하는 방법이 별도로 필요합니다. 해커톤 규모에서는 아래 두 방식 중 하나를 선택:
-#   1) 구독 데이터를 GitHub Gist/Repo에 커밋하도록 앱을 구성 (간단하지만 지저분함)
-#   2) 가벼운 외부 스토리지(예: Supabase, Firebase)로 교체
-# 어느 쪽이든 src/push/subscription_store.py의 인터페이스는 유지할 것.
+# 구독 데이터는 Upstash Redis(REST API)에 저장한다 (9/10) — 배포된 Streamlit 앱(쓰기)과
+# 이 워크플로(읽기)가 서로 다른 프로세스라 파일시스템을 공유 못 하기 때문.
+# src/push/subscription_store.py 참고. Repo Secrets에 UPSTASH_REDIS_REST_URL/TOKEN 필요.
 
 on:
   schedule:
@@ -25,4 +22,6 @@ jobs:
         env:
           VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
           VAPID_CONTACT_EMAIL: ${{ secrets.VAPID_CONTACT_EMAIL }}
+          UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
+          UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
         run: python -c "from src.push.push_sender import send_due_reminders; send_due_reminders()"
