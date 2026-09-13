@@ -2,7 +2,9 @@
 
 import { FormEvent, useState } from "react";
 import { ProjectSwitcher } from "@/components/ProjectSwitcher";
+import { PushSetup } from "@/components/PushSetup";
 import { CardResultSkeleton } from "@/components/Skeleton";
+import { VoiceInput } from "@/components/VoiceInput";
 import { ApiError, Card, createCard } from "@/lib/api";
 
 /**
@@ -18,9 +20,9 @@ export default function HomePage() {
   const [result, setResult] = useState<Card | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    const text = rawText.trim();
+  // 텍스트 입력과 음성 입력이 공유하는 단일 제출 경로 — 어느 쪽에서 오든 동일한
+  // 스켈레톤/결과 카드 UX를 탄다 (docs/06-migration.md §2.1: 별도 흐름을 만들지 않는다).
+  const submitText = async (text: string) => {
     if (!text || submitting) return;
 
     setSubmitting(true);
@@ -38,9 +40,15 @@ export default function HomePage() {
     }
   };
 
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    submitText(rawText.trim());
+  };
+
   return (
     <div className="flex flex-col gap-4 px-4 pt-4">
       <ProjectSwitcher />
+      <PushSetup />
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-3">
         <textarea
@@ -58,6 +66,8 @@ export default function HomePage() {
           {submitting ? "정리하는 중…" : "3초 만에 정리하기"}
         </button>
       </form>
+
+      <VoiceInput onTranscript={submitText} disabled={submitting} />
 
       {submitting && <CardResultSkeleton />}
 
