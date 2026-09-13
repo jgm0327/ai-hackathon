@@ -101,6 +101,57 @@ def test_get_current_project_returns_none_without_projects():
     assert db.get_current_project() is None
 
 
+def test_delete_card_removes_it():
+    card_id = db.save_card(None, _make_parsed(), "2023-02-14")
+    other_id = db.save_card(None, _make_parsed("다른 카드"), "2023-02-15")
+
+    db.delete_card(card_id)
+
+    remaining = db.list_cards()
+    assert [c.id for c in remaining] == [other_id]
+
+
+def test_delete_card_missing_id_is_noop():
+    db.delete_card(9999)  # 예외 없이 조용히 무시돼야 한다
+    assert db.list_cards() == []
+
+
+def test_update_project_renames_name():
+    project_id = db.create_project("A은행 차세대", "2023-02-01")
+
+    db.update_project(project_id, name="A은행 차세대 2차")
+
+    updated = next(p for p in db.list_projects() if p.id == project_id)
+    assert updated.name == "A은행 차세대 2차"
+
+
+def test_update_project_sets_ended_at():
+    project_id = db.create_project("A은행 차세대", "2023-02-01")
+
+    db.update_project(project_id, ended_at="2023-11-30")
+
+    updated = next(p for p in db.list_projects() if p.id == project_id)
+    assert updated.ended_at == "2023-11-30"
+
+
+def test_update_project_is_current_unsets_previous_current():
+    first = db.create_project("B카드 시스템", "2022-05-01")
+    second = db.create_project("A은행 차세대", "2023-02-01")
+
+    db.update_project(first, is_current=True)
+
+    projects = {p.id: p for p in db.list_projects()}
+    assert projects[first].is_current is True
+    assert projects[second].is_current is False
+
+
+def test_update_project_rejects_unknown_field():
+    project_id = db.create_project("A은행 차세대", "2023-02-01")
+
+    with pytest.raises(ValueError):
+        db.update_project(project_id, unknown_field="x")
+
+
 def test_load_seed_cards_creates_projects_and_cards(tmp_path):
     seed_path = tmp_path / "seed.json"
     seed_path.write_text(
