@@ -55,6 +55,14 @@ export interface HealthStatus {
   llm: boolean;
 }
 
+/** `PushSubscription.toJSON()`이 만드는 모양과 동일 — `docs/05-api-contract.md` §7. */
+export interface PushSubscriptionPayload {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+  /** "HH:MM" — 발송 시각 계산에 쓴다 (9/13 계약에 추가된 필드). */
+  leave_time: string;
+}
+
 export interface UpdateProjectPatch {
   is_current?: boolean;
   name?: string;
@@ -173,6 +181,35 @@ export function buildResume(projectId: number, jdText?: string): Promise<StarIte
       ...(jdText ? { jd_text: jdText } : {}),
     }),
   }).then((res) => res.items);
+}
+
+// ---------------------------------------------------------------------------
+// 7. 웹푸시 — docs/05-api-contract.md §7
+// ---------------------------------------------------------------------------
+
+/**
+ * VAPID 공개키를 가져온다. 서버에 `VAPID_PUBLIC_KEY`가 설정되어 있지 않으면
+ * 503 `ApiError`가 던져진다 — 호출부에서 잡아서 푸시 UI를 숨기거나 비활성화할 것
+ * (`components/PushSetup.tsx`).
+ */
+export function getVapidPublicKey(): Promise<string> {
+  return request<{ public_key: string }>("/push/vapid-public-key").then((res) => res.public_key);
+}
+
+/** 같은 `endpoint`로 다시 호출하면 서버에서 upsert된다 — 별도 "이미 구독됨" 분기 불필요. */
+export function subscribePush(payload: PushSubscriptionPayload): Promise<void> {
+  return request<void>("/push/subscribe", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+/** 존재하지 않는 구독을 지워도 204(멱등) — 호출부에서 별도 예외 처리 불필요. */
+export function unsubscribePush(endpoint: string): Promise<void> {
+  return request<void>("/push/subscribe", {
+    method: "DELETE",
+    body: JSON.stringify({ endpoint }),
+  });
 }
 
 // ---------------------------------------------------------------------------

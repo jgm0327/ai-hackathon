@@ -96,12 +96,35 @@ public/service-worker.js → 루트 scope 등록
       고도화 없음)
 - [ ] `/onboarding` (P2) — 이번 세션 범위 밖. 백엔드 계약(현재 직무/목표 직무/연차
       세그먼트 저장 방식)이 아직 안 고정돼 있어 후속 세션에서 진행
-- [ ] 마이크 이식 — `docs/06-migration.md` 참조. **의도적으로 미룸**: CLAUDE.md 8장의
-      실기기 음성 테스트 결과가 아직 없어 Web Speech API vs 녹음+STT 중 어느 쪽으로
-      이식할지 확정 불가. 결과 나오는 대로 후속 세션에서 진행
-- [ ] PWA manifest + 서비스워커 루트 등록 — 이번 세션 범위 밖 (마이크 이식과 마찬가지로
-      음성 UX 확정 후 진행하는 것이 순서에 맞음, `docs/06-migration.md` §5)
-- [ ] 웹푸시 구독 이식 — `docs/06-migration.md` 참조. 이번 세션 범위 밖
+- [x] 마이크 이식 (9/13, 2번째 세션) — `web/components/VoiceInput.tsx`
+      (`docs/06-migration.md` §2.1). `src/frontend/components/voice_input.py`의 JS
+      로직(`lang="ko-KR"`, `continuous=false`, `interimResults=true`, 버튼 클릭 안에서
+      `recognition.start()`, `onend`에서 `isFinal` 누락 시 폴백 제출)을 그대로 포팅했다.
+      iframe 우회(base64 쿼리 파라미터 리다이렉트)는 삭제 — React state로 직접 받는다.
+      `web/app/page.tsx`의 `submitText()`를 텍스트/음성 공통 제출 경로로 추출해 동일한
+      스켈레톤/결과 카드를 탄다. **CLAUDE.md 8장의 실기기(iPhone Safari) 검증은 여전히
+      미완료** — iOS Safari가 14.5부터 `webkitSpeechRecognition`을 지원한다는 사전 조사
+      결과에 기반해 Web Speech API로 진행을 결정했다(이번 세션 지시사항). 실기기에서 실패
+      확인 시 `docs/05-api-contract.md` §6(`POST /api/stt` + `MediaRecorder`) 폴백으로
+      전환할 것 — 아직 구현 안 함
+- [x] PWA manifest + 서비스워커 루트 등록 (9/13, 2번째 세션) — `web/app/manifest.ts`
+      (Next.js App Router 관례, `/manifest.webmanifest`로 서빙 확인), `web/public/service-worker.js`
+      (push/notificationclick 핸들러, `src/frontend/static/service-worker.js`와 로직 동일),
+      `web/components/ServiceWorkerRegistration.tsx`가 루트 scope(`/`)로 등록(`app/layout.tsx`에
+      마운트). 아이콘은 실제 에셋이 없어 `web/public/icon.svg` 플레이스홀더 사용 —
+      디자이너 확정 시 PNG로 교체 필요. manifest `name`/`short_name`을 "커리어 로그"로
+      갱신함(이 파일 범위 내에서만 — README 등 나머지 이름 정리는 CLAUDE.md 우선순위상
+      9/18로 미룸)
+- [x] 웹푸시 구독 이식 (9/13, 2번째 세션) — `web/components/PushSetup.tsx`
+      (`docs/06-migration.md` §1). `GET /api/push/vapid-public-key` → 권한 요청(버튼
+      클릭 핸들러 안) → SW 등록/재사용 → `pushManager.subscribe()`(base64url→Uint8Array
+      변환은 `web/lib/push.ts`) → `POST /api/push/subscribe`(+`leave_time`) 순서로 구현.
+      `web/app/page.tsx` 상단(프로젝트 스위처 아래)에 배치. 재구독은 서버 upsert에
+      기대 — 별도 클라이언트 분기 없음. 구독 해제(`DELETE /api/push/subscribe`)도
+      구현함(선택 항목이었지만 시간 내 완료). 503(VAPID 미설정) 시 안내 문구만 보이고
+      숨겨짐. **Tier 1(탭 열려있을 때 타이머, `reminder.py`)은 의도적으로 스킵** — Tier 2
+      실 웹푸시가 있으므로 이식 가치가 낮다고 판단(이번 세션 지시사항, `docs/06-migration.md`
+      본문에 대한 편차는 아님)
 - [x] 로딩 상태 (스켈레톤) — `web/components/Skeleton.tsx`. `/`(카드 변환)와
       `/resume`(STAR 생성) 양쪽 다 3~10초 대기 스켈레톤 적용
 
@@ -111,6 +134,22 @@ public/service-worker.js → 루트 scope 등록
   curl로 200 확인, 에러 페이지 없음 (백엔드가 없으므로 각 화면은 fetch 실패 시
   에러 메시지만 보여주고 크래시하지 않음 — 의도된 동작)
 - 백엔드가 붙은 상태의 실제 통합 테스트는 아직 못 함 — Track B 완료 후 필요
+
+### 5.2 마이크/PWA/푸시 세션 검증 결과 (9/13, 2번째 세션)
+- `npm run build`, `npm run lint` 재확인 — 0 에러 (신규 파일 포함)
+- `npm run dev` 기동 후 curl로 확인:
+  - `GET /` → 200, 마이크 버튼("말로 기록하기")·푸시 설정("퇴근 알림 켜기", "퇴근 시각")
+    마크업 포함 확인
+  - `GET /manifest.webmanifest` → 200, `application/manifest+json`, `name`/`short_name`/
+    `start_url`/`display`/`icons` 필드 전부 정상 (Next.js는 `app/manifest.ts`를
+    `/manifest.webmanifest`로 서빙함 — `/manifest.json` 아님, 착오 주의)
+  - `GET /service-worker.js` → 200, `application/javascript; charset=UTF-8`, 루트 경로에서
+    정상 서빙
+- `web/lib/push.ts`의 base64url→Uint8Array 변환 로직을 Node 스크립트로 별도 검증 —
+  샘플 VAPID 공개키(65바이트, 첫 바이트 `0x04` = 압축 안 된 EC 포인트) 디코딩 결과 정상
+- **실기기로 확인 못 한 것** (브라우저 자동화가 처리할 수 없는 영역, 아래 7장 완료 기준의
+  실기기 항목 참고): 마이크 권한 팝업/실제 인식 품질, `Notification`/푸시 권한 팝업,
+  서비스워커 설치 후 실제 웹푸시 수신, iOS Safari 자체에서의 동작 여부 전부
 
 ---
 
@@ -126,11 +165,24 @@ AI가 지어내지 않고 빈 문자열을 반환하도록 설계돼 있기 때�
 
 ## 7. 완료 기준
 
-- [ ] 텍스트 입력 → 변환 → 결과 표시가 실기기 브라우저에서 동작
-- [ ] 음성 입력이 **실제 폰에서** 동작 (또는 녹음+STT 폴백이 동작)
+- [ ] 텍스트 입력 → 변환 → 결과 표시가 실기기 브라우저에서 동작 — **실기기 확인 필요**
+      (이번 세션에서 코드는 구현/빌드/curl 검증까지 끝났으나, 실제 폰 브라우저로는
+      확인 못 함)
+- [ ] 음성 입력이 **실제 폰에서** 동작 (또는 녹음+STT 폴백이 동작) — **실기기 확인 필요**.
+      코드는 `web/components/VoiceInput.tsx`로 구현 완료(Web Speech API 경로,
+      `docs/06-migration.md` §2.1), 브라우저 자동화로는 마이크 권한 팝업 자체를 다룰 수
+      없어 이 항목은 이번 세션에서 체크 불가. CLAUDE.md 8장의 iPhone Safari 실기기
+      테스트가 여전히 미완료 상태 — iOS 실패 시 `docs/05-api-contract.md` §6 폴백으로
+      전환 필요
 - [ ] 카드가 새로고침 후에도 남아 있음
 - [ ] `/resume`에서 시간차 페어가 하나의 STAR로 합쳐진 것이 눈으로 확인됨
 - [ ] 9/16 저녁까지 최소 기능 버전이 로컬에서 동작 (Track D 연습 배포용)
+- [ ] (신규, 9/13 2번째 세션) PWA 설치 + 웹푸시 수신이 **실기기에서** 동작 —
+      **실기기 확인 필요**. 코드는 `app/manifest.ts` + `public/service-worker.js` +
+      `components/ServiceWorkerRegistration.tsx` + `components/PushSetup.tsx`로 구현
+      완료, curl로 manifest/서비스워커 서빙까지만 검증함. `Notification.requestPermission()`
+      팝업, `pushManager.subscribe()` 실제 성공 여부, 서버로부터의 실제 푸시 수신은
+      브라우저 자동화로 확인 불가 — 사용자가 직접 폰/브라우저로 확인해야 함
 
 ---
 
