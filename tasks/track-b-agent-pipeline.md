@@ -98,8 +98,9 @@ SI처럼 고객사를 옮겨 다니면 A은행의 "결제 API 개선"과 B카드
 - 폴더 이동/병합/중첩 같은 CRUD 고도화 금지 (2.4 위반)
 
 ## 작업 항목
-- [ ] `run_pipeline()`이 현재 프로젝트를 조회해 자동 배정하도록 수정
-- [ ] 프로젝트 없음(NULL) 상태 정상 동작 확인
+- [x] `run_pipeline()`이 현재 프로젝트를 조회해 자동 배정하도록 수정
+- [x] 프로젝트 없음(NULL) 상태 정상 동작 확인 — `get_current_project()`가 `None`이면
+      `project_id=NULL`로 저장 (`test_run_pipeline_saves_card_with_null_project_when_no_current_project`)
 
 ---
 
@@ -124,9 +125,20 @@ def build_career_doc(project_id: int, jd_text: str | None = None) -> list[StarIt
 ```
 
 ## 작업 항목
-- [ ] `run_pipeline()`에서 `match_jds()` 호출 제거, `save_card()` 추가
-- [ ] `build_career_doc()` 신규 — Track A의 `build_resume()` 호출
-- [ ] 기존 통합 테스트 수정
+- [x] `run_pipeline()`에서 `match_jds()` 호출 제거, `save_card()` 추가 — 9/13
+- [x] `build_career_doc()` 신규 — Track A의 `build_resume()` 호출 — 9/13
+- [x] 기존 통합 테스트 수정 — `tests/test_pipeline.py` 신설(6개 케이스: 프로젝트 자동
+      배정, NULL 프로젝트 폴백, match_jds 미호출 검증, batch, build_career_doc 위임/jd_text
+      전달). 이전에는 pipeline 전용 테스트 파일이 없었음(vectorstore.match_jds()가
+      pipeline.py 임포트 시점에 인덱스를 구축하던 구조라 별도 유닛 테스트가 없었다)
+
+### 구현 노트 (9/13)
+- `run_pipeline()`의 반환 스키마에서 `matched_jds` 키가 사라졌다. 기존 Streamlit
+  프론트(`src/frontend/app.py`)는 `.get("matched_jds", [])`로 읽고 있어 에러 없이
+  빈 목록으로 동작하지만, 더 이상 채워지지 않는다 — 의도된 변경(Track C 확인 필요).
+- 모듈 임포트 시점에 `build_jd_index()`를 호출하던 구 코드를 제거했다. 매일 쓰는
+  경로가 더 이상 벡터 인덱스에 의존하지 않으므로, 임베딩 서버 연결 실패가 앱
+  임포트 자체를 위협하지 않게 됐다(기존에는 warning으로 방어하던 리스크였음).
 
 ---
 
@@ -173,7 +185,7 @@ def build_career_doc(project_id: int, jd_text: str | None = None) -> list[StarIt
 ---
 
 ## 완료 기준
-- [ ] 앱 재시작 후에도 카드가 남아 있다
-- [ ] 현재 프로젝트에 새 카드가 자동 배정된다
-- [ ] `build_career_doc()` 호출 하나로 STAR 항목 리스트가 나온다
-- [ ] 노션 REST 경로 하나는 동작한다
+- [x] 앱 재시작 후에도 카드가 남아 있다 — SQLite 영속화(1부)로 확인됨
+- [x] 현재 프로젝트에 새 카드가 자동 배정된다 — `test_run_pipeline_auto_assigns_new_card_to_current_project`
+- [x] `build_career_doc()` 호출 하나로 STAR 항목 리스트가 나온다
+- [ ] 노션 REST 경로 하나는 동작한다 (5부, 진행 중 — 미완료)
