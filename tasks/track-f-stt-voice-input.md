@@ -1,5 +1,11 @@
 # Track F — STT 음성 입력 (9/11 착수)
 
+> **9/13 CLAUDE.md 대개편으로 Next.js/OCI로 스택이 바뀌었다.** 이 문서의 구현 내용
+> (Web Speech API 로직, `onend` 폴백 등)은 그대로 유지하되, 이식 절차는
+> `docs/06-migration.md` 2장을 참고할 것 — **9/13 실기기(iOS/Android) 음성 테스트 결과에
+> 따라 이식 방식(Web Speech API 그대로 vs 녹음+STT 폴백)이 갈린다. 이 테스트를 최우선으로
+> 먼저 할 것** (CLAUDE.md 8장).
+
 **상태: 구현 완료 (Web Speech API 경로).** 9/11에 착수 결정, 그대로 구현함.
 
 ## 아이디어
