@@ -110,6 +110,14 @@ def list_cards(project_id: int | None = None) -> list[Card]:
     return [_row_to_card(row) for row in rows]
 
 
+def get_card(card_id: int) -> Card | None:
+    """카드 하나를 id로 조회한다. 없으면 None (JD 매칭 등 단건 조회가 필요한 API용)."""
+    init_db()
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM cards WHERE id = ?", (card_id,)).fetchone()
+    return _row_to_card(row) if row else None
+
+
 def create_project(name: str, started_at: str) -> int:
     """새 프로젝트를 만들고 자동으로 현재(is_current) 프로젝트로 지정한다."""
     init_db()

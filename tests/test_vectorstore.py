@@ -86,6 +86,18 @@ def test_build_and_match_returns_expected_schema(jd_dir):
     assert top["description"] == "결제 장애 대응 경험자"
 
 
+def test_match_jds_includes_score_between_zero_and_one(jd_dir):
+    vectorstore.build_jd_index(str(jd_dir))
+    results = vectorstore.match_jds(["장애대응", "결제시스템", "트러블슈팅"], top_k=2)
+
+    assert len(results) == 2
+    for jd in results:
+        assert "score" in jd
+        assert 0.0 <= jd["score"] <= 1.0
+    # 가장 잘 맞는 결과(정확히 일치하는 가짜 임베딩)가 더 높은 score를 가져야 한다.
+    assert results[0]["score"] >= results[1]["score"]
+
+
 def test_match_jds_picks_most_similar_jd(jd_dir):
     vectorstore.build_jd_index(str(jd_dir))
 
