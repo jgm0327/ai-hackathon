@@ -12,3 +12,13 @@ requests==2.34.2
 
 # Tier 2 푸시 알림 (선택, Track E)
 pywebpush==2.0.3
+
+# 선택: EMBEDDING_PROVIDER=local_multilingual 사용 시에만 필요 (9/13 검증, 무거움 — torch 포함).
+# chroma_default(기본 배포)에는 불필요하므로 기본 설치에는 포함하지 않고 주석으로만 남김.
+# 필요 시 아래 주석을 해제하고 설치할 것:
+#   sentence-transformers==6.0.1
+# 주의(9/13, Windows 로컬 검증 환경 한정): scipy==1.18.1 / 최신 scikit-learn을 그대로 두면
+# 일부 환경의 애플리케이션 제어 정책(Windows)이 컴파일된 DLL 로드를 막아 sentence-transformers
+# import 자체가 실패했다. 아래 버전으로 고정하면 해결됨 (다른 환경에서 문제 없으면 최신판 유지 가능):
+#   scipy==1.16.2
+#   scikit-learn==1.7.2
