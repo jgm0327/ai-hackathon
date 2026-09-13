@@ -1,0 +1,52 @@
+{
+  "projects": [
+    {
+      "name": "B카드 시스템 구축",
+      "started_at": "2022-05-01",
+      "ended_at": "2023-01-31",
+      "cards": [
+        {
+          "created_at": "2022-11-04",
+          "raw_text": "정산 배치 8시간 걸리던 거 병렬로 돌림",
+          "refined_sentence": "정산 배치 처리 로직을 병렬화하여 실행 시간을 단축함",
+          "skill_tags": ["배치처리", "성능최적화"],
+          "confidence": 0.88
+        },
+        {
+          "created_at": "2022-12-20",
+          "raw_text": "정산 배치 8시간 → 1시간 20분",
+          "refined_sentence": "정산 배치 병렬화를 통해 처리 시간을 8시간에서 1시간 20분으로 단축함",
+          "skill_tags": ["배치처리", "성능최적화"],
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "name": "A은행 차세대",
+      "started_at": "2023-02-01",
+      "cards": [
+        {
+          "created_at": "2023-02-14",
+          "raw_text": "결제 API 느려서 레디스 캐시 붙임",
+          "refined_sentence": "결제 API 응답 지연을 해소하기 위해 Redis 캐싱 레이어를 도입함",
+          "skill_tags": ["Redis", "성능최적화", "결제시스템"],
+          "confidence": 0.9
+        },
+        {
+          "created_at": "2023-02-17",
+          "raw_text": "쿠폰 중복 버그 잡아서 핫픽스 배포",
+          "refined_sentence": "쿠폰 중복 적용 버그를 식별하고 긴급 수정 사항을 배포함",
+          "skill_tags": ["버그수정", "핫픽스", "결제시스템"],
+          "confidence": 0.85
+        },
+        {
+          "created_at": "2023-03-02",
+          "raw_text": "레디스 붙인 뒤 결제 오류율 0.8% → 0.3%",
+          "refined_sentence": "Redis 캐싱 적용 이후 결제 오류율을 0.8%에서 0.3%로 개선함",
+          "skill_tags": ["성능최적화", "결제시스템", "모니터링"],
+          "confidence": 0.92
+        }
+      ]
+    }
+  ]
+}

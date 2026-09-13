@@ -59,11 +59,21 @@ def get_current_project() -> Project | None
 ```
 
 ## 작업 항목
-- [ ] `src/storage/db.py` 생성, 스키마 초기화 루틴 (`CREATE TABLE IF NOT EXISTS`)
-- [ ] 위 6개 함수 구현
-- [ ] `skill_tags` JSON 직렬화/역직렬화 처리
-- [ ] `data/seed_cards.json` 로더 — 시드 투입 스크립트
-- [ ] `tests/test_db.py` — CRUD + `is_current` 유일성 검증
+- [x] `src/storage/db.py` 생성, 스키마 초기화 루틴 (`CREATE TABLE IF NOT EXISTS`) — 9/13
+- [x] 위 6개 함수 구현 — 9/13
+- [x] `skill_tags` JSON 직렬화/역직렬화 처리 — 9/13
+- [x] `data/seed_cards.json` 로더 — 9/13, `db.load_seed_cards()`로 구현.
+  실기기 없이도 확인 가능한 시드 데이터(B카드 시스템 구축 2건 + A은행 차세대 3건,
+  02.14 조치/03.02 결과 시간차 페어 포함)를 함께 준비함
+- [x] `tests/test_db.py` — CRUD + `is_current` 유일성 + 시드 로더 검증, 8개 전부 통과 — 9/13
+
+### 구현 노트 (9/13)
+- `DB_PATH`(`src/config.py`, 기본값 `data/app.db`)로 경로 관리. `data/app.db`는 실행 시
+  생성되는 실데이터라 `.gitignore` 처리함(`data/seed_cards.json`은 예시 데이터라 커밋 대상).
+- `create_project()`가 항상 새로 만든 프로젝트를 자동으로 `is_current`로 지정하므로,
+  `load_seed_cards()`로 여러 프로젝트를 한 번에 넣을 때는 **JSON에 나열하는 순서가
+  중요하다** — 마지막 항목이 자동으로 현재 프로젝트가 된다. `data/seed_cards.json`은
+  종료된 프로젝트(B카드)를 먼저, 진행 중인 프로젝트(A은행)를 마지막에 둬서 이걸 활용함.
 
 ---
 
