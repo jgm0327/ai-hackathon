@@ -106,3 +106,83 @@ def test_build_jd_index_is_idempotent(jd_dir):
     count_after_repeat = vectorstore._INDEX.count()
 
     assert count_after_first == count_after_repeat == 2
+
+
+class TestGetEmbeddingFunction:
+    """_get_embedding_function()의 provider 선택 로직 검증.
+
+    모듈 상단의 autouse fixture(_reset_index_and_fake_embedding)가 매 테스트마다
+    vectorstore._get_embedding_function 자체를 monkeypatch로 가짜 함수로 덮어쓰므로,
+    이 클래스의 테스트들은 import 시점에 미리 캡처해둔 진짜 함수 객체(_real_get_embedding_function)를
+    직접 호출해서 provider 선택 로직 자체를 검증한다.
+    """
+
+    def test_defaults_to_chroma_builtin(self, monkeypatch):
+        class _FakeSettings:
+            embedding_provider = "chroma_default"
+
+        monkeypatch.setattr(vectorstore, "settings", _FakeSettings())
+        assert _real_get_embedding_function() is None
+
+    def test_selects_ollama(self, monkeypatch):
+        class _FakeSettings:
+            embedding_provider = "ollama"
+            ollama_base_url = "http://localhost:11434"
+            ollama_embedding_model = "bge-m3"
+
+        monkeypatch.setattr(vectorstore, "settings", _FakeSettings())
+        fn = _real_get_embedding_function()
+        assert isinstance(fn, vectorstore._OllamaEmbeddingFunction)
+
+    def test_selects_local_multilingual_without_real_package(self, monkeypatch):
+        """실제 sentence-transformers를 설치/다운로드하지 않도록 가짜 모듈로 대체한다."""
+        import sys
+        import types
+
+        fake_module = types.ModuleType("sentence_transformers")
+
+        class _FakeArray(list):
+            """실제 SentenceTransformer.encode()가 반환하는 numpy 배열의 .tolist()만 흉내."""
+
+            def tolist(self):
+                return list(self)
+
+        class _FakeSentenceTransformer:
+            def __init__(self, model_name):
+                self.model_name = model_name
+
+            def encode(self, texts, normalize_embeddings=True):
+                return _FakeArray([0.0, 0.0, 0.0] for _ in texts)
+
+        fake_module.SentenceTransformer = _FakeSentenceTransformer
+        monkeypatch.setitem(sys.modules, "sentence_transformers", fake_module)
+
+        class _FakeSettings:
+            embedding_provider = "local_multilingual"
+            local_multilingual_model = "paraphrase-multilingual-MiniLM-L12-v2"
+
+        monkeypatch.setattr(vectorstore, "settings", _FakeSettings())
+        fn = _real_get_embedding_function()
+        assert isinstance(fn, vectorstore._LocalMultilingualEmbeddingFunction)
+        # chromadb의 EmbeddingFunction 래퍼가 반환값을 numpy 배열로 바꿔줄 수 있으므로
+        # 리스트로 명시 변환해서 비교한다 (== 로 바로 비교하면 ndarray 진위값 판별 에러 발생).
+        result = [list(row) for row in fn(["테스트 문서"])]
+        assert result == [[0.0, 0.0, 0.0]]
+
+    def test_local_multilingual_raises_clear_error_if_package_missing(self, monkeypatch):
+        import sys
+
+        monkeypatch.setitem(sys.modules, "sentence_transformers", None)
+
+        class _FakeSettings:
+            embedding_provider = "local_multilingual"
+            local_multilingual_model = "paraphrase-multilingual-MiniLM-L12-v2"
+
+        monkeypatch.setattr(vectorstore, "settings", _FakeSettings())
+        with pytest.raises(ImportError, match="pip install sentence-transformers"):
+            _real_get_embedding_function()
+
+
+# 모듈 로드 시점의 진짜 함수 객체를 보존해둔다 (fixture가 vectorstore._get_embedding_function
+# 자체를 monkeypatch로 가짜로 바꾸므로, provider 선택 로직 테스트는 이 원본을 직접 호출한다).
+_real_get_embedding_function = vectorstore._get_embedding_function

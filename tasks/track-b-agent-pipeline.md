@@ -85,3 +85,91 @@ def run_pipeline(raw_text: str) -> dict:
 **테스트**: `tests/test_vectorstore.py`에 Track A와 동일한 패턴(외부 호출부 모킹)으로 4개
 작성 — bag-of-words 가짜 임베딩으로 오프라인/결정론적 검증 (인덱스 미구축 에러, 스키마,
 유사도 매칭, 멱등성). 전체 `pytest tests/` 9개 통과.
+
+## chroma_default 한국어 품질 검증 및 다국어 임베딩 대안 (9/13)
+
+Track D 배포 전 반드시 확인이 필요하다고 남겨뒀던 `chroma_default`(Chroma 내장 ONNX
+all-MiniLM-L6-v2)의 한국어 스킬 태그 매칭 품질을 실제로 검증했다. 검증 환경: venv +
+`chromadb`/`requests`/`python-dotenv`/`pytest`/`anthropic`만 설치, `EMBEDDING_PROVIDER`는
+기본값(`chroma_default`) 그대로. `data/mock_jds/*.json` 20개를 `build_jd_index()`로
+인덱싱하고 아래 4개 한국어 스킬 태그 쿼리로 `match_jds(top_k=5)`를 직접 호출했다.
+
+### 결과 요약 (chroma_default, top-1 기준)
+
+| 쿼리 | chroma_default 1순위 | 기대(정답) 공고 | 판정 |
+|---|---|---|---|
+| 장애대응/결제시스템/트러블슈팅 | 가상뱅크(백엔드 개발자·인증) | 가상핀테크/가상페이먼츠(결제) | **오답** — 결제 관련 공고가 top-5에서 완전히 누락(가상핀테크), 인증 도메인이 1순위로 나옴 |
+| 동시성제어/코드리뷰/버그해결 | 가상스타트업(신입 백엔드) | 가상클라우드(동시성제어) 등 | 애매 — 코드리뷰/버그수정은 근접하지만 동시성제어 정답 공고(가상클라우드)는 top-5에서 완전히 누락 |
+| React/상태관리/성능최적화 | 가상테크(프론트엔드, React/상태관리/성능최적화 정확히 일치) | 가상테크 | **정답** |
+| DB최적화/인덱스관리/쿼리튜닝 | 가상보안(보안 엔지니어) | 가상데이터랩(DB최적화 등 4개 스킬 정확히 일치) | **오답** — 정답 공고가 2순위로 밀림, 완전히 무관한 보안 공고가 1순위 |
+
+4개 쿼리 중 2개(장애대응/결제시스템, DB최적화)에서 명백히 무관한 공고가 1순위로 나왔고,
+한 쿼리(동시성제어)는 스킬 태그를 정확히 포함한 공고가 top-5에서 아예 빠졌다. 영어
+로마자 태그가 섞인 React 쿼리만 정확히 매칭됐는데, 이는 all-MiniLM-L6-v2가 영어 위주
+모델이라 한글 토큰 임베딩 품질이 낮기 때문으로 보인다.
+
+**로컬 Ollama(bge-m3) 결과와 비교** (위 "벡터 매칭 구현 노트" 기록 기준): bge-m3는 동일한
+장애대응/결제시스템/트러블슈팅 쿼리에서 가상핀테크를 1순위로 정확히 매칭했고,
+DB최적화/인덱스관리/쿼리튜닝 쿼리에서도 가상데이터랩을 1순위로 정확히 매칭했다.
+즉 **chroma_default는 실사용에 문제될 정도로 한국어 품질이 낮다** — 결제/DB 도메인처럼
+사용자 낙서에서 흔히 나올 법한 스킬 태그 조합에서 완전히 무관한 공고를 1순위로 추천하는
+것은 데모 신뢰도에 직접 타격을 준다.
+
+### 다국어 임베딩 대안 검증: sentence-transformers 로컬 로드
+
+서버 없이(로컬 프로세스 안에서 모델 가중치를 직접 로드) 쓸 수 있는 다국어 모델을
+찾기 위해 `sentence-transformers`의 `paraphrase-multilingual-MiniLM-L12-v2`를
+Chroma 커스텀 `EmbeddingFunction`으로 붙여서 동일한 4개 쿼리로 재검증했다.
+
+**결과** (top-1 기준): React/상태관리/성능최적화 → 가상테크(정확), DB최적화/인덱스관리/
+쿼리튜닝 → 가상데이터랩(정확, bge-m3와 동일), 장애대응/결제시스템/트러블슈팅 →
+가상페이먼츠(결제 플랫폼 엔지니어, 결제시스템/장애대응 일치 — 도메인상 올바른 결제
+공고이며 가상핀테크도 3순위로 근접 등장), 동시성제어/코드리뷰/버그해결 → 가상서비스
+(고객지원 엔지니어, 완전 일치는 아니지만 chroma_default처럼 전혀 무관한 도메인은 아님).
+즉 4개 쿼리 모두 "무관한 도메인이 1순위로 나오는" chroma_default의 실패 패턴이
+사라졌고, 2개는 bge-m3와 동일하게 완전히 정확했다.
+
+**검증 중 발견한 이슈(중요, 재현 시 참고)**: 이 로컬 Windows 검증 환경에서
+`sentence-transformers`를 설치하면 딸려오는 `scipy`(1.18.1)/최신 `scikit-learn`의
+컴파일된 DLL(`scipy.linalg._decomp_interpolative`, `sklearn.utils._isfinite` 등)이
+"애플리케이션 제어 정책"에 의해 로드 자체가 차단되는 문제가 있었다 (`ImportError: DLL
+load failed ... 애플리케이션 제어 정책에서 이 파일을 차단했습니다`). `scipy==1.16.2`,
+`scikit-learn==1.7.2`로 버전을 낮춰 설치하니 문제없이 동작했다. 다른 환경(특히 실제
+배포 환경인 Linux 기반 Streamlit Community Cloud)에서는 재현되지 않을 가능성이 높지만,
+로컬에서 이 provider를 재검증할 다른 에이전트/사람을 위해 `requirements.txt`에 주석으로
+남겨뒀다.
+
+**결론**: `_get_embedding_function()`에 `local_multilingual` provider를 추가했다
+(`src/agent/vectorstore.py`의 `_LocalMultilingualEmbeddingFunction`). 이 provider는
+Ollama와 달리 별도 서버가 필요 없으므로(모델을 최초 1회 다운로드해 로컬 캐시에 저장한 뒤
+in-process로 추론) "배포 기본값은 서버가 필요 없어야 한다"는 원칙에 위배되지 않는다.
+다만 `EMBEDDING_PROVIDER`의 실제 **기본값은 `chroma_default`로 그대로 유지**했다 —
+`sentence-transformers`(+torch) 의존성이 무겁고(설치 용량·메모리 사용량 큼), 무료 티어인
+Streamlit Community Cloud의 빌드/메모리 제약에 걸릴 위험이 있어서, 배포 리소스 상황을
+직접 확인할 Track D가 기본값 전환 여부를 최종 판단하는 게 맞다고 봤다. 요약하면:
+- 로컬 개발/정확도 최우선: `EMBEDDING_PROVIDER=ollama` (bge-m3, 서버 필요, 품질 최상)
+- 서버 없이 한국어 품질 개선이 필요하면: `EMBEDDING_PROVIDER=local_multilingual`
+  (`pip install sentence-transformers` 추가 필요, 의존성 무거움)
+- 아무 설정도 안 하면(배포 기본값): `chroma_default` — 서버/추가 설치 불필요하지만
+  한국어 품질이 검증상 실사용에 부족함이 확인됨. **Track D는 배포 전 반드시
+  `local_multilingual`로 전환할지, 아니면 품질 저하를 감수하고 `chroma_default`를
+  유지할지 결정해야 한다.**
+
+**테스트**: `tests/test_vectorstore.py`에 `TestGetEmbeddingFunction` 클래스로 4개 추가
+(chroma_default/ollama/local_multilingual provider 선택 로직, `sentence-transformers`
+미설치 시 명확한 ImportError). 실제 모델 다운로드 없이 가짜 모듈로 결정론적 검증.
+
+## 사람인(Saramin) 오픈API 클라이언트 스캐폴드 (9/13)
+
+사람인 오픈API 키가 승인 대기 중이라 실제 호출 없이 스캐폴딩만 준비해뒀다.
+`src/agent/saramin_client.py`의 `fetch_saramin_jobs(keywords, count=50, access_key=None)`가
+`GET https://oapi.saramin.co.kr/job-search` 응답(`jobs.job` 배열)을 `data/mock_jds/*.json`과
+동일한 스키마(`company`/`title`/`required_skills`/`description`)로 매핑한다.
+`access_key` 미지정 시 `settings.saramin_api_key`(`SARAMIN_API_KEY` env, `.env.example`에
+추가함)를 쓰고, 둘 다 없으면 `ValueError`. 하루 호출 한도(500회)가 있어 분석 요청마다
+실시간 호출하면 안 된다는 점, 캐싱 전략이 필요하다는 점을 모듈 docstring에 명시했다
+(실제 캐싱 로직은 이번 스캐폴드 범위 밖).
+
+**테스트**: `tests/test_saramin_client.py` — 실제 API 스펙 문서의 응답 예시로
+`requests.get`을 모킹해 스키마 매핑, 키 없을 때 에러, `settings` 폴백, 빈 결과 처리를
+검증 (`tests/test_notion_client.py`와 동일한 모킹 패턴). 4개 모두 통과.

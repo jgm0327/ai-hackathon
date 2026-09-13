@@ -43,9 +43,46 @@ class _OllamaEmbeddingFunction(EmbeddingFunction[Documents]):
         return f"ollama-{settings.ollama_embedding_model}"
 
 
+class _LocalMultilingualEmbeddingFunction(EmbeddingFunction[Documents]):
+    """sentence-transformers 다국어 모델을 로컬 프로세스 안에서 직접 로드해 쓰는 임베딩 함수.
+
+    EMBEDDING_PROVIDER=local_multilingual일 때만 사용한다. Ollama와 달리 별도 서버가
+    필요 없다 — 모델 가중치를 최초 1회 다운로드해 로컬(디스크 캐시)에 저장한 뒤 in-process로
+    추론하므로, "배포 기본값은 외부 서버가 필요 없어야 한다"는 원칙을 그대로 지킨다.
+
+    chroma_default(all-MiniLM-L6-v2, 영어 위주)보다 한국어 스킬 태그 매칭 품질이 훨씬
+    좋음을 실측 검증함 (tasks/track-b-agent-pipeline.md의 "다국어 임베딩 대안 검증" 섹션 참고).
+    다만 sentence-transformers + torch 의존성이 무겁다(설치 용량/메모리 사용량 큼, 최초
+    실행 시 모델 다운로드 필요) — Streamlit Community Cloud 같은 무료 티어의 빌드/메모리
+    제약에 걸릴 수 있으므로, 기본값 전환 여부는 Track D가 실제 배포 리소스를 보고 판단한다.
+
+    사용하려면 requirements.txt와 별개로 `pip install sentence-transformers`가 추가로
+    필요하다 (기본 설치에는 포함하지 않음 — 이 provider를 안 쓰는 배포에는 불필요한 무게라서).
+    """
+
+    def __init__(self) -> None:
+        try:
+            from sentence_transformers import SentenceTransformer
+        except ImportError as e:
+            raise ImportError(
+                "EMBEDDING_PROVIDER=local_multilingual을 쓰려면 "
+                "`pip install sentence-transformers`가 추가로 필요합니다."
+            ) from e
+        self._model = SentenceTransformer(settings.local_multilingual_model)
+
+    def __call__(self, input: Documents) -> Embeddings:
+        return self._model.encode(list(input), normalize_embeddings=True).tolist()
+
+    @staticmethod
+    def name() -> str:
+        return f"local-multilingual-{settings.local_multilingual_model}"
+
+
 def _get_embedding_function():
     if settings.embedding_provider == "ollama":
         return _OllamaEmbeddingFunction()
+    if settings.embedding_provider == "local_multilingual":
+        return _LocalMultilingualEmbeddingFunction()
     return None  # None이면 Chroma 기본 임베딩 함수(all-MiniLM-L6-v2) 사용
 
 
