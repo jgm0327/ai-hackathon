@@ -160,9 +160,20 @@ def build_career_doc(project_id: int, jd_text: str | None = None) -> list[StarIt
 > 한국어 매칭 품질이 데모에 중요하다면 검토할 가치가 있다. 단 **P0 완료 후에만.**
 
 ## 신규 작업 — JD 붙여넣기 (P1)
-- [ ] 유저가 붙여넣은 JD 텍스트를 받는 경로 추가
-- [ ] `build_resume(cards, jd_text=...)`로 전달
-- [ ] **URL 크롤링은 구현하지 않는다** (CLAUDE.md 2.4)
+- [x] 유저가 붙여넣은 JD 텍스트를 받는 경로 추가 — `POST /api/resume`의 `jd_text` 필드 (6부)
+- [x] `build_resume(cards, jd_text=...)`로 전달 — `build_career_doc()` 경유
+- [x] **URL 크롤링은 구현하지 않는다** (CLAUDE.md 2.4) — 계약 문서에 URL 필드 자체가 없음
+
+## 신규 작업 — 카드 기반 JD 매칭 (P1, 9/13)
+`GET /api/jds/match?card_id=&top_k=` 구현 완료 (`src/api/routers/jds.py`).
+- [x] 카드 id로 스킬 태그 조회 (`db.get_card()` 신규 추가 + 테스트 2개)
+- [x] 인덱스는 라우터 최초 호출 시 지연 구축 후 프로세스 동안 재사용 (모듈 전역 플래그)
+      — 9/13 파이프라인 개편으로 일상 경로가 인덱스에 안 기대는 원칙을 API 레이어에서도 유지
+- [x] `match_jds()`에 `score`(0~1, distance 기반) 필드 추가 — 계약 문서 4장 응답 스키마 충족
+- [x] 스킬 태그가 없는 카드(모호한 입력)는 매칭 시도 없이 빈 목록 반환
+- [x] `tests/test_api_jds.py` 4개 케이스 + `tests/test_vectorstore.py`에 score 검증 1개 추가
+- [x] 실제 Ollama(bge-m3) + Chroma로 라이브 검증 — Redis/성능최적화/결제시스템 태그 카드가
+      Spring Boot·Redis 요구 공고, 결제 플랫폼 공고 순으로 합리적인 score와 함께 매칭됨
 
 ---
 
@@ -178,9 +189,24 @@ def build_career_doc(project_id: int, jd_text: str | None = None) -> list[StarIt
 - 토큰별 별도 클라이언트를 써야 하므로 **모듈 전역 캐싱 금지** (`lru_cache` 패턴 금지)
 
 ## 작업 항목
-- [ ] Notion REST API 연동 (읽기)
-- [ ] **노션 쓰기는 구현하지 않는다** (CLAUDE.md 2.4) — 내보내기는 클립보드 복사로 처리
-- [ ] (선택) MCP 연동 — 타임박스 하루, 초과 시 중단 기록
+- [x] Notion REST API 연동 (읽기) — `POST /api/notion/sync` (`src/api/routers/notion.py`, 9/13)
+      HTTP 레이어만 신규 추가. `fetch_notion_entries()` 자체는 이전부터 구현돼 있었음
+- [x] **노션 쓰기는 구현하지 않는다** (CLAUDE.md 2.4) — 내보내기는 클립보드 복사로 처리
+- [ ] (선택) MCP 연동 — 타임박스 하루, 초과 시 중단 기록. 미착수(선택 사항)
+
+### 구현 노트 (9/13, `POST /api/notion/sync`)
+- `user_token`은 빈 문자열도 "값 없음"으로 취급해 422로 거부한다 — Pydantic의 `str`
+  타입은 빈 문자열을 통과시키므로, 스키마만으로는 "필수" 검증이 안 돼 라우터에서
+  `.strip()` 체크를 추가했다. **`settings.notion_token`으로 암묵 폴백하지 않는다**는
+  원칙(위 "멀티유저 설계 결정")을 API 경계에서도 지키기 위함.
+- 계약 문서(5장)는 `page_id`를 요청 필드로 보여주지만, `fetch_notion_entries()`는
+  특정 페이지 하나만 골라오는 기능이 없고 이 토큰과 공유된 페이지 전체를 가져온다.
+  `page_id`는 스키마에 받되 아직 미사용 — 필요해지면 `notion_client.py`부터 확장 필요
+  (`src/api/schemas.py`의 `NotionSyncRequest` docstring에도 기록).
+- 본문이 빈 페이지는 `parse_note()`에 넘길 근거가 없어 가져오기 단계에서 건너뛴다.
+- 실제 Notion 토큰으로 라이브 검증은 못 함(테스트용 유효 토큰 없음) — 대신 라이브
+  서버에 빈 토큰(422)과 잘못된 토큰(401, 실제 Notion API가 거부하는 것까지 확인)
+  두 에러 경로는 실제로 호출해 검증함. 성공 경로는 유닛 테스트(모킹)로만 검증.
 
 ---
 
@@ -194,7 +220,7 @@ def build_career_doc(project_id: int, jd_text: str | None = None) -> list[StarIt
 - `src/api/main.py` — FastAPI 앱, CORS(환경변수 `CORS_ALLOWED_ORIGINS`, 기본값 `*`)
 - `src/api/schemas.py` — Pydantic 모델. dataclass(Card/Project/StarItem)와 필드명을
   1:1로 맞춰 `model_validate()`(from_attributes)로 바로 변환
-- `src/api/routers/{cards,projects,resume,health}.py`
+- `src/api/routers/{cards,projects,resume,health,jds,notion}.py`
 
 ## 계약 문서와의 알려진 차이 (조율 없이 임의 변경하지 않음)
 - **`created_at` 포맷**: 계약 문서 예시는 타임존 포함 ISO datetime
@@ -209,13 +235,14 @@ def build_career_doc(project_id: int, jd_text: str | None = None) -> list[StarIt
   `update_project()`는 계약 문서 2장이 보여주는 `name`/`ended_at`/`is_current` 3개
   필드만 API 스키마로 노출한다(2.4 원칙 — 폴더 CRUD 고도화 금지).
 
-## 시간이 남으면 (P1, `src/api/main.py` 하단 TODO 참고)
-- `GET /api/jds/match` (4장), `POST /api/notion/sync` (5장), `POST /api/stt` (6장),
-  `POST/DELETE /api/push/subscribe` (7장) — 클라이언트 모듈은 이미 있음, 라우터만 없음.
+## 남은 P1 (`src/api/main.py` 하단 TODO 참고)
+- `POST /api/stt` (6장) — 9/13 실기기 음성 검증 결과가 아직 없어 보류
+- `POST/DELETE /api/push/subscribe` (7장) — `src/push/subscription_store.py` 연결만 하면 됨, 미착수
 
 ## 테스트
-`tests/test_api_cards.py`, `tests/test_api_projects.py`, `tests/test_api_resume.py`.
-`FastAPI TestClient` + LLM 모킹(`_call_llm` patch) + 격리된 임시 SQLite, 기존 패턴 그대로.
+`tests/test_api_cards.py`, `tests/test_api_projects.py`, `tests/test_api_resume.py`,
+`tests/test_api_jds.py`, `tests/test_api_notion.py`.
+`FastAPI TestClient` + LLM/Notion/vectorstore 모킹 + 격리된 임시 SQLite, 기존 패턴 그대로.
 
 ---
 
@@ -224,5 +251,7 @@ def build_career_doc(project_id: int, jd_text: str | None = None) -> list[StarIt
 - [x] 현재 프로젝트에 새 카드가 자동 배정된다 — `test_run_pipeline_auto_assigns_new_card_to_current_project`
 - [x] `build_career_doc()` 호출 하나로 STAR 항목 리스트가 나온다
 - [x] FastAPI로 카드/프로젝트/경력기술서/헬스체크 P0 엔드포인트가 동작한다 (6부)
-- [ ] 노션 REST 경로 하나는 동작한다 (5부, 진행 중 — 미완료)
-- [ ] JD 매칭/노션/STT/푸시 HTTP 엔드포인트는 아직 없음 (P1, 6부 TODO 참고)
+- [x] 노션 REST 경로 하나는 동작한다 (5부) — `POST /api/notion/sync`, 에러 경로(422/401)는
+      라이브 서버로도 검증, 성공 경로는 유닛 테스트로 검증
+- [x] JD 매칭 HTTP 엔드포인트 — `GET /api/jds/match`, 실제 Ollama+Chroma로 라이브 검증 완료
+- [ ] STT/푸시 HTTP 엔드포인트는 아직 없음 (P1, 위 "남은 P1" 참고 — 실기기 음성 검증 대기 중)

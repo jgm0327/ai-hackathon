@@ -82,3 +82,34 @@ class HealthResponse(BaseModel):
     db: bool
     chroma: bool
     llm: bool
+
+
+class JDMatchItem(BaseModel):
+    company: str
+    title: str
+    required_skills: list[str]
+    description: str
+    score: float
+
+
+class JDMatchResponse(BaseModel):
+    matches: list[JDMatchItem]
+
+
+class NotionSyncRequest(BaseModel):
+    """docs/05-api-contract.md 5장. user_token은 필수 — settings.notion_token으로
+    암묵 폴백하지 않는다(다른 사용자가 개발자 본인 노션 데이터를 끌어오는 사고 방지).
+
+    주의(구현 노트): 계약 문서는 page_id를 함께 받지만, 현재
+    `notion_client.fetch_notion_entries()`는 특정 페이지 하나만 골라오는 기능이 없고
+    이 토큰과 공유된 페이지 전체를 가져온다. page_id는 그래서 받되 아직 사용하지
+    않는다 — 특정 페이지만 고르는 기능이 필요해지면 notion_client 쪽부터 확장해야 한다.
+    """
+
+    user_token: str
+    page_id: str | None = None
+
+
+class NotionSyncResponse(BaseModel):
+    imported: int
+    cards: list[CardResponse]

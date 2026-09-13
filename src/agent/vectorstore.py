@@ -149,7 +149,10 @@ def _metadata_to_jd(metadata: dict) -> dict:
 def match_jds(skill_tags: list[str], top_k: int = 5) -> list[dict]:
     """역량 태그로 유사 JD를 top_k개 반환한다.
 
-    반환 형식은 data/mock_jds JSON 스키마와 동일한 dict 리스트.
+    반환 형식은 data/mock_jds JSON 스키마 + "score"(유사도, 1에 가까울수록 유사)가
+    추가된 dict 리스트다. score는 Chroma가 반환하는 거리(distance)를 1/(1+distance)로
+    변환한 값이라 임베딩 함수의 거리 척도(l2/cosine)와 무관하게 항상 0~1 범위다
+    (docs/05-api-contract.md 4장 API 응답의 score 필드).
     """
     if _INDEX is None:
         raise RuntimeError("build_jd_index()를 먼저 호출해야 합니다")
@@ -157,4 +160,11 @@ def match_jds(skill_tags: list[str], top_k: int = 5) -> list[dict]:
     query_text = " ".join(skill_tags)
     result = _INDEX.query(query_texts=[query_text], n_results=top_k)
     metadatas = result.get("metadatas", [[]])[0]
-    return [_metadata_to_jd(m) for m in metadatas]
+    distances = result.get("distances", [[]])[0]
+
+    jds = []
+    for metadata, distance in zip(metadatas, distances):
+        jd = _metadata_to_jd(metadata)
+        jd["score"] = 1 / (1 + distance)
+        jds.append(jd)
+    return jds

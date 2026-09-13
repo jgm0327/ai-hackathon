@@ -12,19 +12,10 @@ from src.storage import db
 router = APIRouter(tags=["cards"])
 
 
-def _find_card(card_id: int) -> db.Card | None:
-    """list_cards()에 단건 조회가 없어 전체를 훑어 찾는다. 카드 수가 수천 건
-    규모(CLAUDE.md 4장)라 이 비용은 무시할 만하다."""
-    for card in db.list_cards():
-        if card.id == card_id:
-            return card
-    return None
-
-
 @router.post("/cards", response_model=CardResponse, status_code=201)
 def create_card(payload: CardCreateRequest) -> CardResponse:
     result = run_pipeline(payload.raw_text)
-    card = _find_card(result["card_id"])
+    card = db.get_card(result["card_id"])
     return CardResponse.model_validate(card)
 
 

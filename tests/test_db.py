@@ -46,6 +46,20 @@ def test_save_and_list_cards_roundtrip():
     assert card.created_at == "2023-02-14"
 
 
+def test_get_card_returns_matching_card():
+    parsed = _make_parsed()
+    card_id = db.save_card(None, parsed, "2023-02-14")
+
+    card = db.get_card(card_id)
+    assert card is not None
+    assert card.id == card_id
+    assert card.refined_sentence == parsed.refined_sentence
+
+
+def test_get_card_returns_none_for_missing_id():
+    assert db.get_card(9999) is None
+
+
 def test_list_cards_returns_oldest_first():
     db.save_card(None, _make_parsed("두 번째"), "2023-02-17")
     db.save_card(None, _make_parsed("첫 번째"), "2023-02-14")
