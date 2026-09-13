@@ -168,16 +168,31 @@ Web Speech API가 실기기에서 동작하면 **이 엔드포인트는 불필�
 
 ## 7. 웹푸시
 
+### `GET /api/push/vapid-public-key` (9/13 추가)
+```jsonc
+{ "public_key": "..." }
+```
+프론트가 `pushManager.subscribe({ applicationServerKey: ... })`에 쓸 공개키.
+VAPID_PUBLIC_KEY가 서버에 설정 안 돼 있으면 503.
+
 ### `POST /api/push/subscribe`
 ```jsonc
+// 요청 — leave_time은 9/13 추가 필드(계약 초안엔 없었음). 발송 시각 계산
+// (push_sender.send_due_reminders())에 필수라서 추가함. Track C에 공유 완료.
 { "endpoint": "https://fcm.googleapis.com/...",
-  "keys": { "p256dh": "...", "auth": "..." } }
+  "keys": { "p256dh": "...", "auth": "..." },
+  "leave_time": "18:00" }
 ```
-응답 201. 기존 Upstash 저장소를 그대로 쓰거나 SQLite로 옮긴다
+응답 201. 로그인이 없으므로 `endpoint`를 해시해 구독 구분용 id로 쓴다 — 같은
+구독으로 다시 호출하면 upsert된다. 기존 Upstash 저장소 그대로 씀
 (`docs/06-migration.md` 참조).
 
 ### `DELETE /api/push/subscribe`
-응답 204.
+```jsonc
+// 요청
+{ "endpoint": "https://fcm.googleapis.com/..." }
+```
+응답 204. 존재하지 않는 구독을 지워도 204(멱등).
 
 ---
 

@@ -113,3 +113,30 @@ class NotionSyncRequest(BaseModel):
 class NotionSyncResponse(BaseModel):
     imported: int
     cards: list[CardResponse]
+
+
+class PushKeys(BaseModel):
+    p256dh: str
+    auth: str
+
+
+class PushSubscribeRequest(BaseModel):
+    """docs/05-api-contract.md 7장 + 추가 필드.
+
+    계약 문서는 endpoint/keys만 보여주지만, 실제 발송 시각 계산
+    (`push_sender.send_due_reminders()`)에는 "몇 시에 보낼지"(leave_time)가 필요하다.
+    계약 문서 "변경 규칙"이 허용하는 범위(추가는 자유롭다)에서 필드를 더했다 —
+    Track C에 공유 필요.
+    """
+
+    endpoint: str
+    keys: PushKeys
+    leave_time: str  # "HH:MM"
+
+
+class PushUnsubscribeRequest(BaseModel):
+    endpoint: str
+
+
+class VapidPublicKeyResponse(BaseModel):
+    public_key: str

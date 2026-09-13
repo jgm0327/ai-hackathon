@@ -82,3 +82,30 @@ def test_list_subscriptions_empty_when_upstash_returns_none():
         with patch("src.push.subscription_store.requests") as mock_requests:
             mock_requests.post.return_value = MagicMock(status_code=200, json=lambda: {"result": None})
             assert store.list_subscriptions() == {}
+
+
+def test_delete_subscription_removes_from_local_fallback():
+    with patch.object(store, "settings", _fake_settings()):
+        store.save_subscription("user1", {"endpoint": "https://x", "keys": {}}, "18:00")
+        store.delete_subscription("user1")
+        assert store.list_subscriptions() == {}
+
+
+def test_delete_subscription_is_idempotent_when_missing():
+    with patch.object(store, "settings", _fake_settings()):
+        store.delete_subscription("no-such-user")  # 에러 없이 조용히 무시
+        assert store.list_subscriptions() == {}
+
+
+def test_delete_subscription_calls_upstash_hdel_when_configured():
+    settings_obj = _fake_settings(
+        upstash_redis_rest_url="https://fake.upstash.io", upstash_redis_rest_token="tok"
+    )
+    with patch.object(store, "settings", settings_obj):
+        with patch("src.push.subscription_store.requests") as mock_requests:
+            mock_requests.post.return_value = MagicMock(status_code=200, json=lambda: {"result": 1})
+            store.delete_subscription("user1")
+
+            mock_requests.post.assert_called_once()
+            _, kwargs = mock_requests.post.call_args
+            assert kwargs["json"] == ["HDEL", "push_subscriptions", "user1"]
