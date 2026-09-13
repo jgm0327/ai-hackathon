@@ -45,6 +45,9 @@ class Settings:
     # 저장소로 쓴다. 비어있으면 로컬 JSON 파일로 자동 폴백(로컬 개발용).
     upstash_redis_rest_url: str = os.getenv("UPSTASH_REDIS_REST_URL", "")
     upstash_redis_rest_token: str = os.getenv("UPSTASH_REDIS_REST_TOKEN", "")
+    # 카드/프로젝트 영속 저장(SQLite). OCI VM 로컬 디스크는 재시작해도 유지되므로
+    # 별도 클라우드 DB 불필요 (CLAUDE.md P0 1순위, 9/13 피벗).
+    db_path: str = os.getenv("DB_PATH", "data/app.db")
 
 
 settings = Settings()
