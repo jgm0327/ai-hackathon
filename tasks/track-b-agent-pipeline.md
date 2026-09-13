@@ -184,8 +184,45 @@ def build_career_doc(project_id: int, jd_text: str | None = None) -> list[StarIt
 
 ---
 
+# 6부 — FastAPI 래핑 (신규, P0 3순위 마무리, 9/13)
+
+## 목표
+기존 파이썬 로직(1~4부)에 얇은 HTTP 레이어만 씌운다. 로직은 재구현하지 않는다.
+`docs/05-api-contract.md` 1~3, 8절(카드/프로젝트/경력기술서/헬스체크)을 구현했다.
+
+## 구현 위치
+- `src/api/main.py` — FastAPI 앱, CORS(환경변수 `CORS_ALLOWED_ORIGINS`, 기본값 `*`)
+- `src/api/schemas.py` — Pydantic 모델. dataclass(Card/Project/StarItem)와 필드명을
+  1:1로 맞춰 `model_validate()`(from_attributes)로 바로 변환
+- `src/api/routers/{cards,projects,resume,health}.py`
+
+## 계약 문서와의 알려진 차이 (조율 없이 임의 변경하지 않음)
+- **`created_at` 포맷**: 계약 문서 예시는 타임존 포함 ISO datetime
+  (`"2026-02-14T18:45:00+09:00"`)이지만, 실제 저장소(`save_card`/`run_pipeline`)는
+  `date.today().isoformat()`로 **날짜만**(`"2026-02-14"`) 기록한다. `db.py`/`pipeline.py`
+  계약을 조율 없이 바꾸지 않기 위해 API는 저장된 값을 그대로 반환한다. 프론트가 시각까지
+  필요하면 저장소 쪽 변경을 먼저 논의할 것.
+- **`GET /api/cards` 정렬**: `list_cards()`는 내부 계약(오래된 순, `build_resume()`이
+  시간순 입력을 기대함)을 유지해야 해서 그대로 두고, 라우터에서만 응답 직전에 뒤집어
+  계약 문서가 요구하는 최신순을 맞췄다.
+- `db.py`에 `delete_card()`, `update_project()`를 최소 구현으로 추가(각각 테스트 포함).
+  `update_project()`는 계약 문서 2장이 보여주는 `name`/`ended_at`/`is_current` 3개
+  필드만 API 스키마로 노출한다(2.4 원칙 — 폴더 CRUD 고도화 금지).
+
+## 시간이 남으면 (P1, `src/api/main.py` 하단 TODO 참고)
+- `GET /api/jds/match` (4장), `POST /api/notion/sync` (5장), `POST /api/stt` (6장),
+  `POST/DELETE /api/push/subscribe` (7장) — 클라이언트 모듈은 이미 있음, 라우터만 없음.
+
+## 테스트
+`tests/test_api_cards.py`, `tests/test_api_projects.py`, `tests/test_api_resume.py`.
+`FastAPI TestClient` + LLM 모킹(`_call_llm` patch) + 격리된 임시 SQLite, 기존 패턴 그대로.
+
+---
+
 ## 완료 기준
 - [x] 앱 재시작 후에도 카드가 남아 있다 — SQLite 영속화(1부)로 확인됨
 - [x] 현재 프로젝트에 새 카드가 자동 배정된다 — `test_run_pipeline_auto_assigns_new_card_to_current_project`
 - [x] `build_career_doc()` 호출 하나로 STAR 항목 리스트가 나온다
+- [x] FastAPI로 카드/프로젝트/경력기술서/헬스체크 P0 엔드포인트가 동작한다 (6부)
 - [ ] 노션 REST 경로 하나는 동작한다 (5부, 진행 중 — 미완료)
+- [ ] JD 매칭/노션/STT/푸시 HTTP 엔드포인트는 아직 없음 (P1, 6부 TODO 참고)

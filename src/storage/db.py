@@ -147,6 +147,44 @@ def get_current_project() -> Project | None:
     return _row_to_project(row) if row else None
 
 
+def delete_card(card_id: int) -> None:
+    """카드 하나를 삭제한다. 존재하지 않는 id여도 조용히 무시한다(멱등)."""
+    init_db()
+    with _connect() as conn:
+        conn.execute("DELETE FROM cards WHERE id = ?", (card_id,))
+
+
+def update_project(project_id: int, **fields) -> None:
+    """프로젝트 필드를 부분 업데이트한다 (`name`, `started_at`, `ended_at`, `is_current`만 허용).
+
+    `is_current=True`로 설정하면 `set_current_project()`와 동일하게 기존 current를
+    자동으로 해제한다. 그 외 필드는 주어진 것만 갱신한다.
+    """
+    init_db()
+    allowed = {"name", "started_at", "ended_at", "is_current"}
+    unknown = set(fields) - allowed
+    if unknown:
+        raise ValueError(f"알 수 없는 필드: {unknown}")
+
+    if "is_current" in fields:
+        is_current = fields.pop("is_current")
+        if is_current:
+            set_current_project(project_id)
+        else:
+            with _connect() as conn:
+                conn.execute(
+                    "UPDATE projects SET is_current = 0 WHERE id = ?", (project_id,)
+                )
+
+    if fields:
+        columns = ", ".join(f"{key} = ?" for key in fields)
+        with _connect() as conn:
+            conn.execute(
+                f"UPDATE projects SET {columns} WHERE id = ?",
+                (*fields.values(), project_id),
+            )
+
+
 def load_seed_cards(path: str = "data/seed_cards.json") -> None:
     """시드 데이터(프로젝트+카드)를 DB에 투입한다. 데모/개발용.
 

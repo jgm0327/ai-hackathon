@@ -48,6 +48,10 @@ class Settings:
     # 카드/프로젝트 영속 저장(SQLite). OCI VM 로컬 디스크는 재시작해도 유지되므로
     # 별도 클라우드 DB 불필요 (CLAUDE.md P0 1순위, 9/13 피벗).
     db_path: str = os.getenv("DB_PATH", "data/app.db")
+    # FastAPI CORS 허용 origin. 콤마로 구분(예: "https://app.example.com,http://localhost:3000").
+    # 해커톤 단일 유저 데모 기본값은 "*"(전체 허용) — 인증이 없으므로(docs/05-api-contract.md)
+    # 배포 시엔 반드시 실제 프론트 origin으로 좁힐 것 (CLAUDE.md 9장: 하드코딩 금지).
+    cors_allowed_origins: str = os.getenv("CORS_ALLOWED_ORIGINS", "*")
 
 
 settings = Settings()

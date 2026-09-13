@@ -10,6 +10,12 @@ python-dotenv==1.2.3
 pytest==9.1.1
 requests==2.34.2
 
+# FastAPI 백엔드 (9/13 피벗, docs/02-architecture.md 4장). streamlit은 9/15 P0 게이트를
+# 통과해 Next.js 전환이 확정된 뒤에만 제거한다 (CLAUDE.md 11장, src/frontend/ 폴백 유지 조항).
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+httpx==0.28.1  # FastAPI TestClient(내부적으로 httpx 사용)와 테스트용
+
 # Tier 2 푸시 알림 (선택, Track E)
 pywebpush==2.0.3
 
