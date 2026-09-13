@@ -77,17 +77,40 @@ public/service-worker.js → 루트 scope 등록
 
 ## 5. 작업 항목
 
-- [ ] Next.js 프로젝트 초기화, Tailwind 설정, Figma 토큰 이식
-- [ ] API 클라이언트 (`lib/api.ts`) — `docs/05-api-contract.md` 기준
-- [ ] `/` 입력 화면 + 프로젝트 스위처 + 변환 모달
-- [ ] `/stack` 카드 목록 + 필터
-- [ ] `/resume` JD 붙여넣기 + STAR 렌더링 + 클립보드 복사
-- [ ] `/projects` 목록 + 생성
-- [ ] `/onboarding` (P2)
-- [ ] 마이크 이식 — `docs/06-migration.md` 참조
-- [ ] PWA manifest + 서비스워커 루트 등록
-- [ ] 웹푸시 구독 이식 — `docs/06-migration.md` 참조
-- [ ] 로딩 상태 (스켈레톤) — LLM 호출이 3~10초 걸린다
+- [x] Next.js 프로젝트 초기화, Tailwind 설정 — `web/`에 App Router + TypeScript +
+      Tailwind v4로 초기화. **Figma 토큰 이식은 안 함** — Figma 접근 권한이 없어
+      `app/globals.css`의 기본 토큰(Tailwind v4는 `tailwind.config.js` 대신 CSS
+      `@theme`로 토큰을 정의함)을 플레이스홀더로 남겨둠. 디자이너 확정 시 후속 작업 필요
+- [x] API 클라이언트 (`web/lib/api.ts`) — `docs/05-api-contract.md` §1~3(카드/프로젝트/
+      경력기술서) + §8(헬스체크) 타입/함수 구현. `result: ""`, `source_dates: string[]`
+      계약을 타입 레벨에서 그대로 반영
+- [x] `/` 입력 화면 + 프로젝트 스위처 — `web/app/page.tsx` +
+      `web/components/ProjectSwitcher.tsx` (바텀시트, 이름+시작일만 받음).
+      "변환 모달"은 별도 모달 대신 인라인 카드 + 스켈레톤으로 구현 (동일 화면 흐름 유지가
+      더 가볍다고 판단 — 필요시 모달로 전환 가능)
+- [x] `/stack` 카드 목록 + 태그 필터 — `web/app/stack/page.tsx`
+- [x] `/resume` JD 붙여넣기 + STAR 렌더링 + 클립보드 복사 — `web/app/resume/page.tsx`,
+      `web/components/StarItemCard.tsx`. 빈 `result`는 "결과 없음" 대신 되묻기 칩으로
+      표시, `source_dates` 토글("이 문장의 근거") 포함, 항목별/전체 클립보드 복사 버튼 포함
+- [x] `/projects` 목록 + 생성 — `web/app/projects/page.tsx` (이름+시작일만, 폴더 CRUD
+      고도화 없음)
+- [ ] `/onboarding` (P2) — 이번 세션 범위 밖. 백엔드 계약(현재 직무/목표 직무/연차
+      세그먼트 저장 방식)이 아직 안 고정돼 있어 후속 세션에서 진행
+- [ ] 마이크 이식 — `docs/06-migration.md` 참조. **의도적으로 미룸**: CLAUDE.md 8장의
+      실기기 음성 테스트 결과가 아직 없어 Web Speech API vs 녹음+STT 중 어느 쪽으로
+      이식할지 확정 불가. 결과 나오는 대로 후속 세션에서 진행
+- [ ] PWA manifest + 서비스워커 루트 등록 — 이번 세션 범위 밖 (마이크 이식과 마찬가지로
+      음성 UX 확정 후 진행하는 것이 순서에 맞음, `docs/06-migration.md` §5)
+- [ ] 웹푸시 구독 이식 — `docs/06-migration.md` 참조. 이번 세션 범위 밖
+- [x] 로딩 상태 (스켈레톤) — `web/components/Skeleton.tsx`. `/`(카드 변환)와
+      `/resume`(STAR 생성) 양쪽 다 3~10초 대기 스켈레톤 적용
+
+### 5.1 이번 세션 검증 결과 (백엔드 미기동 상태에서)
+- `npm run build`, `npm run lint` 모두 통과 (0 에러)
+- `npm run dev`로 기동 후 `/`, `/stack`, `/resume`, `/projects` 4개 라우트 전부
+  curl로 200 확인, 에러 페이지 없음 (백엔드가 없으므로 각 화면은 fetch 실패 시
+  에러 메시지만 보여주고 크래시하지 않음 — 의도된 동작)
+- 백엔드가 붙은 상태의 실제 통합 테스트는 아직 못 함 — Track B 완료 후 필요
 
 ---
 
