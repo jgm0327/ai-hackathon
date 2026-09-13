@@ -47,6 +47,17 @@ def list_subscriptions() -> dict:
     return _load_local()
 
 
+def delete_subscription(user_id: str) -> None:
+    """구독을 하나 삭제한다. 존재하지 않아도 조용히 무시한다(멱등, storage.db.delete_card와
+    동일한 패턴). 9/13 신설 — `DELETE /api/push/subscribe` 라우터가 사용."""
+    if _upstash_configured():
+        _upstash_command("HDEL", _REDIS_KEY, user_id)
+    else:
+        data = _load_local()
+        data.pop(user_id, None)
+        _save_local(data)
+
+
 def _upstash_configured() -> bool:
     return bool(settings.upstash_redis_rest_url and settings.upstash_redis_rest_token)
 

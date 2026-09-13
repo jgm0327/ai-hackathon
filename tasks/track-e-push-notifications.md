@@ -4,6 +4,12 @@
 > (VAPID 키, `push_sender.py`, 구독 저장소 등)은 그대로 유지하되, 이식 절차는
 > `docs/06-migration.md` 1장을 참고할 것 — 새로 만들지 말고 이식한다.
 
+> **9/13 후속**: HTTP 레이어(`GET /api/push/vapid-public-key`,
+> `POST/DELETE /api/push/subscribe`)를 `src/api/routers/push.py`에 신설함
+> (`docs/05-api-contract.md` 7장). `subscription_store.py`에 `delete_subscription()`
+> 추가(테스트 포함). 로그인이 없어 endpoint 해시를 user_id로 씀. 프론트(Next.js)
+> 이식은 아직 — `docs/06-migration.md` 1장 기준으로 진행 예정.
+
 이 트랙은 **선택 기능**이다. 메인 4개 트랙(A/B/C/D)의 완료 기준을 해치면서까지
 투입하지 않는다. 반드시 `docs/04-push-notifications.md`를 먼저 읽을 것.
 
