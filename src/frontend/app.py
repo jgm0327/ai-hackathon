@@ -17,7 +17,7 @@ from src.frontend.components.reminder import render_reminder_widget
 from src.frontend.components.skill_chart import render_skill_chart
 from src.frontend.components.voice_input import handle_pending_voice_entry, render_voice_input_widget
 
-st.set_page_config(page_title="온보딩 다이어리", layout="wide")
+st.set_page_config(page_title="온보딩 다이어리", page_icon="📔", layout="wide", initial_sidebar_state="expanded")
 
 if "results" not in st.session_state:
     st.session_state.results = []  # list[dict] — run_pipeline() 반환값 누적
@@ -33,7 +33,8 @@ voice_result = handle_pending_voice_entry()
 if voice_result is not None:
     st.session_state.results.append(voice_result)
 
-st.title("신입사원 온보딩 다이어리")
+st.title("📔 신입사원 온보딩 다이어리")
+st.caption("오늘 있었던 일을 편하게 적으면, AI가 경력기술서 문장으로 정리하고 잘 맞는 공고를 찾아드려요.")
 
 with st.sidebar:
     render_install_button()
@@ -43,11 +44,16 @@ with st.sidebar:
     # Tier 2 알림 — 탭/브라우저를 꺼도 동작 (Web Push, 같은 퇴근 시각을 공유)
     render_push_setup_widget(st.session_state.user_id, leave_time_str)
 
-col_input, col_notion = st.columns([3, 1])
+col_input, col_notion = st.columns([3, 1], gap="medium")
 
 with col_input:
-    raw_text = st.text_input("오늘 있었던 일을 편하게 적어보세요", placeholder="예: 결제 터진 거 막음")
-    if st.button("분석하기") and raw_text.strip():
+    st.subheader("📝 오늘의 기록")
+    raw_text = st.text_input(
+        "오늘 있었던 일을 편하게 적어보세요",
+        placeholder="예: 결제 터진 거 막음",
+        help="문장이 짧거나 대충 적어도 괜찮아요. AI가 알아서 다듬어드려요.",
+    )
+    if st.button("분석하기", help="입력한 문장을 AI가 정제된 문장과 역량 태그로 변환합니다") and raw_text.strip():
         with st.spinner("AI가 정리하는 중..."):
             result = run_pipeline(raw_text)
         st.session_state.results.append(result)
@@ -55,6 +61,7 @@ with col_input:
     render_voice_input_widget()
 
 with col_notion:
+    st.subheader("🔗 노션 연동")
     # 각 사용자가 자기 Notion 워크스페이스를 연결할 수 있도록 토큰을 직접 입력받는다.
     # .env의 NOTION_TOKEN(개발자 본인 것)으로 암묵적 폴백하지 않는다 — 그렇게 하면
     # 토큰을 안 넣은 다른 사용자가 실수로 개발자의 개인 노션 데이터를 끌어오게 된다.
@@ -76,30 +83,30 @@ with col_notion:
         type="password",
         help="notion.so/my-integrations 에서 발급받은 본인 통합 토큰을 입력하세요.",
     )
-    if st.button("노션 동기화"):
+    if st.button("노션 동기화", help="입력한 토큰으로 연결된 노션 페이지를 가져와 한 번에 분석합니다"):
         if not notion_token_input.strip():
-            st.warning("먼저 본인의 Notion 토큰을 입력해주세요.")
+            st.warning("⚠️ 먼저 본인의 Notion 토큰을 입력해주세요.")
         else:
             with st.spinner("노션 일지를 불러오는 중..."):
                 entries = fetch_notion_entries(user_token=notion_token_input.strip())
                 batch = run_pipeline_batch([e.content for e in entries]) if entries else []
             if not entries:
                 st.info(
-                    "가져올 페이지가 없어요. 토큰은 맞는데 이 결과가 나왔다면, "
+                    "📭 가져올 페이지가 없어요. 토큰은 맞는데 이 결과가 나왔다면, "
                     "위 안내의 3번(페이지를 통합에 연결하기)을 빼먹었을 가능성이 높아요."
                 )
             else:
-                st.success(f"{len(entries)}개 페이지를 가져와서 분석했어요.")
+                st.success(f"✅ {len(entries)}개 페이지를 가져와서 분석했어요.")
                 st.session_state.results.extend(batch)
 
 st.divider()
 
-left, right = st.columns([1, 1])
+left, right = st.columns([1, 1], gap="medium")
 with left:
-    st.subheader("역량 그래프")
+    st.subheader("📊 역량 그래프")
     render_skill_chart(st.session_state.results)
 
 with right:
-    st.subheader("매칭 공고")
+    st.subheader("💼 매칭 공고")
     all_jds = [jd for r in st.session_state.results for jd in r.get("matched_jds", [])]
     render_jd_cards(all_jds)
