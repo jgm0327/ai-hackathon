@@ -1,0 +1,52 @@
+# nginx 리버스 프록시 설정 템플릿 — tasks/track-d-deploy.md 3.4절
+#
+# 사용법:
+#   1. <YOUR_DOMAIN>을 실제 도메인(또는 nip.io 같은 임시 와일드카드 DNS)으로 치환
+#   2. /etc/nginx/sites-available/career-log 로 복사
+#   3. ln -s /etc/nginx/sites-available/career-log /etc/nginx/sites-enabled/
+#   4. nginx -t && systemctl reload nginx
+#   5. certbot --nginx -d <YOUR_DOMAIN>  (Let's Encrypt 인증서 발급 — 아래 443 블록은
+#      certbot이 자동으로 만들어주므로, 최초엔 80 블록만 있는 채로 적용해도 된다)
+#
+# 핵심 포인트 (자주 막히는 지점, tasks/track-d-deploy.md 4장 참고):
+#   - service-worker.js는 반드시 "루트" 경로(/service-worker.js)에서 서빙돼야 한다.
+#     Streamlit에서 막혔던 지점이 바로 이거다. Next.js가 web/public/service-worker.js를
+#     이미 루트에서 서빙하므로, 아래 "/" location 블록이 그대로 흘려보내기만 하면 되고
+#     별도 location 블록은 필요 없다.
+#   - proxy_read_timeout을 넉넉히 잡을 것 — LLM 호출(build_resume 등)이 10초 이상
+#     걸릴 수 있다.
+#   - 마이크/웹푸시는 HTTPS 필수 — 인증서 없이는 두 기능 다 브라우저가 막는다.
+
+server {
+    listen 80;
+    server_name <YOUR_DOMAIN>;
+
+    # certbot이 80을 인증서 발급용으로 쓰고, 이후 자동으로 443 리다이렉트 블록을 추가한다.
+    # 그 전까지는 그냥 여기서 바로 프록시해도 된다 (초기 연습 배포 단계).
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:8000/api/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # LLM 호출(경력기술서 생성 등)은 10초 이상 걸릴 수 있다 — 기본 60초 타임아웃이면
+        # 보통 충분하지만, 응답이 느린 게 관측되면 더 올릴 것.
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Next.js 개발 서버(HMR) 대비 — 프로덕션(next start)에는 필요 없지만 있어도 무해.
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
