@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { StarItemSection, formatStarItemForClipboard } from "@/components/StarItemCard";
 import { StarItemSkeleton } from "@/components/Skeleton";
-import { ApiError, Profile, StarItem, buildResume, getProfile } from "@/lib/api";
+import { ApiError, Profile, StarItem, getProfile } from "@/lib/api";
+import { buildResumeCached } from "@/lib/resumeCache";
 import { useProjects } from "@/lib/useProjects";
 
 /** 프로필/프로젝트에서 실제로 있는 값만으로 문서 제목을 만든다 — 없는 정보를
@@ -71,7 +72,9 @@ export default function ResumePage() {
     setLoading(true);
     setError(null);
     try {
-      const result = await buildResume(currentProject.id, jdText.trim() || undefined);
+      // 카드 구성이 지난 생성 때와 같으면 재호출 없이 캐시에서 반환한다 (9/14, LLM
+      // 호출 비용 절감 — web/lib/resumeCache.ts 참고).
+      const result = await buildResumeCached(currentProject.id, { jdText: jdText.trim() || undefined });
       setItems(result);
       setShowBuildForm(false);
     } catch (err) {
