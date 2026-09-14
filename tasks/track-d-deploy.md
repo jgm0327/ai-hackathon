@@ -31,7 +31,23 @@ nginx  ┬─ /       → localhost:3000  (Next.js)
 
 ## 2. 사전 조건
 
-- OCI 무료 티어 VM (ARM Ampere 권장: 4 OCPU / 24GB)
+- **OCI 무료 티어 VM — AMD Micro (x86, 1GB RAM 고정, 확정, 9/14)**.
+  ~~ARM Ampere(4 OCPU/24GB) 권장~~은 이전 버전 가정이었다 — 실제로 이 인스턴스를 쓰기로
+  확정하면서 아래 항목들이 전부 1GB RAM 기준으로 다시 판단됐다:
+  - **`EMBEDDING_PROVIDER`는 `chroma_default` 확정, 그 외는 배포 불가.** 로컬 개발용
+    `ollama`/`local_multilingual`을 그대로 `.env`에 복사하면 안 된다 — 실측: FastAPI+
+    Chroma+Anthropic 클라이언트까지 다 올려도 `chroma_default`는 ~152MB인 반면,
+    `sentence-transformers`(local_multilingual)는 모델 로드 시점에 이미 ~1,232MB로
+    1GB를 그 자체로 넘는다. 로컬 Ollama도 서버 자체를 이 VM에 또 띄워야 하고
+    `bge-m3` 모델만 로드해도 ~600MB+라 배제(`src/config.py`의 `embedding_provider`
+    주석 참고).
+  - **`next build`가 1GB에서 안 끝날 수 있다.** ARM Ampere 24GB를 가정한 예전
+    체크리스트는 이 문제를 고려하지 않았다 — VM에서 직접 빌드하지 말고, **다른
+    머신(또는 CI)에서 빌드한 `.next` 산출물만 VM에 올리는 방식**을 우선 검토할 것.
+    굳이 VM에서 빌드해야 하면 swap을 충분히(최소 2GB) 잡아두고 시도한다.
+  - **동시 실행 가능한 프로세스 수 자체가 빠듯하다** — nginx + uvicorn(FastAPI) +
+    `next start` 세 개만 떠도 1GB 중 상당 부분을 씀. 배포 중 다른 무거운 작업
+    (빌드, 대량 마이그레이션 스크립트 등)을 서비스와 동시에 돌리지 않는다.
 - 도메인 1개 (Let's Encrypt 인증서 발급용). 없으면 nip.io 같은 와일드카드 DNS로 임시 대체
 - **9/16 저녁까지 최소 기능으로 한 번 연습 배포를 완료할 것.**
   마지막 날 몰아서 하면 방화벽·인증서·CORS에서 반드시 막힌다
@@ -52,6 +68,9 @@ nginx  ┬─ /       → localhost:3000  (Next.js)
 - [ ] `uvicorn` systemd 서비스 등록 (`--host 127.0.0.1 --port 8000`)
       — 외부에 직접 노출하지 않는다. nginx만 바라본다
 - [ ] `.env` 배치 (커밋 금지). `.env.example` 갱신
+      — **`EMBEDDING_PROVIDER`를 로컬 개발용 값(`ollama`/`local_multilingual`)에서
+      복사해오지 않았는지 확인.** 비워두면 기본값(`chroma_default`)이 적용되니
+      가장 안전한 건 아예 이 줄을 안 넣는 것 (2장 참고)
 - [ ] SQLite 파일 경로를 VM 영구 디렉터리로 (`/opt/app/data/`)
 - [ ] Chroma 인덱스 초기 빌드 확인
 
@@ -86,7 +105,8 @@ nginx  ┬─ /       → localhost:3000  (Next.js)
 | 마이크/푸시가 안 뜸 | HTTPS가 아니다. 인증서부터 확인 |
 | 서비스워커 등록 실패 | `/service-worker.js`가 하위 경로에서 서빙되고 있다 |
 | API 502 | uvicorn이 죽었거나 포트 불일치. `systemctl status` 확인 |
-| 빌드 중 OOM | ARM VM에서 `next build`가 메모리를 많이 쓴다. swap 추가 |
+| 빌드 중 OOM | **AMD Micro는 1GB RAM 고정**이라 `next build`가 그 자체로 못 끝날 수 있다. 다른 머신에서 빌드해 `.next` 산출물만 올리거나, swap을 최소 2GB 추가 |
+| FastAPI 프로세스가 계속 죽음(OOM) | `.env`의 `EMBEDDING_PROVIDER`가 로컬 개발용(`ollama`/`local_multilingual`)으로 남아있는지 확인 — 1GB에서 `local_multilingual`은 그 자체로 OOM 확정, `ollama`는 로컬 Ollama 서버가 없으면 애초에 연결 실패. `chroma_default`(기본값)로 되돌릴 것 (2장 참고) |
 
 ---
 

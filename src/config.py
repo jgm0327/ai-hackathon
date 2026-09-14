@@ -17,13 +17,18 @@ class Settings:
     llm_model: str = os.getenv("LLM_MODEL", "claude-sonnet-5")
     ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     ollama_model: str = os.getenv("OLLAMA_MODEL", "exaone3.5:2.4b")
-    # "chroma_default"(기본, 배포용 — 별도 서버 불필요, 대신 한국어 임베딩 품질이 낮음.
-    #   실측: 4개 한국어 스킬 태그 쿼리 중 2개가 무관한 공고를 1순위로 반환 —
-    #   tasks/track-b-agent-pipeline.md 참고)
-    # "ollama"(로컬 개발용 — bge-m3로 한국어 품질 우수, 로컬 Ollama 서버 필요)
-    # "local_multilingual"(서버 불필요 — sentence-transformers 다국어 모델을 in-process로
-    #   로드. chroma_default보다 한국어 품질 우수하나 의존성이 무거움(torch 포함),
-    #   `pip install sentence-transformers` 별도 필요. 배포 기본값 전환은 Track D 판단.)
+    # "chroma_default"(기본, **배포용 — 확정**. 별도 서버 불필요, 대신 한국어 임베딩
+    #   품질이 낮음. 실측: 4개 한국어 스킬 태그 쿼리 중 2개가 무관한 공고를 1순위로
+    #   반환 — tasks/track-b-agent-pipeline.md 참고)
+    # "ollama"(로컬 개발용 전용 — bge-m3로 한국어 품질 우수, 로컬 Ollama 서버 필요.
+    #   OCI 배포엔 못 쓴다: Ollama 서버까지 그 VM에 띄워야 하고 bge-m3 모델만 로드해도
+    #   ~600MB+라 AMD Micro 1GB RAM에서 FastAPI 프로세스와 같이 못 돈다.)
+    # "local_multilingual"(서버는 불필요하지만 **배포 후보에서 제외 확정, 9/14** —
+    #   sentence-transformers 자체가 torch를 끌고 와서, 실측해보니 FastAPI+Chroma+Anthropic
+    #   클라이언트까지 다 합쳐도 chroma_default는 ~152MB인데 반해 이건 모델 로드 시점에
+    #   벌써 ~1,232MB를 찍는다 — OCI 배포 대상인 AMD Micro(1GB RAM 고정, tasks/
+    #   track-d-deploy.md 2장)를 그 자체로 넘어서서 사실상 OOM 확정. 로컬 개발에서
+    #   Ollama보다 빠르면서 한국어 품질을 유지하고 싶을 때만 로컬 전용으로 쓸 것.)
     embedding_provider: str = os.getenv("EMBEDDING_PROVIDER", "chroma_default")
     ollama_embedding_model: str = os.getenv("OLLAMA_EMBEDDING_MODEL", "bge-m3")
     local_multilingual_model: str = os.getenv(
