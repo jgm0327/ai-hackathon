@@ -92,6 +92,22 @@ class ResumeResponse(BaseModel):
     items: list[StarItemResponse]
 
 
+# 경력기술서 초안 저장 (9/14 신규, docs/05-api-contract.md 3장). AI가 만든 STAR
+# 구조 자체가 아니라, 유저가 그걸 가져다 직접 고친 자유 텍스트(마크다운)를 저장한다
+# — CLAUDE.md 3장이 막는 "AI 그룹핑을 정식 데이터로 저장"과는 다른 문제라서
+# 별도로 허용됨(src/storage/db.py의 ResumeDraft 참고).
+class ResumeDraftResponse(BaseModel):
+    project_id: int
+    # 저장된 초안이 없으면(또는 project_id가 이 유저 소유가 아니면) 둘 다 None.
+    content: str | None
+    updated_at: str | None
+
+
+class ResumeDraftSaveRequest(BaseModel):
+    project_id: int
+    content: str
+
+
 class HealthResponse(BaseModel):
     status: str
     db: bool
