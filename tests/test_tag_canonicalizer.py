@@ -21,12 +21,19 @@ _VECTORS: dict[str, list[float]] = {
 
 
 class _FakeEmbeddingFunction(EmbeddingFunction[Documents]):
-    """미리 정해둔 좌표를 반환하는 결정론적 가짜 임베딩. 목록에 없는 태그는 원점 근처."""
+    """미리 정해둔 좌표를 반환하는 결정론적 가짜 임베딩. 목록에 없는 태그는 원점 근처.
+
+    `call_count`/`call_sizes`로 실제 몇 번, 몇 개씩 묶여서 호출됐는지 기록한다 —
+    태그별로 따로 호출되던 걸 배치로 묶은 최적화(9/14)가 회귀하지 않는지 검증하는 데 쓴다.
+    """
 
     def __init__(self) -> None:
-        pass
+        self.call_count = 0
+        self.call_sizes: list[int] = []
 
     def __call__(self, input: Documents) -> Embeddings:
+        self.call_count += 1
+        self.call_sizes.append(len(input))
         return [_VECTORS.get(text, [0.5, 0.5, 0.5]) for text in input]
 
     @staticmethod
@@ -36,15 +43,21 @@ class _FakeEmbeddingFunction(EmbeddingFunction[Documents]):
 
 @pytest.fixture(autouse=True)
 def _isolated_collection(monkeypatch, tmp_path):
-    """각 테스트마다 캐시된 컬렉션을 리셋하고, 격리된 persist 디렉토리 + 가짜 임베딩을 쓴다."""
+    """각 테스트마다 캐시된 컬렉션을 리셋하고, 격리된 persist 디렉토리 + 가짜 임베딩을 쓴다.
+
+    같은 가짜 임베딩 인스턴스를 매번 반환하도록 고정해서, 호출 횟수를 세야 하는
+    테스트(배치 최적화 검증)가 `_isolated_collection` 픽스처 값으로 그 인스턴스를
+    받아 쓸 수 있게 한다.
+    """
     tag_canonicalizer.reset_collection()
-    monkeypatch.setattr(vectorstore, "_get_embedding_function", lambda: _FakeEmbeddingFunction())
+    fake_embedding = _FakeEmbeddingFunction()
+    monkeypatch.setattr(vectorstore, "_get_embedding_function", lambda: fake_embedding)
 
     class _FakeSettings:
         chroma_persist_dir = str(tmp_path / ".chroma_test")
 
     monkeypatch.setattr(vectorstore, "settings", _FakeSettings())
-    yield
+    yield fake_embedding
     tag_canonicalizer.reset_collection()
 
 
@@ -98,6 +111,31 @@ def test_canonicalize_is_idempotent_across_repeated_calls():
 
     collection = tag_canonicalizer._get_collection()
     assert collection.count() == 2  # "성능최적화", "결제시스템"만 캐노니컬로 존재
+
+
+def test_batches_embedding_calls_regardless_of_tag_count(_isolated_collection):
+    """태그별로 따로 임베딩 API를 부르지 않는지 검증한다 (9/14 성능 최적화 회귀 방지).
+
+    실측: 태그별로 query()+upsert()를 따로 부르던 예전 구현은 로컬 Ollama로 태그 3개
+    처리에 ~14초가 걸렸다(태그당 왕복 2회). 배치로 묶으면 태그 수와 무관하게 query 1회
+    + upsert 1회, 최대 2번의 임베딩 함수 호출로 끝나야 한다.
+    """
+    fake_embedding = _isolated_collection
+
+    # 첫 호출 — 컬렉션이 비어 있으므로 query 없이 upsert만 1번(신규 태그 4개를 한 번에).
+    canonicalize_tags(["성능최적화", "결제시스템", "캐싱기술", "시스템최적화"], threshold=0.01)
+    assert fake_embedding.call_count == 1
+    assert fake_embedding.call_sizes == [4]
+
+    fake_embedding.call_count = 0
+    fake_embedding.call_sizes = []
+
+    # 두 번째 호출 — 컬렉션이 비어있지 않으므로 query 1번(태그 3개 배치) + 전부
+    # 기존 태그와 안 겹쳐 upsert 1번(태그 3개 배치) = 총 2번. 태그가 3개여도
+    # 6번(3개 × 2)이 되면 안 된다 — 이게 이번 배치 최적화의 핵심 검증.
+    canonicalize_tags(["완전히새로운태그1", "완전히새로운태그2", "완전히새로운태그3"], threshold=0.01)
+    assert fake_embedding.call_count == 2
+    assert fake_embedding.call_sizes == [3, 3]
 
 
 def test_uses_configured_threshold_by_default(monkeypatch):

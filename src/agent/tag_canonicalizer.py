@@ -56,6 +56,17 @@ def canonicalize_tags(raw_tags: list[str], threshold: float | None = None) -> li
     한 카드에 같이 나온 태그가 서로 다른 개념인 게 정상이므로, 카드 내부 구성으로
     유사도 판단을 흐리면 안 된다. 대신 이번 호출 안에서 완전히 같은 문자열이 두 번
     나오면(중복 태그) 컬렉션에 중복 upsert하지 않도록 한 번만 처리한다.
+
+    **구현 노트 (9/14, 태그별 순차 호출 -> 배치 호출로 변경)**: 원래는 태그마다 따로
+    `query()`/`upsert()`를 불렀는데, 이건 태그 수만큼 임베딩 API(Ollama 등) 왕복이
+    생긴다는 뜻이다 — 실측해보니 로컬 Ollama(bge-m3)로 태그 3개를 처리하는 데
+    ~14초가 걸렸고(태그당 query+upsert 2회 × ~2.2초), 이게 "경력 변환하기"(POST
+    /api/cards, CLAUDE.md 2.1의 매일 쓰는 경로) 체감 속도의 실제 병목이었다(사용자
+    지적 — parse_note() 자체는 Claude로 바꾼 뒤 ~2.4초로 이미 빠름). chromadb의
+    `query()`/`upsert()`는 여러 텍스트를 한 번에 받을 수 있고, 그러면 임베딩 함수가
+    한 번의 호출로 전부 임베딩한다(Ollama `/api/embed`도 `input`이 리스트를 받는
+    배치 API다) — 그래서 태그를 모아 query 1회 + upsert 1회로 묶어서 왕복 횟수를
+    태그 수와 무관하게 최대 2회로 줄였다.
     """
     if not raw_tags:
         return []
@@ -63,28 +74,33 @@ def canonicalize_tags(raw_tags: list[str], threshold: float | None = None) -> li
         threshold = settings.tag_canonicalize_threshold
 
     collection = _get_collection()
-    canonical: list[str] = []
-    resolved_in_this_call: dict[str, str] = {}
 
+    # 순서를 보존하며 중복 제거 — 같은 태그가 여러 번 나와도 임베딩 호출 대상에선 한 번만.
+    unique_tags: list[str] = []
+    seen: set[str] = set()
     for tag in raw_tags:
-        if tag in resolved_in_this_call:
-            canonical.append(resolved_in_this_call[tag])
-            continue
+        if tag not in seen:
+            seen.add(tag)
+            unique_tags.append(tag)
 
-        resolved = tag
-        if collection.count() > 0:
-            result = collection.query(query_texts=[tag], n_results=1)
-            documents = result.get("documents") or [[]]
-            distances = result.get("distances") or [[]]
-            if documents[0] and distances[0] and distances[0][0] <= threshold:
-                resolved = documents[0][0]
+    resolved: dict[str, str] = dict.fromkeys(unique_tags)
+    for tag in unique_tags:
+        resolved[tag] = tag  # 기본값: 매칭되는 기존 태그가 없으면 자기 자신
 
-        if resolved == tag:
-            # 신규 캐노니컬 태그로 등록. id=문서 내용으로 둬서 같은 태그 재등록이 upsert로
-            # 자연스럽게 멱등 처리되게 한다.
-            collection.upsert(ids=[tag], documents=[tag])
+    if collection.count() > 0:
+        result = collection.query(query_texts=unique_tags, n_results=1)
+        documents = result.get("documents") or []
+        distances = result.get("distances") or []
+        for i, tag in enumerate(unique_tags):
+            docs = documents[i] if i < len(documents) else []
+            dists = distances[i] if i < len(distances) else []
+            if docs and dists and dists[0] <= threshold:
+                resolved[tag] = docs[0]
 
-        resolved_in_this_call[tag] = resolved
-        canonical.append(resolved)
+    # 매칭되는 기존 태그가 없었던(= 자기 자신으로 남은) 태그만 신규 캐노니컬로 등록.
+    # id=문서 내용으로 둬서 같은 태그 재등록이 upsert로 자연스럽게 멱등 처리되게 한다.
+    new_tags = [tag for tag in unique_tags if resolved[tag] == tag]
+    if new_tags:
+        collection.upsert(ids=new_tags, documents=new_tags)
 
-    return canonical
+    return [resolved[tag] for tag in raw_tags]
