@@ -254,4 +254,33 @@ def build_career_doc(project_id: int, jd_text: str | None = None) -> list[StarIt
 - [x] 노션 REST 경로 하나는 동작한다 (5부) — `POST /api/notion/sync`, 에러 경로(422/401)는
       라이브 서버로도 검증, 성공 경로는 유닛 테스트로 검증
 - [x] JD 매칭 HTTP 엔드포인트 — `GET /api/jds/match`, 실제 Ollama+Chroma로 라이브 검증 완료
-- [ ] STT/푸시 HTTP 엔드포인트는 아직 없음 (P1, 위 "남은 P1" 참고 — 실기기 음성 검증 대기 중)
+- [x] 웹푸시 HTTP 엔드포인트 — `GET /api/push/vapid-public-key`, `POST/DELETE
+      /api/push/subscribe` (9/13, push-router PR). 라이브 스모크 테스트 완료
+- [ ] STT HTTP 엔드포인트는 아직 없음 — 9/13 실기기 음성 검증 대기 중 (현재는 Web
+      Speech API로 진행해 서버측 STT 자체가 불필요, `src/api/main.py` 하단 TODO 참고)
+
+---
+
+# 7부 — 온보딩 프로필 (신규, P2, 9/14)
+
+## 목표
+CLAUDE.md 6장 P2 "온보딩(현재 직무/목표 직무/연차)"에 대응하는 저장소 + API.
+싱글턴(로그인 없음, 단일 유저 데모 전제)이라 프로젝트/카드처럼 여러 건을 다루지 않는다.
+
+## 작업 항목
+- [x] `src/storage/db.py`에 `profile` 테이블(싱글턴, `id=1` CHECK 제약) + `Profile`
+      dataclass + `get_profile()`/`save_profile()` 추가, 테스트 3개
+- [x] `src/api/routers/profile.py` — `GET/PUT /api/profile`
+- [x] `job_field`/`years_segment`는 Pydantic `Literal`로 고정 칩 세트만 허용
+      (CLAUDE.md 2.4 — 연차 직접 입력 배제). 잘못된 값은 422
+- [x] `docs/05-api-contract.md` 9장 신설
+- [x] `tests/test_api_profile.py` 6개 케이스 (기본값, 저장/재조회, 선택 필드 생략,
+      잘못된 직군/연차 값 거부, 덮어쓰기)
+
+## 알려진 한계 (의도된 스코프)
+- `job_detail`(세부 직무)은 자유 문자열이다 — Figma 디자인엔 "개발" 직군의 하위
+  칩(백엔드/프론트엔드/안드로이드/iOS/DevOps/데이터엔지니어)만 구체적으로 나와
+  있고 다른 직군의 하위 선택지는 아직 정해지지 않았다. 확정되면 `Literal`로 좁힐 것.
+- 이 프로필 값은 아직 `build_resume()`/JD 매칭 어디에도 연결돼 있지 않다 — 온보딩
+  화면과 입력 화면 상단에 컨텍스트를 보여주는 용도로만 쓰인다. 스코프 확장은
+  실제 필요가 생겼을 때 논의(CLAUDE.md 2.4).

@@ -38,6 +38,19 @@ class Project:
     is_current: bool
 
 
+@dataclass
+class Profile:
+    """온보딩에서 받는 유저 프로필 — 싱글턴(단일 유저 데모 전제, 인증 없음).
+
+    `years_segment`는 CLAUDE.md 2.4 원칙(연차 직접 입력 배제)에 따라 자유 입력이
+    아니라 4개 세그먼트 중 하나만 허용한다: "1-3", "4-6", "7-10", "10+".
+    """
+
+    job_field: str | None
+    job_detail: str | None
+    years_segment: str | None
+
+
 def _connect() -> sqlite3.Connection:
     Path(settings.db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(settings.db_path)
@@ -70,6 +83,16 @@ def init_db() -> None:
                 skill_tags       TEXT NOT NULL,
                 confidence       REAL,
                 created_at       TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS profile (
+                id           INTEGER PRIMARY KEY CHECK (id = 1),
+                job_field    TEXT,
+                job_detail   TEXT,
+                years_segment TEXT
             )
             """
         )
@@ -193,6 +216,35 @@ def update_project(project_id: int, **fields) -> None:
             )
 
 
+def get_profile() -> Profile:
+    """온보딩 프로필을 반환한다. 아직 온보딩을 안 했으면 필드가 전부 None인 Profile.
+
+    (프로젝트/카드와 달리 "없으면 None"이 아니라 항상 Profile 객체를 반환한다 —
+    프론트가 "아직 값이 없다"와 "조회 자체가 실패했다"를 구분할 필요가 없게 한다.)
+    """
+    init_db()
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM profile WHERE id = 1").fetchone()
+    return _row_to_profile(row) if row else Profile(job_field=None, job_detail=None, years_segment=None)
+
+
+def save_profile(job_field: str | None, job_detail: str | None, years_segment: str | None) -> None:
+    """온보딩 프로필을 저장한다(싱글턴, upsert). 항상 세 필드 전체를 덮어쓴다."""
+    init_db()
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO profile (id, job_field, job_detail, years_segment)
+            VALUES (1, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                job_field = excluded.job_field,
+                job_detail = excluded.job_detail,
+                years_segment = excluded.years_segment
+            """,
+            (job_field, job_detail, years_segment),
+        )
+
+
 def load_seed_cards(path: str = "data/seed_cards.json") -> None:
     """시드 데이터(프로젝트+카드)를 DB에 투입한다. 데모/개발용.
 
@@ -245,4 +297,12 @@ def _row_to_project(row: sqlite3.Row) -> Project:
         started_at=row["started_at"],
         ended_at=row["ended_at"],
         is_current=bool(row["is_current"]),
+    )
+
+
+def _row_to_profile(row: sqlite3.Row) -> Profile:
+    return Profile(
+        job_field=row["job_field"],
+        job_detail=row["job_detail"],
+        years_segment=row["years_segment"],
     )

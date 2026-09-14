@@ -4,6 +4,8 @@ docs/05-api-contract.md 1~3, 8절의 필드명/모양을 그대로 따른다. �
 내부 dataclass(Card, Project, StarItem)와 1:1로 맞춰뒀으므로 `model_validate()`로
 (from_attributes=True) dataclass 인스턴스를 바로 변환할 수 있다.
 """
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict
 
 
@@ -140,3 +142,25 @@ class PushUnsubscribeRequest(BaseModel):
 
 class VapidPublicKeyResponse(BaseModel):
     public_key: str
+
+
+# 온보딩 프로필 (9/14 신규, docs/05-api-contract.md 9장).
+# 직군/연차는 자유 입력이 아니라 고정된 칩 세트다(Figma "2.0 목적지·푸시 설정" 화면,
+# CLAUDE.md 2.4: 연차 직접 입력 배제 — 세그먼트 4개로 충분). Literal로 강제하면 잘못된
+# 값이 스키마 단계에서 422로 걸러진다.
+JobField = Literal["개발", "기획·PM", "디자인", "마케팅", "영업", "데이터"]
+YearsSegment = Literal["1-3", "4-6", "7-10", "10+"]
+
+
+class ProfileResponse(_FromAttributes):
+    job_field: JobField | None
+    job_detail: str | None
+    years_segment: YearsSegment | None
+
+
+class ProfileUpdateRequest(BaseModel):
+    job_field: JobField
+    # 세부 직무는 직군에 따라 선택지가 달라지고(Figma엔 "개발" 하위만 구체적으로
+    # 나열돼 있음), 아직 모든 직군의 하위 칩 세트가 확정되지 않아 자유 문자열로 둔다.
+    job_detail: str | None = None
+    years_segment: YearsSegment

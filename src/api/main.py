@@ -4,7 +4,7 @@
 띄우고 nginx가 `/api/`를 여기로 프록시한다(tasks/track-d-deploy.md 3.2/3.4).
 인증 없음 — 해커톤 단일 유저 데모 전제(docs/05-api-contract.md).
 
-여기서 구현하는 라우터는 계약 문서 1~5, 7~8절(P0 + P1 대부분)이다. 6절(STT)만 보류
+여기서 구현하는 라우터는 계약 문서 1~5, 7~9절(P0 + P1/P2 대부분)이다. 6절(STT)만 보류
 중이다 — 9/13 실기기 음성 검증 없이 Web Speech API로 이식하기로 했으므로
 (docs/06-migration.md 2장, iOS Safari가 14.5부터 지원한다는 사전 조사 근거) 서버측
 STT 엔드포인트 자체가 당장은 불필요하다. 실기기에서 실패가 확인되면 그때 추가한다.
@@ -12,7 +12,7 @@ STT 엔드포인트 자체가 당장은 불필요하다. 실기기에서 실패�
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.api.routers import cards, health, jds, notion, projects, push, resume
+from src.api.routers import cards, health, jds, notion, profile, projects, push, resume
 from src.config import settings
 
 app = FastAPI(title="커리어 로그 API")
@@ -37,6 +37,7 @@ app.include_router(health.router, prefix="/api")
 app.include_router(jds.router, prefix="/api")
 app.include_router(notion.router, prefix="/api")
 app.include_router(push.router, prefix="/api")
+app.include_router(profile.router, prefix="/api")
 
 # --- 남은 P1 (docs/05-api-contract.md 6장) ---
 # TODO(6장 STT): POST /api/stt — 9/13 실기기 음성 검증에서 iOS Safari 실패가 실제로

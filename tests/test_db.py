@@ -229,3 +229,22 @@ def test_load_seed_cards_creates_projects_and_cards(tmp_path):
     assert len(a_cards) == 2
     # 시간차 페어(02.14 조치 + 03.02 결과)가 같은 프로젝트 안에 둘 다 존재해야 한다.
     assert {c.created_at for c in a_cards} == {"2023-02-14", "2023-03-02"}
+
+
+def test_get_profile_defaults_to_all_none_when_never_onboarded():
+    profile = db.get_profile()
+    assert profile == db.Profile(job_field=None, job_detail=None, years_segment=None)
+
+
+def test_save_and_get_profile_roundtrip():
+    db.save_profile(job_field="개발", job_detail="백엔드", years_segment="4-6")
+    profile = db.get_profile()
+    assert profile == db.Profile(job_field="개발", job_detail="백엔드", years_segment="4-6")
+
+
+def test_save_profile_overwrites_previous_value_singleton():
+    db.save_profile(job_field="개발", job_detail="백엔드", years_segment="1-3")
+    db.save_profile(job_field="디자인", job_detail=None, years_segment="7-10")
+
+    profile = db.get_profile()
+    assert profile == db.Profile(job_field="디자인", job_detail=None, years_segment="7-10")
