@@ -265,6 +265,26 @@ def get_card(user_id: int, card_id: int) -> Card | None:
     return _row_to_card(row) if row else None
 
 
+def update_card_tags(user_id: int, card_id: int, skill_tags: list[str]) -> Card | None:
+    """카드의 skill_tags를 통째로 덮어쓴다 (9/14 신규 — 카테고리 직접 수정).
+
+    LLM이 자동으로 뽑은 태그를 나중에(연 몇 회, `/stack`에서) 사람이 손으로 고칠 수
+    있게 하는 기능이다 — 매일 쓰는 입력 경로에는 선택지를 안 넣는다는 원칙(CLAUDE.md
+    2.1)과, 저장 시점엔 LLM/임베딩이 자동으로 분류한다는 원칙(2.3)은 그대로 유지하고,
+    "저장된 다음에 가끔 고쳐 쓰는" 별개의 경로로만 추가한다.
+
+    이 유저 소유가 아니거나 존재하지 않으면 아무것도 안 바꾸고 None을 반환한다
+    (다른 카드 함수들과 동일한 소유권 규칙).
+    """
+    init_db()
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE cards SET skill_tags = ? WHERE id = ? AND user_id = ?",
+            (json.dumps(skill_tags, ensure_ascii=False), card_id, user_id),
+        )
+    return get_card(user_id, card_id)
+
+
 def create_project(user_id: int, name: str, started_at: str) -> int:
     """새 프로젝트를 만들고 자동으로 그 유저의 현재(is_current) 프로젝트로 지정한다."""
     init_db()

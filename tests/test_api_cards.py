@@ -127,3 +127,37 @@ def test_delete_card_returns_204_and_removes_it(client, current_user_id):
 def test_delete_missing_card_still_returns_204(client, current_user_id):
     response = client.delete("/api/cards/9999")
     assert response.status_code == 204
+
+
+def test_patch_card_tags_updates_skill_tags(client, current_user_id):
+    """9/14 신규 — 카테고리(스킬 태그) 직접 수정. /stack에서 가끔 손으로 고치는 경로."""
+    with patch("src.parsing.parser._call_llm", return_value=MOCK_LLM_RESPONSE):
+        created = client.post("/api/cards", json={"raw_text": "결제 API 느려서 레디스 캐시 붙임"}).json()
+
+    response = client.patch(f"/api/cards/{created['id']}", json={"skill_tags": ["결제/정산"]})
+
+    assert response.status_code == 200
+    assert response.json()["skill_tags"] == ["결제/정산"]
+    # 재조회해도 반영돼야 한다.
+    cards = client.get("/api/cards").json()["cards"]
+    assert cards[0]["skill_tags"] == ["결제/정산"]
+
+
+def test_patch_missing_card_tags_returns_404(client, current_user_id):
+    response = client.patch("/api/cards/9999", json={"skill_tags": ["x"]})
+    assert response.status_code == 404
+
+
+def test_patch_another_users_card_tags_returns_404(client, current_user_id):
+    other_user_id = db.upsert_user("other-kakao-id", "다른유저", None, "2026-01-01T00:00:00")
+    other_card_id = db.save_card(
+        other_user_id, None,
+        ParsedEntry(raw_text="다른 유저 카드", refined_sentence="다른 유저 카드",
+                    skill_tags=["Redis"], confidence=0.5),
+        "2023-02-14",
+    )
+
+    response = client.patch(f"/api/cards/{other_card_id}", json={"skill_tags": ["가로채기"]})
+
+    assert response.status_code == 404
+    assert db.get_card(other_user_id, other_card_id).skill_tags == ["Redis"]

@@ -17,6 +17,16 @@ class CardCreateRequest(BaseModel):
     raw_text: str
 
 
+class CardTagsUpdateRequest(BaseModel):
+    """PATCH /api/cards/{id} — 카테고리(스킬 태그) 직접 수정 (9/14 신규).
+
+    이름/문장 등 다른 필드는 안 받는다 — 태그 수정만 지원(가끔 손보는 용도, CLAUDE.md 2.4
+    정신: 폴더 CRUD처럼 여기도 최소 기능만).
+    """
+
+    skill_tags: list[str]
+
+
 class CardResponse(_FromAttributes):
     id: int
     project_id: int | None

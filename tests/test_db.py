@@ -296,3 +296,28 @@ def test_save_profile_does_not_affect_another_users_profile(user_id):
 
     other_profile = db.get_profile(other_user_id)
     assert other_profile == db.Profile(job_field="디자인", job_detail=None, years_segment="10+")
+
+
+def test_update_card_tags_overwrites_skill_tags(user_id):
+    """9/14 신규 — 카테고리(스킬 태그) 직접 수정."""
+    card_id = db.save_card(user_id, None, _make_parsed(skill_tags=["Redis"]), "2023-02-14")
+
+    updated = db.update_card_tags(user_id, card_id, ["결제시스템", "성능최적화"])
+
+    assert updated is not None
+    assert updated.skill_tags == ["결제시스템", "성능최적화"]
+    assert db.get_card(user_id, card_id).skill_tags == ["결제시스템", "성능최적화"]
+
+
+def test_update_card_tags_returns_none_for_missing_card(user_id):
+    assert db.update_card_tags(user_id, 9999, ["x"]) is None
+
+
+def test_update_card_tags_does_not_affect_another_users_card(user_id):
+    other_user_id = db.upsert_user("other-kakao-id", "다른유저", None, "2026-01-01T00:00:00")
+    other_card_id = db.save_card(other_user_id, None, _make_parsed(skill_tags=["Redis"]), "2023-02-14")
+
+    result = db.update_card_tags(user_id, other_card_id, ["가로채기"])
+
+    assert result is None
+    assert db.get_card(other_user_id, other_card_id).skill_tags == ["Redis"]
