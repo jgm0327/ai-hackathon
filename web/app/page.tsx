@@ -1,8 +1,8 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import Link from "next/link";
 import { ProjectSwitcher } from "@/components/ProjectSwitcher";
-import { PushSetup } from "@/components/PushSetup";
 import { CardResultSkeleton } from "@/components/Skeleton";
 import { VoiceInput } from "@/components/VoiceInput";
 import { ApiError, Card, createCard } from "@/lib/api";
@@ -47,8 +47,18 @@ export default function HomePage() {
 
   return (
     <div className="flex flex-col gap-4 px-4 pt-4">
-      <ProjectSwitcher />
-      <PushSetup />
+      <div className="flex items-center justify-between">
+        <ProjectSwitcher />
+        {/* Figma "3.0 일지 기록 패드"의 "⚙ 설정 → 5.0" 링크 대응. 퇴근 알림/직군·연차는
+            연 1~3회만 건드리는 설정이라 /onboarding으로 분리해뒀다 (CLAUDE.md 2.1). */}
+        <Link
+          href="/onboarding"
+          aria-label="설정"
+          className="flex h-8 w-8 items-center justify-center rounded-full text-zinc-400 active:scale-[0.95]"
+        >
+          ⚙
+        </Link>
+      </div>
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-3">
         <textarea
