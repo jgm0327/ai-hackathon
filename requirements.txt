@@ -1,20 +1,26 @@
 # 버전 상향 참고(9/10): 원래 핀 버전들이 Python 3.14 로컬 개발 환경에서
 # numpy 빌드 실패 등으로 설치 자체가 안 돼서, 실제 설치 검증된 버전으로 올림.
 # 배포 환경(Track D)의 Python 버전이 다르면 재검증 필요.
-streamlit==1.63.0
-plotly==7.0.0
-langchain==0.3.7
 chromadb==1.5.9
 anthropic==1.4.0
 python-dotenv==1.2.3
 pytest==9.1.1
 requests==2.34.2
 
-# FastAPI 백엔드 (9/13 피벗, docs/02-architecture.md 4장). streamlit은 9/15 P0 게이트를
-# 통과해 Next.js 전환이 확정된 뒤에만 제거한다 (CLAUDE.md 11장, src/frontend/ 폴백 유지 조항).
+# FastAPI 백엔드 (9/13 피벗, docs/02-architecture.md 4장)
 fastapi==0.141.1
 uvicorn[standard]==0.52.4
 httpx==0.28.1  # FastAPI TestClient(내부적으로 httpx 사용)와 테스트용
+
+# 9/14 제거: streamlit, plotly, langchain.
+# - streamlit/plotly: Next.js(Track C) + Recharts 전환이 실제로 완료·검증됨(P0 게이트
+#   통과 + 음성/PWA/웹푸시 이식까지 끝남, CLAUDE.md 11장의 제거 조건 충족).
+#   src/frontend/(Streamlit 코드)는 참고용으로 파일은 남겨두지만, 이 requirements.txt로
+#   설치한 환경에서는 더 이상 실행되지 않는다 — docs/06-migration.md 3장이 애초에
+#   "버리는 것"으로 분류한 코드라 의도된 상태다.
+# - langchain: 애초에 어느 모듈에서도 import된 적이 없다(파싱은 parser.py/resume.py가
+#   처음부터 Anthropic/Ollama 직접 호출 방식으로 구현됨, tasks/track-a-prompt-engine.md
+#   구현 노트 참고). 기술 스택 초기 결정이 실제 구현과 달라져서 생긴 죽은 의존성.
 
 # Tier 2 푸시 알림 (선택, Track E)
 pywebpush==2.0.3
