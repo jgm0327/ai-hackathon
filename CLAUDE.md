@@ -126,16 +126,17 @@ OCI 단일 VM에 상주 프로세스로 올리므로 **콜드 스타트와 디�
 
 > **진행 현황 (2026-09-14 갱신)**: 아래 표는 9/13 피벗 시점 기준 계획이다. 실제로는
 > 같은 날 세션에서 P0 세 개(저장소/`build_resume()`/프로젝트 층+FastAPI)를 전부
-> 끝냈고, 9/14에 P1 라우터(JD 매칭/노션)와 Track E/F 이식(마이크/PWA/웹푸시)까지
-> 마쳤다. 남은 건 **Track D(OCI 배포)뿐**이며, 이건 실제 VM/도메인 접속 정보가
-> 있어야 진행 가능하다. 실기기(iPhone/Android) 검증은 여전히 미완료 — CLAUDE.md
-> 8장 참고. 세부 현황은 각 `tasks/track-*.md`의 체크리스트가 최신 진실이다.
+> 끝냈고, 9/14엔 P1 라우터(JD 매칭/노션 REST+MCP), Track E/F 이식(마이크/PWA/웹푸시),
+> 온보딩 프로필(`/onboarding`), Figma 디자인 반영(핵심 4화면)까지 마쳤다. 남은 건
+> **Track D(OCI 배포)뿐**이며, 이건 실제 VM/도메인 접속 정보가 있어야 진행 가능하다.
+> 실기기(iPhone/Android) 검증은 여전히 미완료 — CLAUDE.md 8장 참고. 세부 현황은 각
+> `tasks/track-*.md`의 체크리스트가 최신 진실이다.
 
 | 트랙 | 브랜치 | 범위 | 상태 |
 |---|---|---|---|
 | A | `track-a-prompt` | `parse_note()` + `build_resume()` | ✅ 완료 |
-| B | `track-b-agent` | 저장소 + 프로젝트 층 + Chroma + Notion + FastAPI | ✅ 완료 (Notion MCP는 선택, 미착수) |
-| C | `track-c-frontend` | Next.js — 화면 4개 + 마이크 + PWA + 웹푸시 | ✅ 구현 완료, **실기기 검증 대기** |
+| B | `track-b-agent` | 저장소 + 프로젝트 층 + Chroma + Notion(REST+MCP) + FastAPI + 온보딩 프로필 | ✅ 완료 |
+| C | `track-c-frontend` | Next.js — 화면 5개(+온보딩) + 마이크 + PWA + 웹푸시 + Figma 반영 | ✅ 완료, **실기기 검증 대기** |
 | D | `track-d-deploy` | OCI + nginx (Streamlit Cloud 폐기) | ⬜ 미착수 — VM 접속 정보 필요 |
 | E | `track-e-push` | 웹푸시 — 이식 완료 | ✅ 이식 완료, **실기기 수신 확인 대기** |
 | F | `track-f-voice` | 음성 입력 — 이식 완료 | ✅ 이식 완료, **iOS 실기기 검증 대기** |
