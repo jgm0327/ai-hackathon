@@ -21,6 +21,10 @@ CLAUDE.md 2.1 원칙("일상 입력 비용은 거의 0")에도 어긋난다. 대
 유사도 기반, CLAUDE.md 2.3)를 한 번 더 거쳐 기존 태그로 통일한다. LLM 호출이 아니라
 임베딩 조회라 매일 쓰는 경로에 부담을 주지 않는다(2.1). 기존에 저장된 카드는 소급
 적용되지 않는다 — 필요하면 별도 마이그레이션 스크립트로 처리할 것.
+
+**구현 노트 (9/14, 카카오 로그인 Phase B)**: 모든 함수가 `user_id`를 맨 앞 인자로
+받는다 — 호출부(라우터)가 `Depends(get_current_user)`로 받은 로그인 유저의 id를
+그대로 넘긴다. 이 모듈 자체는 "누가 로그인했는지" 판단하지 않는다(그건 라우터의 몫).
 """
 from datetime import date
 
@@ -30,8 +34,8 @@ from src.parsing.resume import StarItem, build_resume
 from src.storage.db import get_current_project, list_cards, save_card
 
 
-def run_pipeline(raw_text: str) -> dict:
-    """단일 낙서 문장을 받아 파싱하고 현재 프로젝트에 카드로 저장한다.
+def run_pipeline(user_id: int, raw_text: str) -> dict:
+    """단일 낙서 문장을 받아 파싱하고 그 유저의 현재 프로젝트에 카드로 저장한다.
 
     JD 매칭은 하지 않는다 (이직 준비 시점의 `build_career_doc()`으로 이동됨).
 
@@ -43,21 +47,21 @@ def run_pipeline(raw_text: str) -> dict:
     """
     parsed = parse_note(raw_text)
     parsed.skill_tags = canonicalize_tags(parsed.skill_tags)
-    current_project = get_current_project()
+    current_project = get_current_project(user_id)
     project_id = current_project.id if current_project else None
-    card_id = save_card(project_id, parsed, date.today().isoformat())
+    card_id = save_card(user_id, project_id, parsed, date.today().isoformat())
     return {"parsed": parsed, "card_id": card_id}
 
 
-def run_pipeline_batch(raw_texts: list[str]) -> list[dict]:
+def run_pipeline_batch(user_id: int, raw_texts: list[str]) -> list[dict]:
     """노션 동기화 등으로 여러 건을 한 번에 처리할 때 사용."""
-    return [run_pipeline(text) for text in raw_texts]
+    return [run_pipeline(user_id, text) for text in raw_texts]
 
 
-def build_career_doc(project_id: int, jd_text: str | None = None) -> list[StarItem]:
+def build_career_doc(user_id: int, project_id: int, jd_text: str | None = None) -> list[StarItem]:
     """한 프로젝트의 누적 카드를 모아 STAR 형식 경력기술서로 변환한다 (이직 준비 시점).
 
     jd_text가 주어지면 build_resume()이 해당 채용공고와 관련 있는 항목을 우선 배치한다.
     """
-    cards = list_cards(project_id)
+    cards = list_cards(user_id, project_id)
     return build_resume(cards, jd_text=jd_text)

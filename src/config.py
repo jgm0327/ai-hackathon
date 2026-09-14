@@ -54,9 +54,25 @@ class Settings:
     # 별도 클라우드 DB 불필요 (CLAUDE.md P0 1순위, 9/13 피벗).
     db_path: str = os.getenv("DB_PATH", "data/app.db")
     # FastAPI CORS 허용 origin. 콤마로 구분(예: "https://app.example.com,http://localhost:3000").
-    # 해커톤 단일 유저 데모 기본값은 "*"(전체 허용) — 인증이 없으므로(docs/05-api-contract.md)
-    # 배포 시엔 반드시 실제 프론트 origin으로 좁힐 것 (CLAUDE.md 9장: 하드코딩 금지).
-    cors_allowed_origins: str = os.getenv("CORS_ALLOWED_ORIGINS", "*")
+    # 9/14 카카오 로그인 도입으로 쿠키 기반 세션을 쓰게 되면서 기본값을 "*"로 둘 수 없게
+    # 됐다(자격증명 포함 요청엔 브라우저가 와일드카드 origin을 거부함) — 로컬 개발 기본값을
+    # 프론트 dev 서버 origin으로 좁혔다. 배포 시엔 반드시 실제 프론트 origin으로 바꿀 것
+    # (CLAUDE.md 9장: 하드코딩 금지 — 여전히 환경변수로 관리하니 원칙은 지켜짐).
+    cors_allowed_origins: str = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3001")
+
+    # --- 카카오 소셜 로그인 (9/14 신규) ---
+    # REST API 키/Redirect URI는 developers.kakao.com 앱 설정에서 그대로 복사해 넣는다.
+    # Client Secret은 콘솔에서 "사용함"으로 켰을 때만 필요(안 켰으면 빈 문자열로 둬도 됨).
+    kakao_rest_api_key: str = os.getenv("KAKAO_REST_API_KEY", "")
+    kakao_client_secret: str = os.getenv("KAKAO_CLIENT_SECRET", "")
+    # Kakao 콘솔에 등록한 값과 바이트 단위로 정확히 일치해야 한다(트레일링 슬래시 등 포함).
+    kakao_redirect_uri: str = os.getenv("KAKAO_REDIRECT_URI", "http://localhost:8000/api/auth/kakao/callback")
+    # 카카오 콜백 처리가 끝난 뒤 브라우저를 돌려보낼 프론트엔드 주소.
+    frontend_base_url: str = os.getenv("FRONTEND_BASE_URL", "http://localhost:3001")
+    # 세션 쿠키의 Secure 속성. 배포(HTTPS)는 true, 로컬 개발(http)은 false로 둘 것 —
+    # true인데 http로 서빙하면 브라우저가 쿠키 자체를 저장하지 않는다.
+    cookie_secure: bool = os.getenv("COOKIE_SECURE", "true").strip().lower() not in ("false", "0", "")
+    session_ttl_days: int = int(os.getenv("SESSION_TTL_DAYS", "30"))
 
 
 settings = Settings()

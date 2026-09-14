@@ -164,3 +164,15 @@ class ProfileUpdateRequest(BaseModel):
     # 나열돼 있음), 아직 모든 직군의 하위 칩 세트가 확정되지 않아 자유 문자열로 둔다.
     job_detail: str | None = None
     years_segment: YearsSegment
+
+
+class MeResponse(BaseModel):
+    """GET /api/auth/me — 프론트가 "로그인 상태인가"를 판단하는 유일한 창구(9/14 신규).
+
+    401이면 로그아웃 상태 — 프론트 `getMe()`는 그 경우 예외 대신 null을 반환하도록
+    감싼다(로그아웃은 에러가 아니라 정상적인 한 가지 상태이므로).
+    """
+
+    id: int
+    nickname: str | None
+    profile_image_url: str | None

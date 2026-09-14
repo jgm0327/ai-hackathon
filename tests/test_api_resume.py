@@ -2,6 +2,8 @@
 
 build_resume()의 LLM 호출부를 모킹해서 실제 API 호출 없이 build_career_doc() ->
 build_resume() 오케스트레이션과 응답 스키마 변환을 검증한다.
+
+DB 격리와 로그인 유저 오버라이드는 tests/conftest.py가 담당한다(9/14 카카오 로그인 Phase B).
 """
 import json
 from unittest.mock import patch
@@ -14,22 +16,14 @@ from src.parsing.parser import ParsedEntry
 from src.storage import db
 
 
-@pytest.fixture(autouse=True)
-def _isolated_db(monkeypatch, tmp_path):
-    class _FakeSettings:
-        db_path = str(tmp_path / "test.db")
-
-    monkeypatch.setattr(db, "settings", _FakeSettings())
-    yield
-
-
 @pytest.fixture
 def client():
     return TestClient(app)
 
 
-def _seed_cards(project_id: int) -> None:
+def _seed_cards(user_id: int, project_id: int) -> None:
     db.save_card(
+        user_id,
         project_id,
         ParsedEntry(
             raw_text="레디스 캐시 붙임",
@@ -40,6 +34,7 @@ def _seed_cards(project_id: int) -> None:
         "2023-02-14",
     )
     db.save_card(
+        user_id,
         project_id,
         ParsedEntry(
             raw_text="오류율 0.8% -> 0.3%",
@@ -69,9 +64,14 @@ _MOCK_LLM_RESPONSE = json.dumps(
 )
 
 
-def test_create_resume_merges_time_gap_pair(client):
-    project_id = db.create_project("A은행 차세대", "2023-02-01")
-    _seed_cards(project_id)
+def test_create_resume_requires_login(client):
+    response = client.post("/api/resume", json={"project_id": 1})
+    assert response.status_code == 401
+
+
+def test_create_resume_merges_time_gap_pair(client, current_user_id):
+    project_id = db.create_project(current_user_id, "A은행 차세대", "2023-02-01")
+    _seed_cards(current_user_id, project_id)
 
     with patch("src.parsing.resume._call_llm", return_value=_MOCK_LLM_RESPONSE):
         response = client.post("/api/resume", json={"project_id": project_id})
@@ -85,9 +85,9 @@ def test_create_resume_merges_time_gap_pair(client):
     assert item["source_dates"] == ["02.14", "03.02"]
 
 
-def test_create_resume_with_jd_text_passes_through(client):
-    project_id = db.create_project("A은행 차세대", "2023-02-01")
-    _seed_cards(project_id)
+def test_create_resume_with_jd_text_passes_through(client, current_user_id):
+    project_id = db.create_project(current_user_id, "A은행 차세대", "2023-02-01")
+    _seed_cards(current_user_id, project_id)
 
     with patch("src.parsing.resume._call_llm", return_value=_MOCK_LLM_RESPONSE) as mock_llm:
         response = client.post(
@@ -101,8 +101,8 @@ def test_create_resume_with_jd_text_passes_through(client):
     assert "백엔드 성능 최적화 경험자 우대" in called_prompt
 
 
-def test_create_resume_empty_project_returns_empty_items(client):
-    project_id = db.create_project("빈 프로젝트", "2023-02-01")
+def test_create_resume_empty_project_returns_empty_items(client, current_user_id):
+    project_id = db.create_project(current_user_id, "빈 프로젝트", "2023-02-01")
 
     response = client.post("/api/resume", json={"project_id": project_id})
 
@@ -110,10 +110,11 @@ def test_create_resume_empty_project_returns_empty_items(client):
     assert response.json() == {"items": []}
 
 
-def test_create_resume_never_fabricates_missing_result(client):
+def test_create_resume_never_fabricates_missing_result(client, current_user_id):
     """CLAUDE.md 2.2: 기록에 숫자가 없으면 result는 빈 문자열이어야 한다."""
-    project_id = db.create_project("온보딩", "2023-04-01")
+    project_id = db.create_project(current_user_id, "온보딩", "2023-04-01")
     db.save_card(
+        current_user_id,
         project_id,
         ParsedEntry(
             raw_text="신규 입사자 온보딩 문서 작성",
@@ -144,3 +145,17 @@ def test_create_resume_never_fabricates_missing_result(client):
         response = client.post("/api/resume", json={"project_id": project_id})
 
     assert response.json()["items"][0]["result"] == ""
+
+
+def test_create_resume_ignores_another_users_project_cards(client, current_user_id):
+    """소유권 강제 — 다른 유저의 project_id를 넣어도 그 사람 카드가 새어나오면 안 된다."""
+    other_user_id = db.upsert_user("other-kakao-id", "다른유저", None, "2026-01-01T00:00:00")
+    other_project_id = db.create_project(other_user_id, "다른 유저 프로젝트", "2023-02-01")
+    _seed_cards(other_user_id, other_project_id)
+
+    with patch("src.parsing.resume._call_llm", return_value=_MOCK_LLM_RESPONSE) as mock_llm:
+        response = client.post("/api/resume", json={"project_id": other_project_id})
+
+    assert response.status_code == 200
+    assert response.json() == {"items": []}
+    mock_llm.assert_not_called()  # 카드가 안 보이니 build_resume 자체가 호출되면 안 됨
