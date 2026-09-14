@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { ProjectSwitcher } from "@/components/ProjectSwitcher";
 import { SkeletonLine } from "@/components/Skeleton";
-import { ApiError, Card, StarItem, buildResume, deleteCard, listCards, updateCardTags } from "@/lib/api";
+import { ApiError, Card, StarItem, deleteCard, listCards, updateCardTags } from "@/lib/api";
+import { buildResumeCached } from "@/lib/resumeCache";
 import { useProjects } from "@/lib/useProjects";
 
 function formatCardDate(iso: string): string {
@@ -87,6 +88,13 @@ export default function StackPage() {
   // 세션 동안만 캐시(starGroups)해서, 껐다 켜도 재호출 안 한다. 프로젝트 단위로만
   // 의미가 있어서 "전체 프로젝트 보기"와 동시에 켤 수 없다(CLAUDE.md 3장: AI가 만든
   // 묶음은 DB에 저장하지 않는다 — 이 뷰도 매번 다시 계산만 하고 저장/관리 UI는 없다).
+  //
+  // **구현 노트 (9/14, LLM 호출 캐싱 추가)**: 위 세션 캐시는 새로고침하면 날아가서,
+  // 카드가 하나도 안 바뀌었어도 새로고침할 때마다 유료 LLM API를 다시 태우는 낭비가
+  // 있었다(사용자 지적). `buildResumeCached()`가 카드 id 목록을 키로 localStorage에
+  // 결과를 저장해두고, 카드 구성이 그대로면 재호출 없이 반환한다 — "그룹을 정식
+  // 데이터로 저장"하는 게 아니라 "동일 입력 재계산 방지"용 캐시라 3장 원칙(관리 UI
+  // 없이)은 그대로 유지된다. web/lib/resumeCache.ts 참고.
   const [groupedView, setGroupedView] = useState(false);
   const [starGroups, setStarGroups] = useState<StarItem[] | null>(null);
   const [groupsLoading, setGroupsLoading] = useState(false);
@@ -114,7 +122,7 @@ export default function StackPage() {
     setGroupsLoading(true);
     setGroupsError(null);
     try {
-      const items = await buildResume(currentProject.id);
+      const items = await buildResumeCached(currentProject.id, { cards });
       setStarGroups(items);
     } catch (err) {
       setGroupsError(err instanceof ApiError ? err.detail : "인과관계 분석에 실패했습니다.");
