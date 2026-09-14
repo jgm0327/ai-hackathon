@@ -7,6 +7,12 @@ interface VoiceInputProps {
   onTranscript: (text: string) => void;
   /** 부모가 이미 제출 처리 중이면(스켈레톤 표시 중) 마이크 버튼도 눌리지 않게 한다. */
   disabled?: boolean;
+  /**
+   * "labeled" — 텍스트 라벨이 붙은 알약 버튼(기존 기본값).
+   * "icon" — Figma "3.0 일지 기록 패드" 대응: 입력창 우하단에 얹는 원형 아이콘
+   * 버튼(`size-[40px]`), 라벨 없음. 인식/에러 상태 텍스트는 버튼 아래 작게 표시.
+   */
+  variant?: "labeled" | "icon";
 }
 
 /**
@@ -21,7 +27,7 @@ interface VoiceInputProps {
  * 텍스트 입력과 "같은 제출 경로"를 타야 하므로 이 컴포넌트 자신은 결과 카드/스켈레톤을
  * 렌더링하지 않는다 — 그건 부모(`app/page.tsx`)가 텍스트 제출과 동일하게 처리한다.
  */
-export function VoiceInput({ onTranscript, disabled = false }: VoiceInputProps) {
+export function VoiceInput({ onTranscript, disabled = false, variant = "labeled" }: VoiceInputProps) {
   // SSR과 첫 클라이언트 렌더를 일치시키기 위해 "지원됨"으로 시작하고, 마운트 후
   // 실제 지원 여부를 확인해 갱신한다 (하이드레이션 불일치 방지).
   const [supported, setSupported] = useState(true);
@@ -117,6 +123,34 @@ export function VoiceInput({ onTranscript, disabled = false }: VoiceInputProps) 
       <p className="text-xs text-zinc-400">
         이 브라우저는 음성 입력을 지원하지 않습니다 (Chrome 권장). 텍스트로 입력해 주세요.
       </p>
+    );
+  }
+
+  if (variant === "icon") {
+    return (
+      <div className="flex flex-col items-end gap-1">
+        <button
+          type="button"
+          onClick={handleClick}
+          disabled={disabled || listening}
+          aria-label={listening ? "듣고 있어요" : "음성 입력"}
+          className={`flex size-[40px] shrink-0 items-center justify-center rounded-full text-base active:scale-[0.95] disabled:opacity-50 ${
+            listening ? "bg-[#18181b] text-white" : "bg-[#f4f4f5] text-[#6b7280]"
+          }`}
+        >
+          <span aria-hidden>🎙️</span>
+        </button>
+
+        {listening && (
+          <p className="max-w-[220px] text-right text-[11px] text-[#a1a1aa]">
+            {interimText ? `인식 중: ${interimText}` : "듣고 있어요…"}
+          </p>
+        )}
+
+        {statusMessage && (
+          <p className="max-w-[220px] text-right text-[11px] text-red-600">{statusMessage}</p>
+        )}
+      </div>
     );
   }
 

@@ -201,6 +201,31 @@ export function buildResume(projectId: number, jdText?: string): Promise<StarIte
 }
 
 // ---------------------------------------------------------------------------
+// 5. 노션 (읽기 전용) — docs/05-api-contract.md §5
+// ---------------------------------------------------------------------------
+
+export interface NotionSyncResult {
+  imported: number;
+  cards: Card[];
+}
+
+/**
+ * 노션 페이지를 가져와 카드로 저장한다. 매일 쓰는 경로가 아니라(연 1회 수준의
+ * 설정에 가까움) 로딩이 길어도 무방하다 — 임포트되는 페이지 전부를 그때그때
+ * 파싱하므로 느릴 수 있다 (`docs/05-api-contract.md` §5). `page_id`는 선택 —
+ * 페이지 선택 UI는 만들지 않는다 (CLAUDE.md 2.4).
+ */
+export function syncNotion(userToken: string, pageId?: string): Promise<NotionSyncResult> {
+  return request<NotionSyncResult>("/notion/sync", {
+    method: "POST",
+    body: JSON.stringify({
+      user_token: userToken,
+      ...(pageId ? { page_id: pageId } : {}),
+    }),
+  });
+}
+
+// ---------------------------------------------------------------------------
 // 7. 웹푸시 — docs/05-api-contract.md §7
 // ---------------------------------------------------------------------------
 
