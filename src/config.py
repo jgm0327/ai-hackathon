@@ -35,6 +35,11 @@ class Settings:
     saramin_api_key: str = os.getenv("SARAMIN_API_KEY", "")
     chroma_persist_dir: str = os.getenv("CHROMA_PERSIST_DIR", "./.chroma")
     mock_jd_dir: str = os.getenv("MOCK_JD_DIR", "data/mock_jds")
+    # 태그 캐노니컬라이제이션(신규) — "성능최적화"/"시스템최적화"처럼 LLM이 매번 다르게
+    # 뽑아내는 동의어 태그를 임베딩 유사도로 통일한다(CLAUDE.md 2.3: 분류는 임베딩).
+    # 코사인 거리 기준값 — 낮을수록 "확실히 같은 개념"일 때만 합친다. 시드 데이터로
+    # 수동 검증한 값이라 데이터가 늘어나면 재튜닝 필요(tasks/track-b-agent-pipeline.md 참고).
+    tag_canonicalize_threshold: float = float(os.getenv("TAG_CANONICALIZE_THRESHOLD", "0.15"))
     # Tier 2 푸시 알림(Track E). PRIVATE는 서버(push_sender.py)만, PUBLIC은 프론트 JS의
     # pushManager.subscribe(applicationServerKey=...)에 그대로 노출해도 안전(공개키라서 그렇다).
     vapid_private_key: str = os.getenv("VAPID_PRIVATE_KEY", "")

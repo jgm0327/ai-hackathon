@@ -25,6 +25,18 @@ def _isolated_db(monkeypatch, tmp_path):
     yield
 
 
+@pytest.fixture(autouse=True)
+def _no_op_canonicalize(monkeypatch):
+    """태그 캐노니컬라이제이션 자체(임베딩/Chroma)는 test_tag_canonicalizer.py가 검증한다.
+
+    여기서는 파이프라인 오케스트레이션 로직만 격리해서 보고 싶으므로 항등 함수로
+    대체한다 — 실제 임베딩 함수를 그대로 쓰면 매 테스트가 Chroma 기본 임베딩(다운로드
+    필요)에 의존하게 돼서 test_vectorstore.py와 동일한 이유로 모킹한다.
+    """
+    monkeypatch.setattr("src.agent.pipeline.canonicalize_tags", lambda tags: tags)
+    yield
+
+
 def _make_parsed(raw_text="결제 버그 고침") -> ParsedEntry:
     return ParsedEntry(
         raw_text=raw_text,
@@ -55,6 +67,20 @@ def test_run_pipeline_auto_assigns_new_card_to_current_project():
     cards = db.list_cards(project_id)
     assert len(cards) == 1
     assert cards[0].project_id == project_id
+
+
+def test_run_pipeline_canonicalizes_tags_before_saving():
+    """save_card()로 넘기는 skill_tags는 parse_note() 원본이 아니라 canonicalize_tags()
+    결과여야 한다 — 태그 표기 통일(9/14 신규)이 실제로 저장 경로에 걸려 있는지 확인."""
+    with patch("src.agent.pipeline.parse_note", return_value=_make_parsed()):
+        with patch(
+            "src.agent.pipeline.canonicalize_tags", return_value=["결제/정산"]
+        ) as mock_canonicalize:
+            result = run_pipeline("결제 버그 고침")
+
+    mock_canonicalize.assert_called_once_with(["결제시스템"])
+    assert result["parsed"].skill_tags == ["결제/정산"]
+    assert db.list_cards()[0].skill_tags == ["결제/정산"]
 
 
 def test_run_pipeline_does_not_call_match_jds():

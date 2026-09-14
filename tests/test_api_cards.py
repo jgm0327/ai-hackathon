@@ -33,6 +33,17 @@ def _isolated_db(monkeypatch, tmp_path):
     yield
 
 
+@pytest.fixture(autouse=True)
+def _no_op_canonicalize(monkeypatch):
+    """태그 캐노니컬라이제이션(임베딩/Chroma)은 test_tag_canonicalizer.py가 검증한다.
+
+    여기서는 API 레이어만 격리해서 보고 싶으므로 항등 함수로 대체한다 — 안 그러면
+    이 테스트들이 실제 임베딩 provider(로컬 Ollama 등)에 의존하게 된다.
+    """
+    monkeypatch.setattr("src.agent.pipeline.canonicalize_tags", lambda tags: tags)
+    yield
+
+
 @pytest.fixture
 def client():
     return TestClient(app)
