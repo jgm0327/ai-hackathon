@@ -76,7 +76,7 @@ export default function StackPage() {
         <Link
           href="/onboarding"
           aria-label="설정"
-          className="flex size-[26px] items-center justify-center rounded-full bg-[#f4f4f5] text-xs text-[#6b7280] active:scale-[0.95]"
+          className="flex size-[26px] items-center justify-center rounded-full bg-[#f4f4f5] text-xs text-[#6b7280] transition-colors hover:bg-[#e4e4e7] active:scale-[0.95]"
         >
           ⚙
         </Link>
@@ -87,10 +87,10 @@ export default function StackPage() {
           <button
             type="button"
             onClick={() => setActiveTag(null)}
-            className={`rounded-full px-3 py-[7px] text-[11px] font-medium ${
+            className={`rounded-full px-3 py-[7px] text-[11px] font-medium transition-colors ${
               activeTag === null
-                ? "border border-black bg-black text-white"
-                : "border border-[#e5e7eb] bg-white text-[#6b7280]"
+                ? "border border-black bg-black text-white hover:bg-zinc-800"
+                : "border border-[#e5e7eb] bg-white text-[#6b7280] hover:bg-zinc-50"
             }`}
           >
             전체
@@ -100,10 +100,10 @@ export default function StackPage() {
               key={tag}
               type="button"
               onClick={() => setActiveTag(tag)}
-              className={`rounded-full px-3 py-[7px] text-[11px] font-medium ${
+              className={`rounded-full px-3 py-[7px] text-[11px] font-medium transition-colors ${
                 activeTag === tag
-                  ? "border border-black bg-black text-white"
-                  : "border border-[#e5e7eb] bg-white text-[#6b7280]"
+                  ? "border border-black bg-black text-white hover:bg-zinc-800"
+                  : "border border-[#e5e7eb] bg-white text-[#6b7280] hover:bg-zinc-50"
               }`}
             >
               {tag}
@@ -181,7 +181,7 @@ export default function StackPage() {
       <div className="pt-2 pb-4">
         <Link
           href="/resume"
-          className="flex w-full items-center justify-center rounded-[14px] bg-black py-[17px] text-[15px] font-semibold text-white active:scale-[0.99]"
+          className="flex w-full items-center justify-center rounded-[14px] bg-black py-[17px] text-[15px] font-semibold text-white transition-colors hover:bg-zinc-800 active:scale-[0.99]"
         >
           마스터 경력기술서 초안 짜기
         </Link>
