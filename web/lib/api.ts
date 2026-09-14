@@ -36,7 +36,14 @@ export interface Project {
 /**
  * `result`는 빈 문자열일 수 있다 — 기록에 숫자가 없으면 AI가 지어내지 않고
  * 비워서 반환한다 (CLAUDE.md 2.2). 절대 "결과 없음"으로 렌더링하지 말 것.
- * `source_dates`는 항상 배열이다 (빈 배열일 수는 있어도 undefined는 아님).
+ * `source_dates`/`source_card_ids`는 항상 배열이다 (빈 배열일 수는 있어도 undefined는 아님).
+ *
+ * `source_dates`와 `source_card_ids`는 역할이 다르다 (9/14 신규 필드,
+ * docs/05-api-contract.md §3 참고). `source_dates`는 화면 표시용(날짜 문자열,
+ * 같은 날짜 카드가 여러 장이면 중복될 수 있음)이고, `source_card_ids`는 실제
+ * 카드를 정확히 가리키는 식별자다. **카드와 매칭하는 로직은 반드시
+ * `source_card_ids`로 할 것** — 날짜 매칭은 같은 날짜에 카드가 여러 장 있을 때
+ * 무관한 카드까지 같이 묶이는 버그가 있다(실제로 발견/수정됨).
  */
 export interface StarItem {
   title: string;
@@ -46,6 +53,7 @@ export interface StarItem {
   action: string;
   result: string;
   source_dates: string[];
+  source_card_ids: number[];
 }
 
 export interface HealthStatus {

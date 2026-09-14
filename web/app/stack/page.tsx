@@ -22,13 +22,16 @@ interface CardGroup {
 }
 
 /**
- * STAR 항목의 `source_dates`를 카드의 날짜(MM.DD)와 매칭해서 "인과관계로 묶인 카드
+ * STAR 항목의 `source_card_ids`를 카드의 `id`와 매칭해서 "인과관계로 묶인 카드
  * 그룹"을 계산한다 (9/14 신규 — DB에 저장하지 않고 매번 다시 계산, CLAUDE.md 3장).
  *
- * `source_dates`가 1개뿐인 항목은 독립 카드이므로 그룹으로 취급하지 않는다. 날짜가
- * MM.DD 단위(연도 없음)라 같은 날짜에 카드가 여러 장 있으면 전부 한 그룹으로 묶일 수
- * 있다 — build_resume()/source_dates의 기존 한계를 그대로 물려받는 것이지 여기서
- * 새로 생기는 문제는 아니다.
+ * **구현 노트 (9/14, 날짜 매칭 → ID 매칭 전환)**: 원래 `source_dates`(MM.DD 문자열)로
+ * 매칭했는데, 같은 날짜에 카드가 여러 장 있으면 무관한 카드까지 같이 묶이는 버그가
+ * 실측으로 발견됐다(B은행 계정계 프로젝트, docs/05-api-contract.md §3 참고). 카드
+ * `id`는 절대 겹치지 않으므로 `source_card_ids`로 매칭하면 이 문제가 구조적으로
+ * 사라진다.
+ *
+ * `source_card_ids`가 1개뿐인 항목은 독립 카드이므로 그룹으로 취급하지 않는다.
  */
 function groupCardsByStarItems(
   cards: Card[],
@@ -36,10 +39,13 @@ function groupCardsByStarItems(
 ): { groups: CardGroup[]; ungrouped: Card[] } {
   const usedCardIds = new Set<number>();
   const groups: CardGroup[] = [];
+  const cardsById = new Map(cards.map((c) => [c.id, c]));
 
   for (const item of starItems) {
-    if (item.source_dates.length < 2) continue;
-    const matched = cards.filter((c) => item.source_dates.includes(formatCardDate(c.created_at)));
+    if (item.source_card_ids.length < 2) continue;
+    const matched = item.source_card_ids
+      .map((id) => cardsById.get(id))
+      .filter((c): c is Card => c !== undefined);
     if (matched.length < 2) continue;
     const sorted = [...matched].sort((a, b) => a.created_at.localeCompare(b.created_at));
     const [parent, ...children] = sorted;
