@@ -162,3 +162,74 @@ def test_create_resume_ignores_another_users_project_cards(client, current_user_
     assert response.status_code == 200
     assert response.json() == {"items": []}
     mock_llm.assert_not_called()  # 카드가 안 보이니 build_resume 자체가 호출되면 안 됨
+
+
+# --- GET/PUT /api/resume/draft (9/14 신규) ---
+
+
+def test_get_resume_draft_requires_login(client):
+    response = client.get("/api/resume/draft", params={"project_id": 1})
+    assert response.status_code == 401
+
+
+def test_put_resume_draft_requires_login(client):
+    response = client.put("/api/resume/draft", json={"project_id": 1, "content": "x"})
+    assert response.status_code == 401
+
+
+def test_get_resume_draft_returns_null_when_never_saved(client, current_user_id):
+    project_id = db.create_project(current_user_id, "A은행 차세대", "2023-02-01")
+
+    response = client.get("/api/resume/draft", params={"project_id": project_id})
+
+    assert response.status_code == 200
+    assert response.json() == {"project_id": project_id, "content": None, "updated_at": None}
+
+
+def test_put_then_get_resume_draft_roundtrip(client, current_user_id):
+    project_id = db.create_project(current_user_id, "A은행 차세대", "2023-02-01")
+
+    put_response = client.put(
+        "/api/resume/draft",
+        json={"project_id": project_id, "content": "# 결제 API 성능 개선\n직접 고친 내용"},
+    )
+    assert put_response.status_code == 200
+    body = put_response.json()
+    assert body["content"] == "# 결제 API 성능 개선\n직접 고친 내용"
+    assert body["updated_at"]  # 타임스탬프가 채워져 있어야 함
+
+    get_response = client.get("/api/resume/draft", params={"project_id": project_id})
+    assert get_response.json()["content"] == "# 결제 API 성능 개선\n직접 고친 내용"
+
+
+def test_put_resume_draft_overwrites_previous_save(client, current_user_id):
+    project_id = db.create_project(current_user_id, "A은행 차세대", "2023-02-01")
+
+    client.put("/api/resume/draft", json={"project_id": project_id, "content": "v1"})
+    client.put("/api/resume/draft", json={"project_id": project_id, "content": "v2"})
+
+    response = client.get("/api/resume/draft", params={"project_id": project_id})
+    assert response.json()["content"] == "v2"
+
+
+def test_put_resume_draft_rejects_project_not_owned_by_user(client, current_user_id):
+    other_user_id = db.upsert_user("other-kakao-id", "다른유저", None, "2026-01-01T00:00:00")
+    other_project_id = db.create_project(other_user_id, "다른 유저 프로젝트", "2023-02-01")
+
+    response = client.put(
+        "/api/resume/draft", json={"project_id": other_project_id, "content": "가로채기 시도"}
+    )
+
+    assert response.status_code == 404
+    assert db.get_resume_draft(other_user_id, other_project_id) is None
+
+
+def test_get_resume_draft_does_not_leak_another_users_draft(client, current_user_id):
+    other_user_id = db.upsert_user("other-kakao-id", "다른유저", None, "2026-01-01T00:00:00")
+    other_project_id = db.create_project(other_user_id, "다른 유저 프로젝트", "2023-02-01")
+    db.save_resume_draft(other_user_id, other_project_id, "다른 유저 초안", "2026-09-14T00:00:00")
+
+    response = client.get("/api/resume/draft", params={"project_id": other_project_id})
+
+    assert response.status_code == 200
+    assert response.json() == {"project_id": other_project_id, "content": None, "updated_at": None}

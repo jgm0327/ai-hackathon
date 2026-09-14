@@ -66,6 +66,23 @@ class Project:
 
 
 @dataclass
+class ResumeDraft:
+    """유저가 직접 손본 경력기술서 초안 (9/14 신규).
+
+    `build_resume()`의 AI 초안 자체(구조화된 StarItem 목록)는 CLAUDE.md 3장에 따라
+    여전히 저장하지 않는다 — 저장하는 건 그것과 다른 것으로, "유저가 그 초안을
+    가져다 직접 고친 자유 텍스트(마크다운)"다. 한 번 고치기 시작하면 카드 구조와는
+    더 이상 엮여 있을 필요가 없는 독립된 문서라(카드가 바뀌어도 재검증/재동기화할
+    필요 없음), 3장이 막았던 "AI 그룹핑을 정식 데이터로 저장" 문제가 여기선 생기지
+    않는다. 프로젝트당 1개(최신 저장본만 유지, 버전 관리 없음 — 간단한 버전).
+    """
+
+    project_id: int
+    content: str
+    updated_at: str
+
+
+@dataclass
 class Profile:
     """온보딩에서 받는 유저 프로필 — 싱글턴(단일 유저 데모 전제, 인증 없음).
 
@@ -144,6 +161,16 @@ def init_db() -> None:
                 job_field     TEXT,
                 job_detail    TEXT,
                 years_segment TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS resume_drafts (
+                project_id INTEGER PRIMARY KEY REFERENCES projects(id),
+                user_id    INTEGER NOT NULL REFERENCES users(id),
+                content    TEXT NOT NULL,
+                updated_at TEXT NOT NULL
             )
             """
         )
@@ -372,6 +399,52 @@ def update_project(user_id: int, project_id: int, **fields) -> None:
             )
 
 
+def get_resume_draft(user_id: int, project_id: int) -> ResumeDraft | None:
+    """저장된 초안이 없거나, project_id가 이 유저 소유가 아니면 None을 반환한다
+    (다른 카드/프로필 함수들과 동일한 소유권 규칙 — 존재 여부 자체를 흘리지 않는다)."""
+    init_db()
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT d.* FROM resume_drafts d
+            JOIN projects p ON p.id = d.project_id
+            WHERE d.project_id = ? AND p.user_id = ?
+            """,
+            (project_id, user_id),
+        ).fetchone()
+    return _row_to_resume_draft(row) if row else None
+
+
+def save_resume_draft(user_id: int, project_id: int, content: str, now: str) -> ResumeDraft | None:
+    """초안을 저장한다(프로젝트당 1개, upsert). project_id가 이 유저 소유가 아니면
+    아무것도 저장하지 않고 None을 반환한다.
+
+    `resume_drafts.project_id`가 PK라, user_id 조건 없이 그냥 UPSERT하면 다른
+    유저의 project_id를 넘겼을 때 그 프로젝트의 기존 초안을 덮어쓸 수 있다 —
+    그래서 INSERT 전에 반드시 소유권을 먼저 확인한다(`update_project`의
+    `WHERE user_id = ?` 가드와 같은 목적, PK 충돌 때문에 그 패턴을 그대로 못 써서
+    여기선 사전 체크로 대신한다).
+    """
+    init_db()
+    with _connect() as conn:
+        owns = conn.execute(
+            "SELECT 1 FROM projects WHERE id = ? AND user_id = ?", (project_id, user_id)
+        ).fetchone()
+        if not owns:
+            return None
+        conn.execute(
+            """
+            INSERT INTO resume_drafts (project_id, user_id, content, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(project_id) DO UPDATE SET
+                content = excluded.content,
+                updated_at = excluded.updated_at
+            """,
+            (project_id, user_id, content, now),
+        )
+    return ResumeDraft(project_id=project_id, content=content, updated_at=now)
+
+
 def get_profile(user_id: int) -> Profile:
     """그 유저의 온보딩 프로필을 반환한다. 아직 온보딩을 안 했으면 필드가 전부 None인 Profile.
 
@@ -475,6 +548,14 @@ def _row_to_project(row: sqlite3.Row) -> Project:
         started_at=row["started_at"],
         ended_at=row["ended_at"],
         is_current=bool(row["is_current"]),
+    )
+
+
+def _row_to_resume_draft(row: sqlite3.Row) -> ResumeDraft:
+    return ResumeDraft(
+        project_id=row["project_id"],
+        content=row["content"],
+        updated_at=row["updated_at"],
     )
 
 

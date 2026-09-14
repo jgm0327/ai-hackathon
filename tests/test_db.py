@@ -321,3 +321,54 @@ def test_update_card_tags_does_not_affect_another_users_card(user_id):
 
     assert result is None
     assert db.get_card(other_user_id, other_card_id).skill_tags == ["Redis"]
+
+
+# --- 경력기술서 초안 저장 (9/14 신규) ---
+
+
+def test_get_resume_draft_returns_none_when_never_saved(user_id):
+    project_id = db.create_project(user_id, "A은행 차세대", "2023-02-01")
+    assert db.get_resume_draft(user_id, project_id) is None
+
+
+def test_save_and_get_resume_draft_roundtrip(user_id):
+    project_id = db.create_project(user_id, "A은행 차세대", "2023-02-01")
+
+    saved = db.save_resume_draft(user_id, project_id, "# 결제 API 성능 개선\n...", "2026-09-14T00:00:00")
+
+    assert saved is not None
+    assert saved.content == "# 결제 API 성능 개선\n..."
+    fetched = db.get_resume_draft(user_id, project_id)
+    assert fetched is not None
+    assert fetched.content == "# 결제 API 성능 개선\n..."
+    assert fetched.updated_at == "2026-09-14T00:00:00"
+
+
+def test_save_resume_draft_overwrites_previous_content_singleton_per_project(user_id):
+    """프로젝트당 초안은 1개만 유지된다(upsert) — 여러 버전을 쌓지 않는다."""
+    project_id = db.create_project(user_id, "A은행 차세대", "2023-02-01")
+
+    db.save_resume_draft(user_id, project_id, "초안 v1", "2026-09-14T00:00:00")
+    db.save_resume_draft(user_id, project_id, "초안 v2", "2026-09-14T00:01:00")
+
+    fetched = db.get_resume_draft(user_id, project_id)
+    assert fetched.content == "초안 v2"
+    assert fetched.updated_at == "2026-09-14T00:01:00"
+
+
+def test_save_resume_draft_rejects_project_not_owned_by_user(user_id):
+    other_user_id = db.upsert_user("other-kakao-id", "다른유저", None, "2026-01-01T00:00:00")
+    other_project_id = db.create_project(other_user_id, "다른유저 프로젝트", "2023-01-01")
+
+    result = db.save_resume_draft(user_id, other_project_id, "가로채기 시도", "2026-09-14T00:00:00")
+
+    assert result is None
+    assert db.get_resume_draft(other_user_id, other_project_id) is None
+
+
+def test_get_resume_draft_does_not_leak_another_users_draft(user_id):
+    other_user_id = db.upsert_user("other-kakao-id", "다른유저", None, "2026-01-01T00:00:00")
+    other_project_id = db.create_project(other_user_id, "다른유저 프로젝트", "2023-01-01")
+    db.save_resume_draft(other_user_id, other_project_id, "다른 유저 초안", "2026-09-14T00:00:00")
+
+    assert db.get_resume_draft(user_id, other_project_id) is None
