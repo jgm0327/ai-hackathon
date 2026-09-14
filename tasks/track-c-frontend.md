@@ -94,8 +94,16 @@ public/service-worker.js → 루트 scope 등록
       표시, `source_dates` 토글("이 문장의 근거") 포함, 항목별/전체 클립보드 복사 버튼 포함
 - [x] `/projects` 목록 + 생성 — `web/app/projects/page.tsx` (이름+시작일만, 폴더 CRUD
       고도화 없음)
-- [ ] `/onboarding` (P2) — 이번 세션 범위 밖. 백엔드 계약(현재 직무/목표 직무/연차
-      세그먼트 저장 방식)이 아직 안 고정돼 있어 후속 세션에서 진행
+- [x] `/onboarding` (P2, 9/14 3번째 세션) — `web/app/onboarding/page.tsx`. 백엔드
+      계약(`docs/05-api-contract.md` §9, `GET/PUT /api/profile`)이 확정돼 진행함.
+      직군(6개 칩, 단일 선택) → "개발" 선택 시 세부 직무 칩 노출 → 연차(4개 세그먼트) →
+      퇴근 알림(기존 `<PushSetup />` 재사용) → 저장 후 `/`로 이동. 직군/연차는 자유
+      입력이 아니라 고정 칩만 받는다(2.4) — 서버가 `Literal`로 다시 한번 강제.
+      `<PushSetup />`을 입력 화면(`/`)에서 이 화면으로 옮겼다 — Figma "3.0" 화면엔
+      원래 없던 요소였고, 연 1~3회만 건드리는 설정을 매일 쓰는 화면에 상시 노출할
+      이유가 없다(2.1). `/`에는 대신 "⚙ 설정" 링크만 남겨 `/onboarding`으로 연결.
+      **미완료**: 최초 방문 시 자동으로 이 화면으로 보내는 온보딩 게이팅은 넣지
+      않음(요청 범위 밖) — 지금은 `/`의 설정 링크로만 진입 가능
 - [x] 마이크 이식 (9/13, 2번째 세션) — `web/components/VoiceInput.tsx`
       (`docs/06-migration.md` §2.1). `src/frontend/components/voice_input.py`의 JS
       로직(`lang="ko-KR"`, `continuous=false`, `interimResults=true`, 버튼 클릭 안에서

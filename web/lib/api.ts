@@ -69,6 +69,23 @@ export interface UpdateProjectPatch {
   ended_at?: string;
 }
 
+/** 고정 칩 세트 — 자유 입력이 아니다 (CLAUDE.md 2.4, `docs/05-api-contract.md` §9). */
+export const JOB_FIELDS = ["개발", "기획·PM", "디자인", "마케팅", "영업", "데이터"] as const;
+export type JobField = (typeof JOB_FIELDS)[number];
+
+export const YEARS_SEGMENTS = ["1-3", "4-6", "7-10", "10+"] as const;
+export type YearsSegment = (typeof YEARS_SEGMENTS)[number];
+
+/** "개발" 직군 하위 세부 직무 — Figma에 구체적으로 나온 유일한 직군이라 여기서만 칩으로 고정한다.
+ * 다른 직군은 `job_detail`을 자유 입력(또는 생략)으로 받는다. */
+export const DEV_JOB_DETAILS = ["백엔드", "프론트엔드", "안드로이드", "iOS", "DevOps", "데이터엔지니어"] as const;
+
+export interface Profile {
+  job_field: JobField | null;
+  job_detail: string | null;
+  years_segment: YearsSegment | null;
+}
+
 // ---------------------------------------------------------------------------
 // 요청 래퍼
 // ---------------------------------------------------------------------------
@@ -218,4 +235,27 @@ export function unsubscribePush(endpoint: string): Promise<void> {
 
 export function getHealth(): Promise<HealthStatus> {
   return request<HealthStatus>("/health");
+}
+
+// ---------------------------------------------------------------------------
+// 9. 온보딩 프로필 — docs/05-api-contract.md §9 (P2, 싱글턴 — 로그인 없음)
+// ---------------------------------------------------------------------------
+
+export function getProfile(): Promise<Profile> {
+  return request<Profile>("/profile");
+}
+
+export function updateProfile(
+  jobField: JobField,
+  yearsSegment: YearsSegment,
+  jobDetail?: string,
+): Promise<Profile> {
+  return request<Profile>("/profile", {
+    method: "PUT",
+    body: JSON.stringify({
+      job_field: jobField,
+      years_segment: yearsSegment,
+      ...(jobDetail ? { job_detail: jobDetail } : {}),
+    }),
+  });
 }
