@@ -57,3 +57,18 @@ def test_parse_note_raises_after_two_consecutive_failures():
         with pytest.raises(json.JSONDecodeError):
             parse_note("결제 터진 거 막음")
         assert mock_llm.call_count == 2
+
+
+def test_parse_note_strips_markdown_code_fence():
+    """LLM이 JSON을 ```json ... ``` 코드 펜스로 감싸서 반환해도 정상 파싱해야 한다.
+
+    9/14 실측 재현: Claude(claude-sonnet-5)가 실제로 이 형태로 응답해서
+    json.loads()가 `Expecting value: line 1 column 1`로 죽고 POST /api/resume이
+    500이 되는 걸 확인했다(parse_note()도 동일한 _call_llm -> json.loads() 경로를
+    쓰므로 같은 버그에 걸림).
+    """
+    fenced = "```json\n" + MOCK_RESPONSES["결제 터진 거 막음"] + "\n```"
+    with patch("src.parsing.parser._call_llm", return_value=fenced) as mock_llm:
+        result = parse_note("결제 터진 거 막음")
+        assert mock_llm.call_count == 1  # 재시도 없이 첫 시도에 바로 성공해야 함
+        assert result.skill_tags == ["장애대응", "결제시스템"]

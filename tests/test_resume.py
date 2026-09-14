@@ -216,3 +216,24 @@ def test_build_resume_raises_after_two_consecutive_failures():
         with pytest.raises(json.JSONDecodeError):
             build_resume(cards)
         assert mock_llm.call_count == 2
+
+
+def test_build_resume_strips_markdown_code_fence():
+    """LLM이 JSON을 ```json ... ``` 코드 펜스로 감싸서 반환해도 정상 파싱해야 한다.
+
+    9/14 실측 재현: /resume에서 "경력기술서 만들기"를 눌렀을 때 Claude가 실제로 이
+    형태로 응답해서 json.loads()가 죽고 POST /api/resume이 500이 되는 걸 확인했다
+    (src/parsing/parser.py의 _strip_code_fence를 여기서도 재사용해서 고침).
+    """
+    cards = [_card(1, "2023-02-14", "결제 API에 Redis 캐싱 도입")]
+    valid_response = _llm_json([{
+        "title": "결제 API 성능 개선", "period": "02.14",
+        "situation": "s", "task": "t", "action": "a", "result": "",
+        "source_indices": [1],
+    }])
+    fenced = "```json\n" + valid_response + "\n```"
+    with patch("src.parsing.resume._call_llm", return_value=fenced) as mock_llm:
+        result = build_resume(cards)
+        assert mock_llm.call_count == 1  # 재시도 없이 첫 시도에 바로 성공해야 함
+        assert len(result) == 1
+        assert result[0].source_card_ids == [1]

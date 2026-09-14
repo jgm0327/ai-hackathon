@@ -33,6 +33,7 @@ import anthropic
 import requests
 
 from src.config import settings
+from src.parsing.parser import _strip_code_fence
 from src.storage.db import Card
 
 _SYSTEM_PROMPT = """\
@@ -124,7 +125,10 @@ def build_resume(cards: list[Card], jd_text: str | None = None) -> list[StarItem
     for attempt in range(2):
         raw_response = _call_llm(user_prompt)
         try:
-            data = json.loads(raw_response)
+            # LLM이 JSON을 마크다운 코드 펜스로 감싸서 반환하는 경우가 있다 — 9/14
+            # 실제로 Claude가 이렇게 응답해서 json.loads()가 죽었다(parser.py의 동일
+            # 버그/수정 참고, `_strip_code_fence` 재사용).
+            data = json.loads(_strip_code_fence(raw_response))
             items = [_dict_to_star_item(item, cards) for item in data["items"]]
             return items
         except (json.JSONDecodeError, KeyError, TypeError):
