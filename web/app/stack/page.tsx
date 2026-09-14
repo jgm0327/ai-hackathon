@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { ProjectSwitcher } from "@/components/ProjectSwitcher";
 import { SkeletonLine } from "@/components/Skeleton";
-import { ApiError, Card, deleteCard, listCards } from "@/lib/api";
+import { ApiError, Card, deleteCard, listCards, updateCardTags } from "@/lib/api";
+import { useProjects } from "@/lib/useProjects";
 
 function formatCardDate(iso: string): string {
   const d = new Date(iso);
@@ -13,22 +15,46 @@ function formatCardDate(iso: string): string {
   return `${mm}.${dd}`;
 }
 
-/** 커리어 스택 (`/stack`) — 카드 목록 + 태그 필터. */
+/**
+ * 커리어 스택 (`/stack`) — 카드 목록 + 태그 필터.
+ *
+ * **구현 노트 (9/14, 프로젝트 매핑 버그 수정)**: 원래 `listCards()`를 인자 없이 호출해
+ * 프로젝트 구분 없이 전체 카드를 섞어서 보여주고 있었다 — CLAUDE.md 3장의 핵심 설계
+ * ("A은행 결제 API 개선"과 "B카드 결제 API 개선"을 별개로 구분)가 이 화면에서만
+ * 무너져 있던 셈. 기본은 현재 프로젝트로 필터링하고(`/`와 동일한 `<ProjectSwitcher />`
+ * 재사용), "전체 프로젝트 보기" 토글로 전 프로젝트를 한 번에 볼 때만 카드마다
+ * 프로젝트명 라벨을 붙인다.
+ */
 export default function StackPage() {
+  const { projects, currentProject, loading: projectsLoading } = useProjects();
   const [cards, setCards] = useState<Card[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTag, setActiveTag] = useState<string | null>(null);
+  const [showAllProjects, setShowAllProjects] = useState(false);
   const [confirmId, setConfirmId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
+  // 카테고리(스킬 태그) 직접 수정 (9/14 신규) — 저장 시점엔 AI가 자동으로 뽑고,
+  // 이건 그 뒤에 가끔(연 몇 회) 손으로 고치는 별도 경로다 (CLAUDE.md 2.1).
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editTags, setEditTags] = useState<string[]>([]);
+  const [newTagInput, setNewTagInput] = useState("");
+  const [savingTags, setSavingTags] = useState(false);
+  const [tagError, setTagError] = useState<string | null>(null);
+
+  // 프로젝트 목록 로딩이 끝나기 전엔 아직 currentProject를 모르므로 대기한다 —
+  // 그 전에 필터 없이 먼저 불러오면 "현재 프로젝트만" 모드에서도 잠깐 전체가
+  // 보였다가 바뀌는 깜빡임이 생긴다.
   useEffect(() => {
+    if (projectsLoading) return;
     let cancelled = false;
     (async () => {
       setLoading(true);
       setError(null);
       try {
-        const list = await listCards();
+        const projectId = showAllProjects ? undefined : (currentProject?.id ?? undefined);
+        const list = await listCards(projectId);
         if (!cancelled) setCards(list);
       } catch (err) {
         if (!cancelled) {
@@ -41,7 +67,13 @@ export default function StackPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [projectsLoading, currentProject?.id, showAllProjects]);
+
+  const projectNameById = useMemo(() => {
+    const map = new Map<number, string>();
+    projects.forEach((p) => map.set(p.id, p.name));
+    return map;
+  }, [projects]);
 
   const tags = useMemo(() => {
     const set = new Set<string>();
@@ -66,6 +98,47 @@ export default function StackPage() {
     }
   };
 
+  const startEditingTags = (card: Card) => {
+    setEditingId(card.id);
+    setEditTags([...card.skill_tags]);
+    setNewTagInput("");
+    setTagError(null);
+    setConfirmId(null);
+  };
+
+  const cancelEditingTags = () => {
+    setEditingId(null);
+    setEditTags([]);
+    setNewTagInput("");
+    setTagError(null);
+  };
+
+  const addTagFromInput = () => {
+    const trimmed = newTagInput.trim();
+    setNewTagInput("");
+    if (!trimmed || editTags.includes(trimmed)) return;
+    setEditTags((prev) => [...prev, trimmed]);
+  };
+
+  const removeEditTag = (tag: string) => {
+    setEditTags((prev) => prev.filter((t) => t !== tag));
+  };
+
+  const saveEditingTags = async () => {
+    if (editingId == null) return;
+    setSavingTags(true);
+    setTagError(null);
+    try {
+      const updated = await updateCardTags(editingId, editTags);
+      setCards((prev) => prev.map((c) => (c.id === editingId ? updated : c)));
+      cancelEditingTags();
+    } catch {
+      setTagError("태그 저장에 실패했습니다. 다시 시도해 주세요.");
+    } finally {
+      setSavingTags(false);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-3 px-5 pt-[8px]">
       {/* Header */}
@@ -76,10 +149,24 @@ export default function StackPage() {
         <Link
           href="/onboarding"
           aria-label="설정"
-          className="flex size-[26px] items-center justify-center rounded-full bg-[#f4f4f5] text-xs text-[#6b7280] active:scale-[0.95]"
+          className="flex size-[26px] items-center justify-center rounded-full bg-[#f4f4f5] text-xs text-[#6b7280] transition-colors hover:bg-[#e4e4e7] active:scale-[0.95]"
         >
           ⚙
         </Link>
+      </div>
+
+      {/* 프로젝트 스위처 + 전체보기 토글 — CLAUDE.md 3장: 프로젝트별로 카드가 구분돼야 한다 */}
+      <div className="flex items-center gap-2">
+        <ProjectSwitcher />
+        {projects.length > 1 && (
+          <button
+            type="button"
+            onClick={() => setShowAllProjects((v) => !v)}
+            className="shrink-0 whitespace-nowrap text-[12px] font-medium text-zinc-500 underline underline-offset-2"
+          >
+            {showAllProjects ? "현재 프로젝트만" : "전체 프로젝트 보기"}
+          </button>
+        )}
       </div>
 
       {tags.length > 0 && (
@@ -87,10 +174,10 @@ export default function StackPage() {
           <button
             type="button"
             onClick={() => setActiveTag(null)}
-            className={`rounded-full px-3 py-[7px] text-[11px] font-medium ${
+            className={`rounded-full px-3 py-[7px] text-[11px] font-medium transition-colors ${
               activeTag === null
-                ? "border border-black bg-black text-white"
-                : "border border-[#e5e7eb] bg-white text-[#6b7280]"
+                ? "border border-black bg-black text-white hover:bg-zinc-800"
+                : "border border-[#e5e7eb] bg-white text-[#6b7280] hover:bg-zinc-50"
             }`}
           >
             전체
@@ -100,10 +187,10 @@ export default function StackPage() {
               key={tag}
               type="button"
               onClick={() => setActiveTag(tag)}
-              className={`rounded-full px-3 py-[7px] text-[11px] font-medium ${
+              className={`rounded-full px-3 py-[7px] text-[11px] font-medium transition-colors ${
                 activeTag === tag
-                  ? "border border-black bg-black text-white"
-                  : "border border-[#e5e7eb] bg-white text-[#6b7280]"
+                  ? "border border-black bg-black text-white hover:bg-zinc-800"
+                  : "border border-[#e5e7eb] bg-white text-[#6b7280] hover:bg-zinc-50"
               }`}
             >
               {tag}
@@ -140,6 +227,13 @@ export default function StackPage() {
           >
             <p className="text-[13px] font-medium text-[#18181b]">{card.refined_sentence}</p>
             <div className="flex items-center gap-2">
+              {showAllProjects && (
+                <p className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-600">
+                  {card.project_id != null
+                    ? (projectNameById.get(card.project_id) ?? "알 수 없는 프로젝트")
+                    : "프로젝트 없음"}
+                </p>
+              )}
               <p className="text-[11px] text-[#a1a1aa]">{formatCardDate(card.created_at)}</p>
               {card.skill_tags[0] && (
                 <p className="text-[11px] text-[#a1a1aa]">#{card.skill_tags[0]}</p>
@@ -147,6 +241,13 @@ export default function StackPage() {
               <div className="flex-1" />
               {confirmId === card.id ? (
                 <div className="flex items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => startEditingTags(card)}
+                    className="text-[11px] font-medium text-zinc-600 underline underline-offset-2"
+                  >
+                    태그 수정
+                  </button>
                   <button
                     type="button"
                     onClick={() => handleDelete(card.id)}
@@ -174,6 +275,72 @@ export default function StackPage() {
                 </button>
               )}
             </div>
+
+            {editingId === card.id && (
+              <div className="flex flex-col gap-2 border-t border-[#e5e7eb] pt-2">
+                <div className="flex flex-wrap gap-1.5">
+                  {editTags.length === 0 && (
+                    <p className="text-[11px] text-zinc-400">태그 없음</p>
+                  )}
+                  {editTags.map((tag) => (
+                    <span
+                      key={tag}
+                      className="flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-1 text-[11px] text-zinc-600"
+                    >
+                      {tag}
+                      <button
+                        type="button"
+                        onClick={() => removeEditTag(tag)}
+                        aria-label={`${tag} 삭제`}
+                        className="text-zinc-400 transition-colors hover:text-zinc-700"
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  ))}
+                </div>
+                <div className="flex gap-1.5">
+                  <input
+                    type="text"
+                    value={newTagInput}
+                    onChange={(e) => setNewTagInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addTagFromInput();
+                      }
+                    }}
+                    placeholder="새 태그"
+                    className="min-w-0 flex-1 rounded-md border border-zinc-200 px-2 py-1 text-[11px] focus:border-zinc-400 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={addTagFromInput}
+                    className="rounded-md border border-zinc-200 px-2 py-1 text-[11px] text-zinc-600 transition-colors hover:bg-zinc-50"
+                  >
+                    추가
+                  </button>
+                </div>
+                {tagError && <p className="text-[11px] text-red-600">{tagError}</p>}
+                <div className="flex justify-end gap-3 pt-0.5">
+                  <button
+                    type="button"
+                    onClick={cancelEditingTags}
+                    className="text-[11px] text-zinc-500"
+                  >
+                    취소
+                  </button>
+                  <button
+                    type="button"
+                    onClick={saveEditingTags}
+                    disabled={savingTags}
+                    className="text-[11px] font-semibold text-black disabled:opacity-50"
+                  >
+                    {savingTags ? "저장 중…" : "저장"}
+                  </button>
+                </div>
+              </div>
+            )}
           </li>
         ))}
       </ul>
@@ -181,7 +348,7 @@ export default function StackPage() {
       <div className="pt-2 pb-4">
         <Link
           href="/resume"
-          className="flex w-full items-center justify-center rounded-[14px] bg-black py-[17px] text-[15px] font-semibold text-white active:scale-[0.99]"
+          className="flex w-full items-center justify-center rounded-[14px] bg-black py-[17px] text-[15px] font-semibold text-white transition-colors hover:bg-zinc-800 active:scale-[0.99]"
         >
           마스터 경력기술서 초안 짜기
         </Link>

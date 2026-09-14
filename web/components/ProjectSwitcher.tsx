@@ -58,7 +58,7 @@ export function ProjectSwitcher() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="inline-flex max-w-[220px] items-center gap-1 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-sm font-medium text-zinc-800 shadow-sm active:scale-[0.98]"
+        className="inline-flex max-w-[220px] items-center gap-1 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-sm font-medium text-zinc-800 shadow-sm transition-colors hover:bg-zinc-50 active:scale-[0.98]"
       >
         <span className="truncate">
           {loading ? "불러오는 중…" : currentProject ? currentProject.name : "프로젝트 없음"}
@@ -77,8 +77,10 @@ export function ProjectSwitcher() {
               <button
                 type="button"
                 onClick={() => handleSwitch(p.id)}
-                className={`flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm ${
-                  p.is_current ? "bg-zinc-100 font-semibold text-zinc-900" : "text-zinc-700"
+                className={`flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm transition-colors ${
+                  p.is_current
+                    ? "bg-zinc-100 font-semibold text-zinc-900"
+                    : "text-zinc-700 hover:bg-zinc-50"
                 }`}
               >
                 <span className="truncate">{p.name}</span>
@@ -95,7 +97,7 @@ export function ProjectSwitcher() {
           <button
             type="button"
             onClick={() => setShowNewForm(true)}
-            className="w-full rounded-lg border border-dashed border-zinc-300 py-2.5 text-sm font-medium text-zinc-600"
+            className="w-full rounded-lg border border-dashed border-zinc-300 py-2.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50"
           >
             + 새 프로젝트
           </button>
@@ -120,14 +122,14 @@ export function ProjectSwitcher() {
                 type="button"
                 onClick={handleCreate}
                 disabled={submitting}
-                className="flex-1 rounded-md bg-zinc-900 py-2 text-sm font-medium text-white disabled:opacity-50"
+                className="flex-1 rounded-md bg-zinc-900 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:opacity-50 disabled:hover:bg-zinc-900"
               >
                 {submitting ? "생성 중…" : "만들기"}
               </button>
               <button
                 type="button"
                 onClick={() => setShowNewForm(false)}
-                className="rounded-md border border-zinc-300 px-3 py-2 text-sm text-zinc-600"
+                className="rounded-md border border-zinc-300 px-3 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-50"
               >
                 취소
               </button>

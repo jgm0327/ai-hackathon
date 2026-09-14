@@ -107,6 +107,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     res = await fetch(`${API_BASE}${path}`, {
       ...init,
+      // 9/14 카카오 로그인 도입 — 세션 쿠키를 실어 보내야 한다. 로컬 개발은 프론트(3001)와
+      // 백엔드(8000)가 다른 origin이라 기본값(same-origin)으로는 쿠키가 안 실린다.
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
         ...(init?.headers ?? {}),
@@ -160,6 +163,18 @@ export function listCards(projectId?: number): Promise<Card[]> {
 
 export function deleteCard(id: number): Promise<void> {
   return request<void>(`/cards/${id}`, { method: "DELETE" });
+}
+
+/**
+ * 카테고리(스킬 태그)를 직접 수정한다 (9/14 신규). 매일 쓰는 저장 경로(POST)는 여전히
+ * AI가 자동으로 태그를 뽑고, 이건 저장 후 가끔(`/stack`에서) 손으로 고치는 별도 경로다
+ * (CLAUDE.md 2.1 — 매일 쓰는 경로에는 선택지를 넣지 않는다).
+ */
+export function updateCardTags(id: number, skillTags: string[]): Promise<Card> {
+  return request<Card>(`/cards/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ skill_tags: skillTags }),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -283,4 +298,38 @@ export function updateProfile(
       ...(jobDetail ? { job_detail: jobDetail } : {}),
     }),
   });
+}
+
+// ---------------------------------------------------------------------------
+// 10. 카카오 로그인 (9/14 신규) — 계획서(카카오 소셜 로그인 + 진입 게이팅) 참고
+// ---------------------------------------------------------------------------
+
+export interface Me {
+  id: number;
+  nickname: string | null;
+  profile_image_url: string | null;
+}
+
+/**
+ * 지금 로그인 상태인지 확인한다. 로그아웃 상태(401)는 에러가 아니라 정상적인 한 가지
+ * 상태이므로 `ApiError`를 던지는 대신 `null`을 반환한다 — 호출부(`AuthGate`)가
+ * try/catch 없이 그냥 값으로 분기할 수 있게.
+ */
+export async function getMe(): Promise<Me | null> {
+  try {
+    return await request<Me>("/auth/me");
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) return null;
+    throw err;
+  }
+}
+
+/** 카카오 로그인 화면으로 이동한다. fetch가 아니라 실제 브라우저 네비게이션이어야
+ * 카카오 로그인/동의 화면 리다이렉트 체인이 정상 동작한다. */
+export function kakaoLoginUrl(): string {
+  return `${API_BASE}/auth/kakao/login`;
+}
+
+export function logout(): Promise<void> {
+  return request<void>("/auth/logout", { method: "POST" });
 }

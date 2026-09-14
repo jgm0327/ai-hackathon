@@ -107,7 +107,7 @@ export default function HomePage() {
         <Link
           href="/onboarding"
           aria-label="설정"
-          className="flex size-[26px] items-center justify-center rounded-full bg-[#f4f4f5] text-xs text-[#6b7280] active:scale-[0.95]"
+          className="flex size-[26px] items-center justify-center rounded-full bg-[#f4f4f5] text-xs text-[#6b7280] transition-colors hover:bg-[#e4e4e7] active:scale-[0.95]"
         >
           ⚙
         </Link>
@@ -145,7 +145,7 @@ export default function HomePage() {
         <button
           type="submit"
           disabled={submitting || !rawText.trim()}
-          className="w-full rounded-[14px] bg-black py-[18px] text-[16px] font-semibold text-white disabled:opacity-40"
+          className="w-full rounded-[14px] bg-black py-[18px] text-[16px] font-semibold text-white transition-colors hover:bg-zinc-800 active:scale-[0.98] disabled:opacity-40 disabled:hover:bg-black"
         >
           {submitting ? "정리하는 중…" : "경력 변환하기"}
         </button>
@@ -171,7 +171,7 @@ export default function HomePage() {
                 type="button"
                 onClick={handleCloseResult}
                 aria-label="닫기"
-                className="flex size-[38px] items-center justify-center rounded-full bg-[#f4f4f5] text-sm text-[#6b7280] active:scale-[0.95]"
+                className="flex size-[38px] items-center justify-center rounded-full bg-[#f4f4f5] text-sm text-[#6b7280] transition-colors hover:bg-[#e4e4e7] active:scale-[0.95]"
               >
                 ✕
               </button>
@@ -203,14 +203,14 @@ export default function HomePage() {
               <button
                 type="button"
                 onClick={handleCopyResult}
-                className="flex flex-1 items-center justify-center rounded-[12px] bg-black py-4 text-[14px] font-semibold text-white active:scale-[0.98]"
+                className="flex flex-1 items-center justify-center rounded-[12px] bg-black py-4 text-[14px] font-semibold text-white transition-colors hover:bg-zinc-800 active:scale-[0.98]"
               >
                 {copiedResult ? "복사됨" : "복사"}
               </button>
               <button
                 type="button"
                 onClick={handleRetry}
-                className="flex flex-1 items-center justify-center rounded-[12px] border-[1.5px] border-[#e5e7eb] bg-white py-4 text-[14px] font-semibold text-[#18181b] active:scale-[0.98]"
+                className="flex flex-1 items-center justify-center rounded-[12px] border-[1.5px] border-[#e5e7eb] bg-white py-4 text-[14px] font-semibold text-[#18181b] transition-colors hover:bg-zinc-50 active:scale-[0.98]"
               >
                 다시 변환
               </button>
@@ -264,7 +264,7 @@ function NotionImportButton() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex items-center justify-center rounded-[10px] border border-[#e5e7eb] bg-white px-3 py-[10px]"
+        className="flex items-center justify-center rounded-[10px] border border-[#e5e7eb] bg-white px-3 py-[10px] transition-colors hover:bg-zinc-50 active:scale-[0.98]"
       >
         <p className="text-[12px] font-medium text-[#6b7280]">노션에서 가져오기</p>
       </button>
@@ -289,7 +289,7 @@ function NotionImportButton() {
             type="button"
             onClick={handleSync}
             disabled={submitting || !token.trim()}
-            className="w-full rounded-xl bg-zinc-900 py-2.5 text-sm font-semibold text-white disabled:opacity-40"
+            className="w-full rounded-xl bg-zinc-900 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-zinc-800 active:scale-[0.98] disabled:opacity-40 disabled:hover:bg-zinc-900"
           >
             {submitting ? "가져오는 중…" : "동기화"}
           </button>

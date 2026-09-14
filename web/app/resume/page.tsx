@@ -123,7 +123,7 @@ export default function ResumePage() {
             type="button"
             onClick={handleBuild}
             disabled={!currentProject || loading}
-            className="w-full rounded-xl bg-zinc-900 py-3 text-base font-semibold text-white disabled:opacity-40"
+            className="w-full rounded-xl bg-zinc-900 py-3 text-base font-semibold text-white transition-colors hover:bg-zinc-800 disabled:opacity-40 disabled:hover:bg-zinc-900"
           >
             {loading ? "경력기술서 만드는 중… (최대 10초)" : "경력기술서 만들기"}
           </button>
@@ -187,14 +187,14 @@ export default function ResumePage() {
                 <button
                   type="button"
                   onClick={() => handleCopy("markdown")}
-                  className="flex flex-1 items-center justify-center rounded-[11px] border-[1.5px] border-[#e5e7eb] bg-white py-[13px] text-[12px] font-semibold text-[#18181b]"
+                  className="flex flex-1 items-center justify-center rounded-[11px] border-[1.5px] border-[#e5e7eb] bg-white py-[13px] text-[12px] font-semibold text-[#18181b] transition-colors hover:bg-zinc-50"
                 >
                   {copyStatus === "markdown" ? "복사됨" : "마크다운"}
                 </button>
                 <button
                   type="button"
                   onClick={() => handleCopy("notion")}
-                  className="flex flex-1 items-center justify-center rounded-[11px] border-[1.5px] border-[#e5e7eb] bg-white py-[13px] text-[12px] font-semibold text-[#18181b]"
+                  className="flex flex-1 items-center justify-center rounded-[11px] border-[1.5px] border-[#e5e7eb] bg-white py-[13px] text-[12px] font-semibold text-[#18181b] transition-colors hover:bg-zinc-50"
                 >
                   {copyStatus === "notion" ? "복사됨" : "노션 복사"}
                 </button>

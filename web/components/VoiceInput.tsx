@@ -134,8 +134,10 @@ export function VoiceInput({ onTranscript, disabled = false, variant = "labeled"
           onClick={handleClick}
           disabled={disabled || listening}
           aria-label={listening ? "듣고 있어요" : "음성 입력"}
-          className={`flex size-[40px] shrink-0 items-center justify-center rounded-full text-base active:scale-[0.95] disabled:opacity-50 ${
-            listening ? "bg-[#18181b] text-white" : "bg-[#f4f4f5] text-[#6b7280]"
+          className={`flex size-[40px] shrink-0 items-center justify-center rounded-full text-base transition-colors active:scale-[0.95] disabled:opacity-50 ${
+            listening
+              ? "bg-[#18181b] text-white hover:bg-zinc-800"
+              : "bg-[#f4f4f5] text-[#6b7280] hover:bg-[#e4e4e7]"
           }`}
         >
           <span aria-hidden>🎙️</span>
@@ -160,7 +162,7 @@ export function VoiceInput({ onTranscript, disabled = false, variant = "labeled"
         type="button"
         onClick={handleClick}
         disabled={disabled || listening}
-        className="inline-flex w-fit items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3.5 py-2 text-sm font-medium text-zinc-700 shadow-sm active:scale-[0.98] disabled:opacity-50"
+        className="inline-flex w-fit items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3.5 py-2 text-sm font-medium text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50 active:scale-[0.98] disabled:opacity-50"
       >
         <span aria-hidden>🎤</span>
         {listening ? "듣고 있어요…" : "말로 기록하기"}

@@ -14,6 +14,9 @@ const TABS = [
 export function TabBar() {
   const pathname = usePathname();
 
+  // 로그인 화면(9/14 신규)은 아직 로그인 전이라 앱 내비게이션이 의미가 없다 — 탭을 숨긴다.
+  if (pathname === "/login") return null;
+
   return (
     <nav className="sticky bottom-0 z-40 border-t border-zinc-200 bg-white/95 backdrop-blur">
       <ul className="flex pb-[env(safe-area-inset-bottom)]">

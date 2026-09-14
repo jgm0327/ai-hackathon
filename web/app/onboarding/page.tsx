@@ -154,7 +154,7 @@ export default function OnboardingPage() {
         type="button"
         onClick={handleSubmit}
         disabled={!canSubmit}
-        className="w-full rounded-xl bg-zinc-900 py-3 text-base font-semibold text-white disabled:opacity-40"
+        className="w-full rounded-xl bg-zinc-900 py-3 text-base font-semibold text-white transition-colors hover:bg-zinc-800 disabled:opacity-40 disabled:hover:bg-zinc-900"
       >
         {saving ? "저장하는 중…" : "내 커리어 스택 시작하기"}
       </button>
@@ -175,10 +175,10 @@ function ChipButton({
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-full border px-3.5 py-1.5 text-sm font-medium active:scale-[0.98] ${
+      className={`rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors active:scale-[0.98] ${
         selected
-          ? "border-zinc-900 bg-zinc-900 text-white"
-          : "border-zinc-200 bg-white text-zinc-700"
+          ? "border-zinc-900 bg-zinc-900 text-white hover:bg-zinc-800"
+          : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
       }`}
     >
       {label}
