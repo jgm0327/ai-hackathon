@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { ProjectSwitcher } from "@/components/ProjectSwitcher";
 import { SkeletonLine } from "@/components/Skeleton";
 import { ApiError, Card, deleteCard, listCards } from "@/lib/api";
+import { useProjects } from "@/lib/useProjects";
 
 function formatCardDate(iso: string): string {
   const d = new Date(iso);
@@ -13,22 +15,38 @@ function formatCardDate(iso: string): string {
   return `${mm}.${dd}`;
 }
 
-/** 커리어 스택 (`/stack`) — 카드 목록 + 태그 필터. */
+/**
+ * 커리어 스택 (`/stack`) — 카드 목록 + 태그 필터.
+ *
+ * **구현 노트 (9/14, 프로젝트 매핑 버그 수정)**: 원래 `listCards()`를 인자 없이 호출해
+ * 프로젝트 구분 없이 전체 카드를 섞어서 보여주고 있었다 — CLAUDE.md 3장의 핵심 설계
+ * ("A은행 결제 API 개선"과 "B카드 결제 API 개선"을 별개로 구분)가 이 화면에서만
+ * 무너져 있던 셈. 기본은 현재 프로젝트로 필터링하고(`/`와 동일한 `<ProjectSwitcher />`
+ * 재사용), "전체 프로젝트 보기" 토글로 전 프로젝트를 한 번에 볼 때만 카드마다
+ * 프로젝트명 라벨을 붙인다.
+ */
 export default function StackPage() {
+  const { projects, currentProject, loading: projectsLoading } = useProjects();
   const [cards, setCards] = useState<Card[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTag, setActiveTag] = useState<string | null>(null);
+  const [showAllProjects, setShowAllProjects] = useState(false);
   const [confirmId, setConfirmId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
+  // 프로젝트 목록 로딩이 끝나기 전엔 아직 currentProject를 모르므로 대기한다 —
+  // 그 전에 필터 없이 먼저 불러오면 "현재 프로젝트만" 모드에서도 잠깐 전체가
+  // 보였다가 바뀌는 깜빡임이 생긴다.
   useEffect(() => {
+    if (projectsLoading) return;
     let cancelled = false;
     (async () => {
       setLoading(true);
       setError(null);
       try {
-        const list = await listCards();
+        const projectId = showAllProjects ? undefined : (currentProject?.id ?? undefined);
+        const list = await listCards(projectId);
         if (!cancelled) setCards(list);
       } catch (err) {
         if (!cancelled) {
@@ -41,7 +59,13 @@ export default function StackPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [projectsLoading, currentProject?.id, showAllProjects]);
+
+  const projectNameById = useMemo(() => {
+    const map = new Map<number, string>();
+    projects.forEach((p) => map.set(p.id, p.name));
+    return map;
+  }, [projects]);
 
   const tags = useMemo(() => {
     const set = new Set<string>();
@@ -80,6 +104,20 @@ export default function StackPage() {
         >
           ⚙
         </Link>
+      </div>
+
+      {/* 프로젝트 스위처 + 전체보기 토글 — CLAUDE.md 3장: 프로젝트별로 카드가 구분돼야 한다 */}
+      <div className="flex items-center gap-2">
+        <ProjectSwitcher />
+        {projects.length > 1 && (
+          <button
+            type="button"
+            onClick={() => setShowAllProjects((v) => !v)}
+            className="shrink-0 whitespace-nowrap text-[12px] font-medium text-zinc-500 underline underline-offset-2"
+          >
+            {showAllProjects ? "현재 프로젝트만" : "전체 프로젝트 보기"}
+          </button>
+        )}
       </div>
 
       {tags.length > 0 && (
@@ -140,6 +178,13 @@ export default function StackPage() {
           >
             <p className="text-[13px] font-medium text-[#18181b]">{card.refined_sentence}</p>
             <div className="flex items-center gap-2">
+              {showAllProjects && (
+                <p className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-600">
+                  {card.project_id != null
+                    ? (projectNameById.get(card.project_id) ?? "알 수 없는 프로젝트")
+                    : "프로젝트 없음"}
+                </p>
+              )}
               <p className="text-[11px] text-[#a1a1aa]">{formatCardDate(card.created_at)}</p>
               {card.skill_tags[0] && (
                 <p className="text-[11px] text-[#a1a1aa]">#{card.skill_tags[0]}</p>
