@@ -134,7 +134,24 @@ class TestGetEmbeddingFunction:
             embedding_provider = "chroma_default"
 
         monkeypatch.setattr(vectorstore, "settings", _FakeSettings())
-        assert _real_get_embedding_function() is None
+        # 9/14 버그 수정: 예전엔 여기서 None을 반환했는데, chromadb 1.5.9는
+        # `embedding_function=None`을 "임베딩 함수 없음"으로 해석해 ValueError를 던진다
+        # (POST /api/cards가 500으로 죽는 형태로 실제 재현됨). None이 아니라 실제
+        # DefaultEmbeddingFunction 인스턴스를 반환해야 한다.
+        fn = _real_get_embedding_function()
+        assert isinstance(fn, vectorstore.DefaultEmbeddingFunction)
+
+    def test_unrecognized_provider_falls_back_to_chroma_builtin(self, monkeypatch):
+        """EMBEDDING_PROVIDER가 오타/지원 안 하는 값(예: "anthropic")이어도 죽지 않고
+        Chroma 기본 임베딩 함수로 폴백해야 한다 (9/14 실측 버그: .env에 EMBEDDING_PROVIDER=
+        anthropic이 잘못 들어가 있어서 canonicalize_tags()가 500을 냈던 상황 그대로 재현)."""
+
+        class _FakeSettings:
+            embedding_provider = "anthropic"
+
+        monkeypatch.setattr(vectorstore, "settings", _FakeSettings())
+        fn = _real_get_embedding_function()
+        assert isinstance(fn, vectorstore.DefaultEmbeddingFunction)
 
     def test_selects_ollama(self, monkeypatch):
         class _FakeSettings:

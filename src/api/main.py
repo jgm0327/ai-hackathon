@@ -16,9 +16,10 @@ STT 엔드포인트 자체가 당장은 불필요하다. 실기기에서 실패�
 """
 import logging
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from src.api.routers import auth, cards, health, jds, notion, profile, projects, push, resume
 from src.config import settings
@@ -49,22 +50,54 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.exception_handler(Exception)
-async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """처리 안 된 예외를 계약대로 `{"detail": "..."}`로 바꿔서 반환한다 (9/14 신규).
 
-    **왜 필요한가**: Starlette는 기본적으로 처리 안 된 예외를 `ServerErrorMiddleware`가
-    잡아서 500을 내려보내는데, 이 미들웨어는 `CORSMiddleware`보다 바깥(먼저)에 있어서
-    응답이 CORSMiddleware를 거치지 않고 나간다 — 그 결과 `Access-Control-Allow-Origin`
-    헤더가 안 붙고, 브라우저 콘솔엔 진짜 원인(예: 파싱 중 예외) 대신 엉뚱하게
-    "CORS policy에 막혔다"는 메시지만 뜬다(9/14 실측: `_call_llm_anthropic()`의
-    `AttributeError`가 이 경로로 CORS 에러처럼 보였음, src/parsing/parser.py 참고).
-    여기서처럼 `@app.exception_handler`로 직접 잡아서 정상 응답 경로로 돌려보내면
-    CORSMiddleware를 거치므로 헤더가 정상적으로 붙는다.
+class _CORSSafeErrorMiddleware:
+    """처리 안 된 예외를 잡아 계약대로 `{"detail": "..."}`로 바꾸면서, CORS 헤더도
+    직접 붙여서 내려보낸다 (9/14 신규).
+
+    **왜 필요한가 (한 번 잘못 고쳐본 기록)**: 처음엔 `@app.exception_handler(Exception)`로
+    고치면 될 줄 알았는데, 실측해보니 안 통했다 — Starlette는 `Exception`(또는 500)에
+    등록된 핸들러를 `ServerErrorMiddleware`에 연결하는데, 이 미들웨어는 Starlette가
+    항상 스택의 **가장 바깥**(우리가 추가하는 `CORSMiddleware`보다도 바깥)에 자동으로
+    끼워 넣는다. 그래서 그 핸들러가 만든 응답도 여전히 CORSMiddleware를 거치지 않고
+    나가서 CORS 헤더가 안 붙는다(9/14 실측: curl로 재현 — `access-control-allow-origin`
+    헤더 없이 500만 내려옴). `app.add_middleware()`로 추가한 미들웨어는 나중에 추가할수록
+    더 바깥쪽(ServerErrorMiddleware에 더 가까운 쪽)에 놓이므로, `CORSMiddleware` **다음에**
+    이 미들웨어를 추가하면 이 미들웨어가 CORSMiddleware보다 바깥에서 예외를 가로챌 수
+    있다 — 대신 CORSMiddleware가 해주던 origin 헤더 부착을 여기서 직접 해야 한다.
+
+    (9/14 애초 증상: `_call_llm_anthropic()`의 `AttributeError`가 이 경로로 CORS 에러처럼
+    보였음 — src/parsing/parser.py 참고. 그 자체 버그는 따로 고쳤지만, 앞으로 어떤
+    예외가 나든 CORS 에러 뒤에 숨지 않게 이 미들웨어를 남겨둔다.)
     """
-    logger.exception("처리되지 않은 예외: %s %s", request.method, request.url.path)
-    return JSONResponse(status_code=500, content={"detail": "서버 오류가 발생했습니다."})
 
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        try:
+            await self.app(scope, receive, send)
+        except Exception:
+            method = scope.get("method", "?")
+            path = scope.get("path", "?")
+            logger.exception("처리되지 않은 예외: %s %s", method, path)
+
+            response = JSONResponse(status_code=500, content={"detail": "서버 오류가 발생했습니다."})
+            origin = next(
+                (v.decode("latin-1") for k, v in scope.get("headers", []) if k == b"origin"),
+                None,
+            )
+            if origin and (_origins == ["*"] or origin in _origins):
+                response.headers["Access-Control-Allow-Origin"] = origin
+                response.headers["Access-Control-Allow-Credentials"] = "true"
+                response.headers["Vary"] = "Origin"
+            await response(scope, receive, send)
+
+
+app.add_middleware(_CORSSafeErrorMiddleware)
 
 app.include_router(auth.router, prefix="/api")
 app.include_router(cards.router, prefix="/api")

@@ -12,6 +12,7 @@ import chromadb
 import requests
 from chromadb import Collection
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
+from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
 
 from src.config import settings
 
@@ -79,11 +80,24 @@ class _LocalMultilingualEmbeddingFunction(EmbeddingFunction[Documents]):
 
 
 def _get_embedding_function():
+    """`EMBEDDING_PROVIDER`에 따라 임베딩 함수를 고른다. 인식 못 하는 값(오타, `anthropic`처럼
+    이 프로젝트가 지원하지 않는 provider 등)이면 Chroma 기본 임베딩 함수로 폴백한다.
+
+    **구현 노트 (9/14, `None` 반환 버그 수정)**: 원래는 여기서 `None`을 반환하고 그걸
+    그대로 `get_or_create_collection(embedding_function=None)`에 넘겼는데, "`None`이면
+    Chroma가 알아서 기본 임베딩 함수를 쓴다"는 예전 동작을 가정한 주석이었다. 실측해보니
+    지금 설치된 chromadb(1.5.9)는 `embedding_function=None`을 "임베딩 함수 없음"으로
+    해석해서 `ValueError: You must provide an embedding function to compute embeddings.`를
+    던진다(`EMBEDDING_PROVIDER`가 실수로 `anthropic`처럼 지원 안 하는 값이 됐을 때 실제로
+    이렇게 터짐 — POST /api/cards의 `canonicalize_tags()` 호출부에서 재현). 그래서 이제
+    `None`을 반환하는 대신 `DefaultEmbeddingFunction()`을 직접 만들어서 반환한다 — 주석이
+    원래 약속했던 동작을 실제로 지키게 한다.
+    """
     if settings.embedding_provider == "ollama":
         return _OllamaEmbeddingFunction()
     if settings.embedding_provider == "local_multilingual":
         return _LocalMultilingualEmbeddingFunction()
-    return None  # None이면 Chroma 기본 임베딩 함수(all-MiniLM-L6-v2) 사용
+    return DefaultEmbeddingFunction()
 
 
 def _get_client() -> chromadb.ClientAPI:
