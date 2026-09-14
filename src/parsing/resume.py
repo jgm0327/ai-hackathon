@@ -191,7 +191,21 @@ def _call_llm_anthropic(user_prompt: str) -> str:
         system=_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_prompt}],
     )
-    return response.content[0].text
+    return _extract_text(response)
+
+
+def _extract_text(response: anthropic.types.Message) -> str:
+    """응답의 첫 텍스트 블록을 꺼낸다.
+
+    `content[0]`이 항상 텍스트라고 가정하면 안 된다 — 모델이 ThinkingBlock 등 텍스트가
+    아닌 블록을 먼저 반환하면 `content[0].text`에서 AttributeError가 난다(9/14 실제로
+    발생, src/parsing/parser.py의 동일 패턴 참고). 여긴 아직 그 순서로 안 걸렸을 뿐
+    같은 위험이 있어 동일하게 고쳐둔다.
+    """
+    for block in response.content:
+        if block.type == "text":
+            return block.text
+    raise ValueError(f"Anthropic 응답에 텍스트 블록이 없습니다: {response.content!r}")
 
 
 def _call_llm_ollama(user_prompt: str) -> str:
