@@ -97,3 +97,36 @@ def test_sync_notion_returns_401_for_invalid_token(client):
     with patch("src.api.routers.notion.fetch_notion_entries", side_effect=ValueError("토큰이 유효하지 않습니다")):
         response = client.post("/api/notion/sync", json={"user_token": "bad-token"})
     assert response.status_code == 401
+
+
+class _FakeSettingsWithMcp:
+    notion_mcp_server_url = "http://fake-mcp"
+
+
+def test_sync_notion_prefers_mcp_when_configured(client):
+    """NOTION_MCP_SERVER_URL이 설정돼 있으면 MCP 경로를 먼저 쓰고, REST는 호출하지 않는다."""
+    entries = [NotionEntry(page_id="p1", title="t", content="결제 버그 고침", created_time="2026-09-14")]
+
+    with patch("src.api.routers.notion.settings", _FakeSettingsWithMcp()):
+        with patch("src.api.routers.notion.fetch_notion_entries_via_mcp", return_value=entries) as mock_mcp:
+            with patch("src.api.routers.notion.fetch_notion_entries") as mock_rest:
+                with patch("src.api.routers.notion.run_pipeline_batch", return_value=[]):
+                    response = client.post("/api/notion/sync", json={"user_token": "secret_abc123"})
+
+    assert response.status_code == 200
+    mock_mcp.assert_called_once_with(user_token="secret_abc123")
+    mock_rest.assert_not_called()
+
+
+def test_sync_notion_falls_back_to_rest_when_mcp_fails(client):
+    """MCP 서버가 설정돼 있어도 실패하면(다운/도구 이름 불일치 등) REST로 조용히 폴백한다."""
+    entries = [NotionEntry(page_id="p1", title="t", content="결제 버그 고침", created_time="2026-09-14")]
+
+    with patch("src.api.routers.notion.settings", _FakeSettingsWithMcp()):
+        with patch("src.api.routers.notion.fetch_notion_entries_via_mcp", side_effect=RuntimeError("연결 실패")):
+            with patch("src.api.routers.notion.fetch_notion_entries", return_value=entries) as mock_rest:
+                with patch("src.api.routers.notion.run_pipeline_batch", return_value=[]):
+                    response = client.post("/api/notion/sync", json={"user_token": "secret_abc123"})
+
+    assert response.status_code == 200
+    mock_rest.assert_called_once_with(user_token="secret_abc123")

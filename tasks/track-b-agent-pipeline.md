@@ -192,7 +192,31 @@ def build_career_doc(project_id: int, jd_text: str | None = None) -> list[StarIt
 - [x] Notion REST API 연동 (읽기) — `POST /api/notion/sync` (`src/api/routers/notion.py`, 9/13)
       HTTP 레이어만 신규 추가. `fetch_notion_entries()` 자체는 이전부터 구현돼 있었음
 - [x] **노션 쓰기는 구현하지 않는다** (CLAUDE.md 2.4) — 내보내기는 클립보드 복사로 처리
-- [ ] (선택) MCP 연동 — 타임박스 하루, 초과 시 중단 기록. 미착수(선택 사항)
+- [x] (선택) MCP 연동 (9/14) — `fetch_notion_entries_via_mcp()`. `POST /api/notion/sync`가
+      `NOTION_MCP_SERVER_URL` 설정 시 이 경로를 먼저 시도하고, 실패하면 조용히 REST로
+      폴백한다(`src/api/routers/notion.py`의 `_fetch_entries()`)
+
+### 구현 노트 (9/14, `fetch_notion_entries_via_mcp()`)
+"오픈소스 Notion MCP 서버"의 정확한 도구 이름/입력 스키마가 CLAUDE.md/tasks 어디에도
+명시돼 있지 않고, 이 세션엔 실제로 띄워서 검증해볼 MCP 서버가 없었다. 그래서 특정
+서버 하나에 맞춰 도구 이름을 하드코딩하지 않고 **적응형**으로 구현했다:
+- `list_tools()` 결과에서 이름에 "search"가 들어간 도구, "fetch"/"retrieve"/"get_page"가
+  들어간 도구를 각각 찾아 검색/조회에 쓴다. 못 찾으면 `NotionMcpUnsupportedError`.
+- 각 도구의 입력 스키마(`properties`)를 보고 질의어/페이지id 파라미터 이름을 추정해서
+  채운다(`query`/`q`/`search`/`text`, `id`/`page_id`/`pageId`/`url` 순으로 탐색).
+- 도구 호출 결과는 `structured_content`(dict)를 우선 쓰고, 없으면 텍스트 콘텐츠
+  블록을 JSON으로 파싱 시도, 그것도 안 되면 텍스트를 그대로 이어붙인다.
+- 의존성: `mcp`(공식 Python SDK) 패키지 추가. `streamable_http_client` 전송을 쓰고,
+  `user_token`을 `Authorization: Bearer` 헤더로 실어 보낸다(멀티유저 원칙 유지 —
+  리스크 6, 서버가 이 헤더를 실제로 존중하는지는 서버 구현에 달려있음).
+
+**실제 MCP 서버로 end-to-end 검증은 안 됐다.** 유닛 테스트(`tests/test_notion_client.py`)는
+`mcp.ClientSession`/`streamable_http_client`를 모킹해서 위 적응형 로직 자체(도구 탐색,
+파라미터 추정, 결과 파싱, 실패 시 명확한 에러)만 검증한다. 표준적인 MCP Notion
+서버라면 대부분 이 명명 규칙을 따를 것으로 기대하지만 보장은 못 한다 — 실제 서버를
+연결해봤을 때 도구를 못 찾으면 `_find_tool()`의 키워드 목록을 그 서버에 맞게
+넓히면 된다. 타임박스(하루) 안에서 "REST 우선, MCP는 실패해도 제품에 영향 없음"
+설계로 리스크를 낮췄다.
 
 ### 구현 노트 (9/13, `POST /api/notion/sync`)
 - `user_token`은 빈 문자열도 "값 없음"으로 취급해 422로 거부한다 — Pydantic의 `str`
