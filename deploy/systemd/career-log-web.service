@@ -1,0 +1,27 @@
+; systemd 유닛 — Next.js 프론트엔드 (tasks/track-d-deploy.md 3.3절)
+;
+; 사용법:
+;   1. 아래 경로/사용자를 실제 VM 환경에 맞게 치환
+;   2. VM에서 미리 한 번 빌드해둘 것: cd <APP_DIR>/web && npm ci && npm run build
+;   3. /etc/systemd/system/career-log-web.service 로 복사
+;   4. systemctl daemon-reload
+;   5. systemctl enable --now career-log-web
+;
+; NEXT_PUBLIC_API_BASE=/api(상대 경로)를 쓰면 프론트와 백엔드가 같은 도메인으로
+; 서빙되므로 CORS 문제 자체가 없어진다 (tasks/track-d-deploy.md 3.3절, web/.env.local.example
+; 참고). 이 값은 빌드 시점에 고정되므로 .env.local을 바꾸면 npm run build를 다시 해야 한다.
+
+[Unit]
+Description=Career Log Next.js frontend
+After=network.target
+
+[Service]
+Type=simple
+User=<APP_USER>
+WorkingDirectory=<APP_DIR>/web
+ExecStart=/usr/bin/npm run start -- --port 3000
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
