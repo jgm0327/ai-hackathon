@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { StarItemSection, formatStarItemForClipboard } from "@/components/StarItemCard";
 import { StarItemSkeleton } from "@/components/Skeleton";
 import { ApiError, Profile, StarItem, getProfile } from "@/lib/api";
-import { buildResumeCached } from "@/lib/resumeCache";
+import { buildResumeCached, peekCachedResume } from "@/lib/resumeCache";
 import { useProjects } from "@/lib/useProjects";
 
 /** 프로필/프로젝트에서 실제로 있는 값만으로 문서 제목을 만든다 — 없는 정보를
@@ -66,6 +66,21 @@ export default function ResumePage() {
       cancelled = true;
     };
   }, []);
+
+  // 새로고침해도 방금 만든 경력기술서가 사라진 것처럼 보이지 않게, 마운트 시점에
+  // 캐시(네트워크 호출 없음)를 먼저 들여다보고 있으면 즉시 복원한다 (9/14, 사용자
+  // 지적 — web/lib/resumeCache.ts의 peekCachedResume() 참고). 카드 구성이 그 사이
+  // 바뀌었을 수도 있는 낡은 값일 수 있는데, "다시 만들기"를 누르면 그때 정상
+  // 검증된다.
+  useEffect(() => {
+    if (!currentProject) return;
+    const cached = peekCachedResume(currentProject.id);
+    if (cached) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setItems(cached);
+      setShowBuildForm(false);
+    }
+  }, [currentProject]);
 
   const handleBuild = async () => {
     if (!currentProject) return;
