@@ -83,3 +83,21 @@ export async function buildResumeCached(
   writeCache(key, { cardIds, items });
   return items;
 }
+
+/**
+ * 네트워크 호출 없이(카드 목록 조회조차 안 함) 캐시에 저장된 마지막 결과만 즉시
+ * 반환한다. 없으면 `null`.
+ *
+ * **왜 필요한가 (9/14)**: `/resume`에서 "경력기술서 만들기"로 생성한 뒤 새로고침하면
+ * 화면이 빈 입력 폼으로 돌아가던 문제(사용자 지적) — React state(`items`)가 그냥
+ * 메모리에만 있어서 새로고침하면 날아가는 게 당연한데, 카드가 안 바뀌었으면 다시
+ * 눌러도 캐시 덕분에 결과 자체는 똑같이 나오니 "생성한 걸 잃어버린 느낌"만 주는
+ * 불필요한 마찰이었다. 마운트 시점에 이 함수로 캐시를 먼저 들여다보고 있으면 그걸로
+ * 화면을 즉시 채운다 — 카드 구성이 실제로 바뀌었는지 검증까진 안 하므로(그러려면
+ * `listCards()` 호출이 필요), 낡은 결과를 잠깐 보여줄 수는 있지만 "다시 만들기"를
+ * 누르면 그 시점에 `buildResumeCached()`가 정상적으로 최신 여부를 검증한다.
+ */
+export function peekCachedResume(projectId: number, jdText?: string): StarItem[] | null {
+  const cached = readCache(cacheKey(projectId, jdText));
+  return cached?.items ?? null;
+}

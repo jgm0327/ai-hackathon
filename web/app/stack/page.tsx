@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { ProjectSwitcher } from "@/components/ProjectSwitcher";
 import { SkeletonLine } from "@/components/Skeleton";
 import { ApiError, Card, StarItem, deleteCard, listCards, updateCardTags } from "@/lib/api";
@@ -67,8 +68,13 @@ function groupCardsByStarItems(
  * 무너져 있던 셈. 기본은 현재 프로젝트로 필터링하고(`/`와 동일한 `<ProjectSwitcher />`
  * 재사용), "전체 프로젝트 보기" 토글로 전 프로젝트를 한 번에 볼 때만 카드마다
  * 프로젝트명 라벨을 붙인다.
+ *
+ * **구현 노트 (9/14, /resume "이 문장의 근거"에서 카드로 이동)**: `/resume`의 STAR
+ * 항목 근거 날짜 칩을 누르면 `/stack?cardId=<id>`로 온다. `useSearchParams()`를
+ * 쓰기 때문에 Next.js가 정적 렌더링에서 제외시키려면 `<Suspense>` 경계가 필요해서,
+ * 실제 페이지 컴포넌트를 `StackPageContent`로 분리하고 기본 export에서 감쌌다.
  */
-export default function StackPage() {
+function StackPageContent() {
   // ProjectSwitcher에도 그대로 넘겨서 훅 인스턴스를 하나로 공유한다 — 그래야 스위처에서
   // 프로젝트를 바꾸는 즉시 이 페이지의 currentProject도 같이 바뀐다(구현 노트: 9/14
   // ProjectSwitcher.tsx 참고 — 예전엔 각자 useProjects()를 불러서 전환해도 새로고침
@@ -109,6 +115,26 @@ export default function StackPage() {
     setGroupedView(false);
     setGroupsError(null);
   }, [currentProject?.id]);
+
+  // /resume의 "이 문장의 근거" 날짜 칩에서 /stack?cardId=<id>로 넘어온 경우, 카드
+  // 목록이 뜨면 그 카드로 스크롤 + 잠깐 하이라이트한다 (9/14 신규).
+  const searchParams = useSearchParams();
+  const targetCardId = searchParams.get("cardId");
+  const [highlightedCardId, setHighlightedCardId] = useState<number | null>(null);
+  const highlightedOnceRef = useRef(false);
+
+  useEffect(() => {
+    if (loading || !targetCardId || highlightedOnceRef.current) return;
+    const id = Number(targetCardId);
+    if (!cards.some((c) => c.id === id)) return; // 아직 이 프로젝트에 없거나 다른 프로젝트 카드
+    highlightedOnceRef.current = true;
+    const el = document.getElementById(`card-${id}`);
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setHighlightedCardId(id);
+    const timer = setTimeout(() => setHighlightedCardId(null), 2500);
+    return () => clearTimeout(timer);
+  }, [loading, targetCardId, cards]);
 
   const toggleGroupedView = async () => {
     if (groupedView) {
@@ -486,11 +512,17 @@ export default function StackPage() {
               className="flex flex-col gap-2.5 rounded-[12px] border border-[#e5e7eb] bg-white px-[14px] py-[13px]"
             >
               <p className="text-[11px] font-semibold text-zinc-400">🔗 {group.title}</p>
-              <div className="flex flex-col gap-2">{renderCardBody(group.parent)}</div>
+              <div
+                id={`card-${group.parent.id}`}
+                className={`flex flex-col gap-2 rounded-lg transition-shadow ${highlightedCardId === group.parent.id ? "ring-2 ring-amber-400" : ""}`}
+              >
+                {renderCardBody(group.parent)}
+              </div>
               {group.children.map((child) => (
                 <div
                   key={child.id}
-                  className="ml-3 flex flex-col gap-2 border-l-2 border-zinc-100 pl-3"
+                  id={`card-${child.id}`}
+                  className={`ml-3 flex flex-col gap-2 rounded-lg border-l-2 border-zinc-100 pl-3 transition-shadow ${highlightedCardId === child.id ? "ring-2 ring-amber-400" : ""}`}
                 >
                   {renderCardBody(child)}
                 </div>
@@ -500,7 +532,8 @@ export default function StackPage() {
           {ungrouped.map((card) => (
             <li
               key={card.id}
-              className="flex flex-col gap-2 rounded-[12px] border border-[#e5e7eb] bg-white px-[14px] py-[13px]"
+              id={`card-${card.id}`}
+              className={`flex flex-col gap-2 rounded-[12px] border border-[#e5e7eb] bg-white px-[14px] py-[13px] transition-shadow ${highlightedCardId === card.id ? "ring-2 ring-amber-400" : ""}`}
             >
               {renderCardBody(card)}
             </li>
@@ -517,5 +550,13 @@ export default function StackPage() {
         </Link>
       </div>
     </div>
+  );
+}
+
+export default function StackPage() {
+  return (
+    <Suspense fallback={null}>
+      <StackPageContent />
+    </Suspense>
   );
 }

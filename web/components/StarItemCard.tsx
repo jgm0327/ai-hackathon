@@ -88,14 +88,24 @@ export function StarItemSection({ item }: { item: StarItem }) {
                 </button>
                 {showSources && (
                   <div className="mt-1.5 flex flex-wrap gap-1.5">
-                    {item.source_dates.map((date) => (
-                      <span
-                        key={date}
-                        className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-500"
-                      >
-                        {date}
-                      </span>
-                    ))}
+                    {item.source_dates.map((date, i) => {
+                      // source_dates와 source_card_ids는 백엔드가 같은 검증된
+                      // 카드 목록에서 같이 계산해서 인덱스가 항상 맞물린다
+                      // (docs/05-api-contract.md §3 참고) — 날짜 칩을 누르면
+                      // 같은 인덱스의 카드 id로 /stack에서 그 카드를 찾아간다.
+                      const cardId = item.source_card_ids[i];
+                      return (
+                        <button
+                          key={cardId ?? `${date}-${i}`}
+                          type="button"
+                          disabled={cardId == null}
+                          onClick={() => cardId != null && router.push(`/stack?cardId=${cardId}`)}
+                          className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-500 transition-colors hover:bg-zinc-200 disabled:cursor-default disabled:hover:bg-zinc-100"
+                        >
+                          {date}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>
