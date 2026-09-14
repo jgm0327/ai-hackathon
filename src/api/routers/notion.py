@@ -9,12 +9,17 @@ docstring 참고). 빈 문자열도 "값 없음"으로 취급해 거부한다 �
 투트랙(docs/03-risk-fallback.md 리스크 1과 별개, notion_client.py 모듈 docstring 참고):
 `NOTION_MCP_SERVER_URL`이 설정돼 있으면 먼저 MCP 경로를 시도하고, 실패하면 조용히
 REST로 폴백한다 — 어느 경로든 이 라우터의 응답 스키마는 동일하다.
+
+**구현 노트 (9/14, 카카오 로그인 Phase B)**: 노션에서 가져온 카드도 가져온 로그인
+유저 소유가 된다 — `user_token`(노션 쪽 신원)과 `current_user`(이 앱의 로그인 유저)는
+서로 다른 축이라 둘 다 필요하다.
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from src.agent.notion_client import fetch_notion_entries, fetch_notion_entries_via_mcp
 from src.agent.pipeline import run_pipeline_batch
 from src.api.schemas import CardResponse, NotionSyncRequest, NotionSyncResponse
+from src.auth.deps import get_current_user
 from src.config import settings
 from src.storage import db
 
@@ -37,7 +42,9 @@ def _fetch_entries(user_token: str):
 
 
 @router.post("/notion/sync", response_model=NotionSyncResponse)
-def sync_notion(payload: NotionSyncRequest) -> NotionSyncResponse:
+def sync_notion(
+    payload: NotionSyncRequest, current_user: db.User = Depends(get_current_user)
+) -> NotionSyncResponse:
     if not payload.user_token.strip():
         raise HTTPException(status_code=422, detail="user_token은 필수입니다.")
 
@@ -49,8 +56,8 @@ def sync_notion(payload: NotionSyncRequest) -> NotionSyncResponse:
 
     # 내용이 빈 페이지는 parse_note()에 넘길 근거가 없으니 건너뛴다.
     contents = [entry.content for entry in entries if entry.content.strip()]
-    results = run_pipeline_batch(contents)
-    cards = [db.get_card(r["card_id"]) for r in results]
+    results = run_pipeline_batch(current_user.id, contents)
+    cards = [db.get_card(current_user.id, r["card_id"]) for r in results]
 
     return NotionSyncResponse(
         imported=len(cards),

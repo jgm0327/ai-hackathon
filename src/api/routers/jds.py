@@ -5,11 +5,17 @@
 지킨다: 인덱스는 이 라우터가 최초로 호출될 때 지연 구축하고, 그 뒤로는 프로세스가
 살아있는 동안 재사용한다(build_jd_index()는 upsert라 다시 불러도 안전하지만
 매번 임베딩을 다시 계산하는 건 낭비라 플래그로 한 번만 하게 한다).
+
+**구현 노트 (9/14, 카카오 로그인 Phase B — 계획서에 없던 정정)**: 이 라우터도
+`db.get_card()`를 직접 호출하므로 로그인 유저 스코핑이 필요하다. 안 하면 다른 유저의
+`card_id`를 넣어도 그 카드의 스킬 태그로 매칭이 돌아가버린다(단순 존재 여부 누출보다
+심각 — 실제 매칭 결과가 새어나간다).
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from src.agent import vectorstore
 from src.api.schemas import JDMatchResponse
+from src.auth.deps import get_current_user
 from src.storage import db
 
 router = APIRouter(tags=["jds"])
@@ -25,8 +31,10 @@ def _ensure_index() -> None:
 
 
 @router.get("/jds/match", response_model=JDMatchResponse)
-def match_jds(card_id: int, top_k: int = 5) -> JDMatchResponse:
-    card = db.get_card(card_id)
+def match_jds(
+    card_id: int, top_k: int = 5, current_user: db.User = Depends(get_current_user)
+) -> JDMatchResponse:
+    card = db.get_card(current_user.id, card_id)
     if card is None:
         raise HTTPException(status_code=404, detail="카드를 찾을 수 없습니다.")
     if not card.skill_tags:

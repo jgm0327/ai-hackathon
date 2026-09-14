@@ -15,7 +15,10 @@ router = APIRouter(tags=["health"])
 
 def _check_db() -> bool:
     try:
-        db.list_projects()
+        # 9/14 카카오 로그인 Phase B: list_projects()는 이제 user_id가 필요해서 이
+        # 로그인 없는 헬스체크에는 안 맞는다. init_db()는 유저 무관하게 연결/스키마
+        # 자체만 확인하므로(멱등) 순수 "DB가 살아있는가" 체크로는 이게 더 맞다.
+        db.init_db()
         return True
     except Exception:
         return False
