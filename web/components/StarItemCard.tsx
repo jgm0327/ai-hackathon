@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { StarItem } from "@/lib/api";
 
@@ -23,8 +24,15 @@ export function formatStarItemForClipboard(item: StarItem): string {
  * `result`가 빈 문자열일 수 있다 — 기록에 숫자가 없으면 AI가 지어내지 않고
  * 비워서 반환하기 때문 (CLAUDE.md 2.2). "결과 없음"을 렌더링하지 않고,
  * 대신 되묻기 칩을 보여준다.
+ *
+ * **구현 노트 (9/14)**: 되묻기 칩을 누르면 숫자를 직접 입력할 자리가 없으므로(여기서
+ * 새 폼을 만들면 CLAUDE.md 2.1 정신에 어긋남 — 이 화면은 어쩌다 한 번 오는 이직 준비
+ * 경로), 매일 쓰는 입력 화면(`/`)으로 보내서 새 메모로 남기게 한다. 원래는 onClick
+ * 없이 title 툴팁 안내만 있었는데, `<button>`인데 눌러도 반응이 없어 혼란을 줄 수
+ * 있다는 지적을 받아 실제 이동 동작을 붙였다.
  */
 export function StarItemSection({ item }: { item: StarItem }) {
+  const router = useRouter();
   const [showSources, setShowSources] = useState(false);
 
   const rows: Array<{ label: string; value: string }> = [
@@ -62,7 +70,8 @@ export function StarItemSection({ item }: { item: StarItem }) {
               <button
                 type="button"
                 title="기록에 숫자가 없어 비워두었습니다. 기억나신다면 입력 화면에서 새 메모로 남겨보세요."
-                className="w-fit rounded-full bg-amber-50 px-2.5 py-1 text-xs text-amber-700"
+                onClick={() => router.push("/")}
+                className="w-fit rounded-full bg-amber-50 px-2.5 py-1 text-xs text-amber-700 transition-colors hover:bg-amber-100"
               >
                 숫자를 기억하시나요? (건너뛰기)
               </button>
