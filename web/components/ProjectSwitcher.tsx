@@ -9,9 +9,22 @@ import { BottomSheet } from "./BottomSheet";
  *
  * 연 1~3회만 쓰는 화면이므로 이름 + 시작일만 받는다 (CLAUDE.md 2.4).
  * 매일 쓰는 입력 경로(`/`)와는 분리된 바텀시트라 평소 입력 비용에 영향이 없다 (2.1).
+ *
+ * **구현 노트 (9/14, "/stack에서 전환해도 새로고침해야 반영됨" 버그 수정)**: 예전엔
+ * 이 컴포넌트가 `useProjects()`를 직접 호출했다. `/stack`처럼 이 컴포넌트를 렌더링하는
+ * 화면 자체도 `useProjects()`를 따로 불러 카드 목록을 그 `currentProject.id`로
+ * 필터링하고 있었는데, 훅을 두 번 부르면 서로 다른(동기화 안 되는) 상태 인스턴스가
+ * 생긴다 — 여기서 프로젝트를 바꿔도 페이지 쪽 인스턴스는 그대로라 카드 목록이
+ * 안 바뀌고, 새로고침으로 훅 인스턴스를 통째로 새로 만들어야만 반영됐다. 부모가
+ * `useProjects()`를 한 번만 호출해서 그 결과를 그대로 넘겨받는 controlled 컴포넌트로
+ * 바꿔서 상태를 하나로 합쳤다.
  */
-export function ProjectSwitcher() {
-  const { projects, currentProject, loading, error, switchCurrent, addProject } = useProjects();
+export function ProjectSwitcher({
+  projectsState,
+}: {
+  projectsState: ReturnType<typeof useProjects>;
+}) {
+  const { projects, currentProject, loading, error, switchCurrent, addProject } = projectsState;
   const [open, setOpen] = useState(false);
   const [showNewForm, setShowNewForm] = useState(false);
   const [name, setName] = useState("");
