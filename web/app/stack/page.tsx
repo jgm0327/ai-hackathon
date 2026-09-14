@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { ProjectSwitcher } from "@/components/ProjectSwitcher";
 import { SkeletonLine } from "@/components/Skeleton";
-import { ApiError, Card, deleteCard, listCards } from "@/lib/api";
+import { ApiError, Card, deleteCard, listCards, updateCardTags } from "@/lib/api";
 import { useProjects } from "@/lib/useProjects";
 
 function formatCardDate(iso: string): string {
@@ -34,6 +34,14 @@ export default function StackPage() {
   const [showAllProjects, setShowAllProjects] = useState(false);
   const [confirmId, setConfirmId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  // 카테고리(스킬 태그) 직접 수정 (9/14 신규) — 저장 시점엔 AI가 자동으로 뽑고,
+  // 이건 그 뒤에 가끔(연 몇 회) 손으로 고치는 별도 경로다 (CLAUDE.md 2.1).
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editTags, setEditTags] = useState<string[]>([]);
+  const [newTagInput, setNewTagInput] = useState("");
+  const [savingTags, setSavingTags] = useState(false);
+  const [tagError, setTagError] = useState<string | null>(null);
 
   // 프로젝트 목록 로딩이 끝나기 전엔 아직 currentProject를 모르므로 대기한다 —
   // 그 전에 필터 없이 먼저 불러오면 "현재 프로젝트만" 모드에서도 잠깐 전체가
@@ -87,6 +95,47 @@ export default function StackPage() {
     } finally {
       setDeletingId(null);
       setConfirmId(null);
+    }
+  };
+
+  const startEditingTags = (card: Card) => {
+    setEditingId(card.id);
+    setEditTags([...card.skill_tags]);
+    setNewTagInput("");
+    setTagError(null);
+    setConfirmId(null);
+  };
+
+  const cancelEditingTags = () => {
+    setEditingId(null);
+    setEditTags([]);
+    setNewTagInput("");
+    setTagError(null);
+  };
+
+  const addTagFromInput = () => {
+    const trimmed = newTagInput.trim();
+    setNewTagInput("");
+    if (!trimmed || editTags.includes(trimmed)) return;
+    setEditTags((prev) => [...prev, trimmed]);
+  };
+
+  const removeEditTag = (tag: string) => {
+    setEditTags((prev) => prev.filter((t) => t !== tag));
+  };
+
+  const saveEditingTags = async () => {
+    if (editingId == null) return;
+    setSavingTags(true);
+    setTagError(null);
+    try {
+      const updated = await updateCardTags(editingId, editTags);
+      setCards((prev) => prev.map((c) => (c.id === editingId ? updated : c)));
+      cancelEditingTags();
+    } catch {
+      setTagError("태그 저장에 실패했습니다. 다시 시도해 주세요.");
+    } finally {
+      setSavingTags(false);
     }
   };
 
@@ -194,6 +243,13 @@ export default function StackPage() {
                 <div className="flex items-center gap-2.5">
                   <button
                     type="button"
+                    onClick={() => startEditingTags(card)}
+                    className="text-[11px] font-medium text-zinc-600 underline underline-offset-2"
+                  >
+                    태그 수정
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => handleDelete(card.id)}
                     disabled={deletingId === card.id}
                     className="text-[11px] font-medium text-red-600 disabled:opacity-50"
@@ -219,6 +275,72 @@ export default function StackPage() {
                 </button>
               )}
             </div>
+
+            {editingId === card.id && (
+              <div className="flex flex-col gap-2 border-t border-[#e5e7eb] pt-2">
+                <div className="flex flex-wrap gap-1.5">
+                  {editTags.length === 0 && (
+                    <p className="text-[11px] text-zinc-400">태그 없음</p>
+                  )}
+                  {editTags.map((tag) => (
+                    <span
+                      key={tag}
+                      className="flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-1 text-[11px] text-zinc-600"
+                    >
+                      {tag}
+                      <button
+                        type="button"
+                        onClick={() => removeEditTag(tag)}
+                        aria-label={`${tag} 삭제`}
+                        className="text-zinc-400 transition-colors hover:text-zinc-700"
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  ))}
+                </div>
+                <div className="flex gap-1.5">
+                  <input
+                    type="text"
+                    value={newTagInput}
+                    onChange={(e) => setNewTagInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addTagFromInput();
+                      }
+                    }}
+                    placeholder="새 태그"
+                    className="min-w-0 flex-1 rounded-md border border-zinc-200 px-2 py-1 text-[11px] focus:border-zinc-400 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={addTagFromInput}
+                    className="rounded-md border border-zinc-200 px-2 py-1 text-[11px] text-zinc-600 transition-colors hover:bg-zinc-50"
+                  >
+                    추가
+                  </button>
+                </div>
+                {tagError && <p className="text-[11px] text-red-600">{tagError}</p>}
+                <div className="flex justify-end gap-3 pt-0.5">
+                  <button
+                    type="button"
+                    onClick={cancelEditingTags}
+                    className="text-[11px] text-zinc-500"
+                  >
+                    취소
+                  </button>
+                  <button
+                    type="button"
+                    onClick={saveEditingTags}
+                    disabled={savingTags}
+                    className="text-[11px] font-semibold text-black disabled:opacity-50"
+                  >
+                    {savingTags ? "저장 중…" : "저장"}
+                  </button>
+                </div>
+              </div>
+            )}
           </li>
         ))}
       </ul>

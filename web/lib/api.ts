@@ -165,6 +165,18 @@ export function deleteCard(id: number): Promise<void> {
   return request<void>(`/cards/${id}`, { method: "DELETE" });
 }
 
+/**
+ * 카테고리(스킬 태그)를 직접 수정한다 (9/14 신규). 매일 쓰는 저장 경로(POST)는 여전히
+ * AI가 자동으로 태그를 뽑고, 이건 저장 후 가끔(`/stack`에서) 손으로 고치는 별도 경로다
+ * (CLAUDE.md 2.1 — 매일 쓰는 경로에는 선택지를 넣지 않는다).
+ */
+export function updateCardTags(id: number, skillTags: string[]): Promise<Card> {
+  return request<Card>(`/cards/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ skill_tags: skillTags }),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // 2. 프로젝트 — docs/05-api-contract.md §2
 // ---------------------------------------------------------------------------
