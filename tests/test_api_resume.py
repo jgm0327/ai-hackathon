@@ -56,7 +56,7 @@ _MOCK_LLM_RESPONSE = json.dumps(
                 "task": "응답 시간을 개선하고 결제 도메인 안정성을 확보해야 했습니다.",
                 "action": "Redis 캐싱 레이어를 도입했습니다.",
                 "result": "결제 오류율을 0.8%에서 0.3%로 낮췄습니다.",
-                "source_dates": ["02.14", "03.02"],
+                "source_indices": [1, 2],
             }
         ]
     },
@@ -83,6 +83,9 @@ def test_create_resume_merges_time_gap_pair(client, current_user_id):
     assert item["title"] == "결제 API 성능 개선"
     assert item["result"] == "결제 오류율을 0.8%에서 0.3%로 낮췄습니다."
     assert item["source_dates"] == ["02.14", "03.02"]
+    # list_cards()는 시간순(오래된 순)이라 source_indices [1, 2]는 02.14 카드, 03.02 카드 순.
+    seeded = db.list_cards(current_user_id, project_id)
+    assert item["source_card_ids"] == [seeded[0].id, seeded[1].id]
 
 
 def test_create_resume_with_jd_text_passes_through(client, current_user_id):
@@ -134,7 +137,7 @@ def test_create_resume_never_fabricates_missing_result(client, current_user_id):
                     "task": "t",
                     "action": "a",
                     "result": "",
-                    "source_dates": ["04.01"],
+                    "source_indices": [1],
                 }
             ]
         },

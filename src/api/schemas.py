@@ -83,6 +83,9 @@ class StarItemResponse(_FromAttributes):
     action: str
     result: str
     source_dates: list[str]
+    # 9/14 신규 — docs/05-api-contract.md 3장 참고. source_dates는 화면 표시(근거 토글)용,
+    # source_card_ids는 카드 매칭(예: /stack "인과관계로 묶어보기")용으로 역할이 다르다.
+    source_card_ids: list[int]
 
 
 class ResumeResponse(BaseModel):
