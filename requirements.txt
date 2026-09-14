@@ -25,6 +25,11 @@ httpx==0.28.1  # FastAPI TestClient(내부적으로 httpx 사용)와 테스트�
 # Tier 2 푸시 알림 (선택, Track E)
 pywebpush==2.0.3
 
+# 노션 MCP 연동 (선택, Track B 5부, 9/14). fetch_notion_entries_via_mcp()에서만 쓰고
+# 지연 import하므로 NOTION_MCP_SERVER_URL을 아예 안 쓰는 배포엔 불필요한 무게는 아니다
+# (패키지 자체는 가볍다). 실제 MCP 서버로 검증은 안 됐다 — notion_client.py 모듈 docstring 참고.
+mcp==2.2.0
+
 # 선택: EMBEDDING_PROVIDER=local_multilingual 사용 시에만 필요 (9/13 검증, 무거움 — torch 포함).
 # chroma_default(기본 배포)에는 불필요하므로 기본 설치에는 포함하지 않고 주석으로만 남김.
 # 필요 시 아래 주석을 해제하고 설치할 것:
