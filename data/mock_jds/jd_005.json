@@ -1,0 +1,6 @@
+{
+  "company": "가상모빌리티",
+  "title": "DevOps 엔지니어",
+  "required_skills": ["CI/CD", "쿠버네티스", "인프라자동화", "장애대응"],
+  "description": "배포 파이프라인 자동화와 프로덕션 장애 대응 경험이 있는 DevOps 엔지니어를 찾습니다."
+}

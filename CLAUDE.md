@@ -124,14 +124,21 @@ OCI 단일 VM에 상주 프로세스로 올리므로 **콜드 스타트와 디�
 
 ## 5. 트랙 구성 (worktree/브랜치)
 
+> **진행 현황 (2026-09-14 갱신)**: 아래 표는 9/13 피벗 시점 기준 계획이다. 실제로는
+> 같은 날 세션에서 P0 세 개(저장소/`build_resume()`/프로젝트 층+FastAPI)를 전부
+> 끝냈고, 9/14에 P1 라우터(JD 매칭/노션)와 Track E/F 이식(마이크/PWA/웹푸시)까지
+> 마쳤다. 남은 건 **Track D(OCI 배포)뿐**이며, 이건 실제 VM/도메인 접속 정보가
+> 있어야 진행 가능하다. 실기기(iPhone/Android) 검증은 여전히 미완료 — CLAUDE.md
+> 8장 참고. 세부 현황은 각 `tasks/track-*.md`의 체크리스트가 최신 진실이다.
+
 | 트랙 | 브랜치 | 범위 | 상태 |
 |---|---|---|---|
-| A | `track-a-prompt` | `parse_note()` + **`build_resume()` 신규** | 절반 |
-| B | `track-b-agent` | **저장소 신규** + 프로젝트 층 + Chroma + Notion | 절반 |
-| C | `track-c-frontend` | **Next.js 신규** (Streamlit 폐기) | 재시작 |
-| D | `track-d-deploy` | **OCI + nginx** (Streamlit Cloud 폐기) | 재시작 |
-| E | `track-e-push` | 웹푸시 — 구현 완료, **이식 필요** | 이식 |
-| F | `track-f-voice` | 음성 입력 — 구현 완료, **이식 + iOS 검증 필요** | 이식 |
+| A | `track-a-prompt` | `parse_note()` + `build_resume()` | ✅ 완료 |
+| B | `track-b-agent` | 저장소 + 프로젝트 층 + Chroma + Notion + FastAPI | ✅ 완료 (Notion MCP는 선택, 미착수) |
+| C | `track-c-frontend` | Next.js — 화면 4개 + 마이크 + PWA + 웹푸시 | ✅ 구현 완료, **실기기 검증 대기** |
+| D | `track-d-deploy` | OCI + nginx (Streamlit Cloud 폐기) | ⬜ 미착수 — VM 접속 정보 필요 |
+| E | `track-e-push` | 웹푸시 — 이식 완료 | ✅ 이식 완료, **실기기 수신 확인 대기** |
+| F | `track-f-voice` | 음성 입력 — 이식 완료 | ✅ 이식 완료, **iOS 실기기 검증 대기** |
 
 ### 트랙 간 계약 (먼저 고정할 시그니처)
 
@@ -264,8 +271,16 @@ iOS 실패 시 UX가 "실시간 자막"에서 "녹음 버튼 하나"로 바뀐�
 - [x] `docs/01-schedule.md` / `02-architecture.md` / `03-risk-fallback.md` — 재작성
 - [x] `docs/05-api-contract.md` — 신규
 - [x] `docs/06-migration.md` — 신규 (Track E/F 이식 절차)
-- [ ] `tasks/track-e-push-notifications.md` / `track-f-stt-voice-input.md`
-      — 본문은 유지하되 상단에 `docs/06-migration.md` 참조 링크 추가
-- [ ] `src/frontend/` — 폐기. iframe 우회 코드(`install_button.py` 등)는 이식하지 않는다
-- [ ] `manifest.json`, `README.md` — 제품명 "신입사원 온보딩 다이어리" 갱신
-- [ ] `requirements.txt` — streamlit 제거, fastapi/uvicorn 추가
+- [x] `tasks/track-e-push-notifications.md` / `track-f-stt-voice-input.md`
+      — 본문은 유지하고 상단에 `docs/06-migration.md` 참조 링크 추가함 (9/13)
+- [x] `logs/` 신설 — 기존 `tasks/track-{a,b,c,d}.md`에 있던 트러블슈팅/회고 기록을
+      개정으로 덮어쓰기 전에 `logs/track-{a,b,c,d}.md`로 이관해서 보존함 (9/13)
+- [ ] `src/frontend/` — **아직 삭제하지 않음.** 파일 자체는 참고/폴백용으로 남겨두되,
+      9/13~14 사이 게이트를 통과하고 Next.js가 실제로 기능적으로 완성돼 requirements.txt
+      제거는 이미 진행함(아래 항목). 파일 자체의 최종 폐기는 OCI 배포 확정 후로 미룸 —
+      iframe 우회 코드(`install_button.py` 등)는 이식하지 않는다
+- [x] `manifest.json`, `README.md` — 제품명 갱신 (9/14). `web/app/manifest.ts`가
+      "커리어 로그"로, `README.md`가 현재 아키텍처(Next.js+FastAPI+SQLite+Chroma) 기준으로
+      전면 갱신됨
+- [x] `requirements.txt` — streamlit/plotly/langchain 제거, fastapi/uvicorn 추가 (9/14).
+      Next.js 전환이 실제로 완료·검증돼 제거 조건 충족으로 판단함

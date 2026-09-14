@@ -30,6 +30,15 @@ SYSTEM_PROMPT = """\
 
 입력: "오늘 좀 바빴음"
 출력: {{"refined_sentence": "특정 업무 내용을 확인할 수 없음", "skill_tags": [], "confidence": 0.1}}
+
+입력: "버그 고침"
+출력: {{"refined_sentence": "발견된 소프트웨어 결함을 수정함", "skill_tags": ["버그수정"], "confidence": 0.4}}
+
+입력: "결제 버그 고치고 나서 API 문서도 정리하고 회의도 들어감"
+출력: {{"refined_sentence": "결제 모듈의 소프트웨어 결함을 식별하고 수정함", "skill_tags": ["버그수정", "결제시스템"], "confidence": 0.7}}
+
+입력: "점심 뭐 먹을지 고민함"
+출력: {{"refined_sentence": "특정 업무 내용을 확인할 수 없음", "skill_tags": [], "confidence": 0.05}}
 """
 
 USER_PROMPT_TEMPLATE = "낙서 문장: {raw_text}"

@@ -1,11 +1,41 @@
-streamlit==1.38.0
-plotly==5.24.0
-langchain==0.3.7
-chromadb==0.5.15
-anthropic==0.36.0
-python-dotenv==1.0.1
-pytest==8.3.3
-requests==2.32.3
+# 버전 상향 참고(9/10): 원래 핀 버전들이 Python 3.14 로컬 개발 환경에서
+# numpy 빌드 실패 등으로 설치 자체가 안 돼서, 실제 설치 검증된 버전으로 올림.
+# 배포 환경(Track D)의 Python 버전이 다르면 재검증 필요.
+chromadb==1.5.9
+anthropic==1.4.0
+python-dotenv==1.2.3
+pytest==9.1.1
+requests==2.34.2
+
+# FastAPI 백엔드 (9/13 피벗, docs/02-architecture.md 4장)
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+httpx==0.28.1  # FastAPI TestClient(내부적으로 httpx 사용)와 테스트용
+
+# 9/14 제거: streamlit, plotly, langchain.
+# - streamlit/plotly: Next.js(Track C) + Recharts 전환이 실제로 완료·검증됨(P0 게이트
+#   통과 + 음성/PWA/웹푸시 이식까지 끝남, CLAUDE.md 11장의 제거 조건 충족).
+#   src/frontend/(Streamlit 코드)는 참고용으로 파일은 남겨두지만, 이 requirements.txt로
+#   설치한 환경에서는 더 이상 실행되지 않는다 — docs/06-migration.md 3장이 애초에
+#   "버리는 것"으로 분류한 코드라 의도된 상태다.
+# - langchain: 애초에 어느 모듈에서도 import된 적이 없다(파싱은 parser.py/resume.py가
+#   처음부터 Anthropic/Ollama 직접 호출 방식으로 구현됨, tasks/track-a-prompt-engine.md
+#   구현 노트 참고). 기술 스택 초기 결정이 실제 구현과 달라져서 생긴 죽은 의존성.
 
 # Tier 2 푸시 알림 (선택, Track E)
 pywebpush==2.0.3
+
+# 노션 MCP 연동 (선택, Track B 5부, 9/14). fetch_notion_entries_via_mcp()에서만 쓰고
+# 지연 import하므로 NOTION_MCP_SERVER_URL을 아예 안 쓰는 배포엔 불필요한 무게는 아니다
+# (패키지 자체는 가볍다). 실제 MCP 서버로 검증은 안 됐다 — notion_client.py 모듈 docstring 참고.
+mcp==2.2.0
+
+# 선택: EMBEDDING_PROVIDER=local_multilingual 사용 시에만 필요 (9/13 검증, 무거움 — torch 포함).
+# chroma_default(기본 배포)에는 불필요하므로 기본 설치에는 포함하지 않고 주석으로만 남김.
+# 필요 시 아래 주석을 해제하고 설치할 것:
+#   sentence-transformers==6.0.1
+# 주의(9/13, Windows 로컬 검증 환경 한정): scipy==1.18.1 / 최신 scikit-learn을 그대로 두면
+# 일부 환경의 애플리케이션 제어 정책(Windows)이 컴파일된 DLL 로드를 막아 sentence-transformers
+# import 자체가 실패했다. 아래 버전으로 고정하면 해결됨 (다른 환경에서 문제 없으면 최신판 유지 가능):
+#   scipy==1.16.2
+#   scikit-learn==1.7.2

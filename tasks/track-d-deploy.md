@@ -3,6 +3,13 @@
 > **2026-09-13 전면 재작성.** Streamlit Community Cloud를 폐기하고
 > OCI 단일 VM + nginx 리버스 프록시로 전환한다.
 
+> **9/14 후속**: 다른 트랙(A/B/C/E/F)의 P0/P1 작업이 전부 끝나서 이 트랙만 남았다.
+> 실제 VM/도메인 접속 정보가 없어 아래 체크리스트를 이 세션에서 직접 수행할 수는
+> 없었지만, VM이 생기면 바로 복사해 쓸 수 있는 설정 템플릿을 `deploy/`에 미리
+> 준비해뒀다: `deploy/nginx.conf.example`, `deploy/systemd/career-log-{api,web}.service`,
+> 적용 순서를 정리한 `deploy/README.md`. **한 번도 실제 VM에 적용해본 적 없는
+> 템플릿**이니 그대로 신뢰하지 말고 각 단계 상태를 확인하며 적용할 것.
+
 ---
 
 ## 1. 구성

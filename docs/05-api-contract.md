@@ -168,16 +168,31 @@ Web Speech API가 실기기에서 동작하면 **이 엔드포인트는 불필�
 
 ## 7. 웹푸시
 
+### `GET /api/push/vapid-public-key` (9/13 추가)
+```jsonc
+{ "public_key": "..." }
+```
+프론트가 `pushManager.subscribe({ applicationServerKey: ... })`에 쓸 공개키.
+VAPID_PUBLIC_KEY가 서버에 설정 안 돼 있으면 503.
+
 ### `POST /api/push/subscribe`
 ```jsonc
+// 요청 — leave_time은 9/13 추가 필드(계약 초안엔 없었음). 발송 시각 계산
+// (push_sender.send_due_reminders())에 필수라서 추가함. Track C에 공유 완료.
 { "endpoint": "https://fcm.googleapis.com/...",
-  "keys": { "p256dh": "...", "auth": "..." } }
+  "keys": { "p256dh": "...", "auth": "..." },
+  "leave_time": "18:00" }
 ```
-응답 201. 기존 Upstash 저장소를 그대로 쓰거나 SQLite로 옮긴다
+응답 201. 로그인이 없으므로 `endpoint`를 해시해 구독 구분용 id로 쓴다 — 같은
+구독으로 다시 호출하면 upsert된다. 기존 Upstash 저장소 그대로 씀
 (`docs/06-migration.md` 참조).
 
 ### `DELETE /api/push/subscribe`
-응답 204.
+```jsonc
+// 요청
+{ "endpoint": "https://fcm.googleapis.com/..." }
+```
+응답 204. 존재하지 않는 구독을 지워도 204(멱등).
 
 ---
 
@@ -191,8 +206,41 @@ Web Speech API가 실기기에서 동작하면 **이 엔드포인트는 불필�
 
 ---
 
+## 9. 온보딩 프로필 (P2, 9/14 신규)
+
+로그인이 없는 단일 유저 데모 전제라 싱글턴이다 — 여러 유저를 구분하지 않는다.
+`job_field`/`years_segment`는 자유 입력이 아니라 고정 칩 세트다(CLAUDE.md 2.4:
+연차 직접 입력 배제). 아직 다른 기능(경력기술서 생성, JD 매칭)에는 연결돼 있지
+않다 — 온보딩/입력 화면에 컨텍스트를 보여주는 용도.
+
+### `GET /api/profile`
+```jsonc
+// 온보딩을 아직 안 했으면 전부 null
+{ "job_field": "개발", "job_detail": "백엔드", "years_segment": "4-6" }
+```
+
+### `PUT /api/profile`
+```jsonc
+// 요청 — job_field/years_segment는 아래 고정값만 허용, 그 외는 422
+// job_field: "개발" | "기획·PM" | "디자인" | "마케팅" | "영업" | "데이터"
+// years_segment: "1-3" | "4-6" | "7-10" | "10+"
+{ "job_field": "개발", "job_detail": "백엔드", "years_segment": "4-6" }
+```
+응답 200, 저장된 프로필 그대로 반환(항상 3개 필드 전체를 덮어씀). `job_detail`은
+직군별 하위 선택지가 아직 다 정해지지 않아 자유 문자열로 둔다 — 생략 가능.
+
+---
+
 ## 변경 규칙
 
 이 문서를 바꾸면 **Track C에 즉시 알린다.**
 필드를 제거하거나 이름을 바꾸는 변경은 프론트 작업 중에는 하지 않는다.
 추가는 자유롭다.
+
+### 구현 시점 알려진 차이 (9/13, FastAPI 구현)
+
+- **1장 `created_at`**: 위 예시는 타임존 포함 datetime(`"...T18:45:00+09:00"`)이지만,
+  실제 구현은 저장소가 가진 값(`"2026-02-14"`, 날짜만)을 그대로 반환한다. 저장소 계약
+  (`save_card`)을 조율 없이 바꾸지 않기 위한 판단. 시각까지 필요하면 Track B와 논의 후
+  `save_card`/`run_pipeline`부터 바꿀 것 — API 레이어만 고쳐서 해결되지 않는다.
+- 나머지 필드/모양은 문서 그대로 구현함 (`tasks/track-b-agent-pipeline.md` 6부 참고).
