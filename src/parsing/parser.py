@@ -4,6 +4,7 @@
 가져다 쓰는 고정 계약이다. 변경 시 tasks/track-b-agent-pipeline.md 담당자와 반드시 상의.
 """
 import json
+import re
 from dataclasses import dataclass, field
 from functools import lru_cache
 
@@ -84,6 +85,20 @@ def _call_llm(raw_text: str) -> str:
     return _call_llm_anthropic(raw_text)
 
 
+_CODE_FENCE_RE = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?```$", re.DOTALL)
+
+
+def _strip_code_fence(text: str) -> str:
+    """LLM이 JSON을 마크다운 코드 펜스(` ```json ... ``` `)로 감싸서 반환하는 경우가
+    있다(9/14 실제 발생 — Claude가 이렇게 응답해서 `json.loads()`가
+    `Expecting value: line 1 column 1`로 죽고, POST /api/resume이 500이 되는 걸
+    실측 재현함). 펜스가 있으면 벗겨내고, 없으면 그대로 둔다 — 두 경우 다 안전하게 처리.
+    """
+    stripped = text.strip()
+    match = _CODE_FENCE_RE.match(stripped)
+    return match.group(1).strip() if match else stripped
+
+
 def parse_note(raw_text: str) -> ParsedEntry:
     """낙서 문장을 받아 정제 문장 + 역량 태그를 반환한다.
 
@@ -92,7 +107,7 @@ def parse_note(raw_text: str) -> ParsedEntry:
     for attempt in range(2):
         raw_response = _call_llm(raw_text)
         try:
-            data = json.loads(raw_response)
+            data = json.loads(_strip_code_fence(raw_response))
             return ParsedEntry(
                 raw_text=raw_text,
                 refined_sentence=data["refined_sentence"],
