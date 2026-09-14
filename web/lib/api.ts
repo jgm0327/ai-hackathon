@@ -223,6 +223,28 @@ export function buildResume(projectId: number, jdText?: string): Promise<StarIte
   }).then((res) => res.items);
 }
 
+/**
+ * 유저가 AI 초안을 가져다 직접 고친 자유 텍스트(마크다운) — `buildResume()`이
+ * 반환하는 구조화된 StarItem과는 별개다(9/14 신규, docs/05-api-contract.md §3).
+ * 저장된 초안이 없으면 `content`/`updated_at`이 둘 다 null.
+ */
+export interface ResumeDraft {
+  project_id: number;
+  content: string | null;
+  updated_at: string | null;
+}
+
+export function getResumeDraft(projectId: number): Promise<ResumeDraft> {
+  return request<ResumeDraft>(`/resume/draft?project_id=${projectId}`);
+}
+
+export function saveResumeDraft(projectId: number, content: string): Promise<ResumeDraft> {
+  return request<ResumeDraft>("/resume/draft", {
+    method: "PUT",
+    body: JSON.stringify({ project_id: projectId, content }),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // 5. 노션 (읽기 전용) — docs/05-api-contract.md §5
 // ---------------------------------------------------------------------------
