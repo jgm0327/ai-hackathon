@@ -37,7 +37,21 @@ def _call_llm_anthropic(raw_text: str) -> str:
             {"role": "user", "content": USER_PROMPT_TEMPLATE.format(raw_text=raw_text)},
         ],
     )
-    return response.content[0].text
+    return _extract_text(response)
+
+
+def _extract_text(response: anthropic.types.Message) -> str:
+    """응답의 첫 텍스트 블록을 꺼낸다.
+
+    `content[0]`이 항상 텍스트라고 가정하면 안 된다 — 모델이 ThinkingBlock 등 텍스트가
+    아닌 블록을 먼저 반환하면 `content[0].text`에서 AttributeError가 난다(9/14 실제로
+    발생: `AttributeError: 'ThinkingBlock' object has no attribute 'text'`, POST
+    /api/cards가 500으로 죽으면서 CORS 헤더가 안 붙어 브라우저엔 CORS 에러로 보였음).
+    """
+    for block in response.content:
+        if block.type == "text":
+            return block.text
+    raise ValueError(f"Anthropic 응답에 텍스트 블록이 없습니다: {response.content!r}")
 
 
 def _call_llm_ollama(raw_text: str) -> str:
