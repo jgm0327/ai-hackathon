@@ -1,23 +1,70 @@
 "use client";
 
-import { useState } from "react";
-import { StarItemCard, formatStarItemForClipboard } from "@/components/StarItemCard";
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { StarItemSection, formatStarItemForClipboard } from "@/components/StarItemCard";
 import { StarItemSkeleton } from "@/components/Skeleton";
-import { ApiError, StarItem, buildResume } from "@/lib/api";
+import { ApiError, Profile, StarItem, buildResume, getProfile } from "@/lib/api";
 import { useProjects } from "@/lib/useProjects";
+
+/** 프로필/프로젝트에서 실제로 있는 값만으로 문서 제목을 만든다 — 없는 정보를
+ * 지어내 요약 문단을 만들지 않는다(CLAUDE.md 2.2). `build_resume()`은 제목/요약을
+ * 생성하지 않으므로 여기서 조합 가능한 값만 쓴다. */
+function buildResumeHeading(profile: Profile | null, projectName: string | null): string | null {
+  if (profile?.job_field) {
+    const parts = [profile.job_detail ?? profile.job_field];
+    if (profile.years_segment) {
+      parts.push(profile.years_segment === "10+" ? "10년 이상" : `${profile.years_segment}년차`);
+    }
+    return parts.join(" · ");
+  }
+  return projectName;
+}
+
+/** STAR 항목 한 건을 마크다운 섹션으로. 클립보드 복사 포맷과 동일한 본문을 재사용해
+ * 두 곳에서 STAR→텍스트 변환 로직이 갈라지지 않게 한다. */
+function toMarkdownSection(item: StarItem): string {
+  const [header, ...rest] = formatStarItemForClipboard(item).split("\n");
+  return [`## ${header}`, ...rest].join("\n");
+}
+
+function buildResumeMarkdown(heading: string | null, items: StarItem[]): string {
+  const parts: string[] = [];
+  if (heading) parts.push(`# ${heading}`);
+  parts.push(...items.map(toMarkdownSection));
+  return parts.join("\n\n");
+}
 
 /**
  * 경력기술서 빌더 (`/resume`) — 이직 준비 경로. 무거운 호출이라 로딩 표시가 중요하다
  * (`docs/02-architecture.md` §2.2 — 입력 200토큰/150토큰짜리 매일 경로와 달리
  * 여기는 2,500/2,000토큰짜리 호출).
+ *
+ * Figma "4.2 경력기술서 빌더"는 STAR 항목들을 카드로 나열하지 않고 제목+요약 →
+ * 항목별 라벨 행(상황/과제/행동/결과)이 이어지는 하나의 문서로 보여준다. 문서
+ * 요약 문단은 `build_resume()`이 만들지 않는 데이터라 생성하지 않는다.
  */
 export default function ResumePage() {
   const { currentProject, loading: projectsLoading } = useProjects();
+  const [profile, setProfile] = useState<Profile | null>(null);
   const [jdText, setJdText] = useState("");
   const [items, setItems] = useState<StarItem[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [copiedAll, setCopiedAll] = useState(false);
+  const [showBuildForm, setShowBuildForm] = useState(true);
+  const [copyStatus, setCopyStatus] = useState<"markdown" | "notion" | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getProfile()
+      .then((p) => {
+        if (!cancelled) setProfile(p);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleBuild = async () => {
     if (!currentProject) return;
@@ -26,6 +73,7 @@ export default function ResumePage() {
     try {
       const result = await buildResume(currentProject.id, jdText.trim() || undefined);
       setItems(result);
+      setShowBuildForm(false);
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : "경력기술서 생성에 실패했습니다.");
     } finally {
@@ -33,20 +81,26 @@ export default function ResumePage() {
     }
   };
 
-  const handleCopyAll = async () => {
+  const heading = buildResumeHeading(profile, currentProject?.name ?? null);
+
+  const handleCopy = async (kind: "markdown" | "notion") => {
     if (!items || items.length === 0) return;
     try {
-      await navigator.clipboard.writeText(items.map(formatStarItemForClipboard).join("\n\n"));
-      setCopiedAll(true);
-      setTimeout(() => setCopiedAll(false), 1500);
+      await navigator.clipboard.writeText(buildResumeMarkdown(heading, items));
+      setCopyStatus(kind);
+      setTimeout(() => setCopyStatus(null), 1500);
     } catch {
       // 클립보드 접근 실패 — 조용히 무시
     }
   };
 
   return (
-    <div className="flex flex-col gap-4 px-4 pt-4">
-      <h1 className="text-lg font-semibold">경력기술서</h1>
+    <div className="flex flex-col gap-4 px-5 pb-8">
+      <div className="flex items-center gap-[10px] pb-[6px] pt-[8px]">
+        <Link href="/stack" aria-label="뒤로" className="text-[17px] text-[#18181b]">
+          ←
+        </Link>
+      </div>
 
       <p className="text-sm text-zinc-500">
         {projectsLoading
@@ -56,22 +110,35 @@ export default function ResumePage() {
             : "먼저 입력 화면에서 프로젝트를 선택해 주세요."}
       </p>
 
-      <textarea
-        value={jdText}
-        onChange={(e) => setJdText(e.target.value)}
-        placeholder="채용공고 본문을 붙여넣으면 맞춰서 재구성해 드려요 (선택)"
-        rows={4}
-        className="w-full resize-none rounded-xl border border-zinc-200 bg-white p-3 text-sm shadow-sm focus:border-zinc-400 focus:outline-none"
-      />
+      {(!items || showBuildForm) && (
+        <div className="flex flex-col gap-3 rounded-[14px] border border-[#e5e7eb] bg-white p-4">
+          <textarea
+            value={jdText}
+            onChange={(e) => setJdText(e.target.value)}
+            placeholder="채용공고 본문을 붙여넣으면 맞춰서 재구성해 드려요 (선택)"
+            rows={4}
+            className="w-full resize-none rounded-xl border border-zinc-200 bg-white p-3 text-sm shadow-sm focus:border-zinc-400 focus:outline-none"
+          />
+          <button
+            type="button"
+            onClick={handleBuild}
+            disabled={!currentProject || loading}
+            className="w-full rounded-xl bg-zinc-900 py-3 text-base font-semibold text-white disabled:opacity-40"
+          >
+            {loading ? "경력기술서 만드는 중… (최대 10초)" : "경력기술서 만들기"}
+          </button>
+        </div>
+      )}
 
-      <button
-        type="button"
-        onClick={handleBuild}
-        disabled={!currentProject || loading}
-        className="w-full rounded-xl bg-zinc-900 py-3 text-base font-semibold text-white disabled:opacity-40"
-      >
-        {loading ? "경력기술서 만드는 중… (최대 10초)" : "경력기술서 만들기"}
-      </button>
+      {items && !showBuildForm && (
+        <button
+          type="button"
+          onClick={() => setShowBuildForm(true)}
+          className="w-fit text-xs font-medium text-zinc-500 underline underline-offset-2"
+        >
+          JD를 바꿔 다시 만들기
+        </button>
+      )}
 
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
 
@@ -84,28 +151,57 @@ export default function ResumePage() {
 
       {items && !loading && (
         <>
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-zinc-500">{items.length}개 항목</p>
-            {items.length > 0 && (
-              <button
-                type="button"
-                onClick={handleCopyAll}
-                className="rounded-full border border-zinc-200 px-3 py-1 text-xs text-zinc-600"
-              >
-                {copiedAll ? "전체 복사됨" : "전체 복사"}
-              </button>
-            )}
-          </div>
-
           {items.length === 0 ? (
             <p className="px-1 py-8 text-center text-sm text-zinc-400">
               아직 STAR로 묶을 만한 기록이 없습니다.
             </p>
           ) : (
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col rounded-[14px] border border-[#e5e7eb] bg-white p-5">
+              {heading && (
+                <>
+                  <p className="text-[16px] font-bold text-[#18181b]">{heading}</p>
+                  <div className="my-3 h-px w-full bg-[#e5e7eb]" />
+                </>
+              )}
               {items.map((item, i) => (
-                <StarItemCard key={`${item.title}-${i}`} item={item} />
+                <div key={`${item.title}-${i}`}>
+                  <StarItemSection item={item} />
+                  {i < items.length - 1 && <div className="h-px w-full bg-[#e5e7eb]" />}
+                </div>
               ))}
+            </div>
+          )}
+
+          {items.length > 0 && (
+            <div className="flex flex-col gap-[10px] rounded-[14px] border border-[#e5e7eb] bg-white p-4">
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled
+                  title="Word(.docx) 내보내기는 아직 준비 중이에요"
+                  className="flex flex-1 cursor-not-allowed flex-col items-center justify-center gap-0.5 rounded-[11px] bg-zinc-200 py-[13px] text-zinc-400"
+                >
+                  <span className="text-[12px] font-semibold">Word</span>
+                  <span className="text-[9px]">준비 중</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleCopy("markdown")}
+                  className="flex flex-1 items-center justify-center rounded-[11px] border-[1.5px] border-[#e5e7eb] bg-white py-[13px] text-[12px] font-semibold text-[#18181b]"
+                >
+                  {copyStatus === "markdown" ? "복사됨" : "마크다운"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleCopy("notion")}
+                  className="flex flex-1 items-center justify-center rounded-[11px] border-[1.5px] border-[#e5e7eb] bg-white py-[13px] text-[12px] font-semibold text-[#18181b]"
+                >
+                  {copyStatus === "notion" ? "복사됨" : "노션 복사"}
+                </button>
+              </div>
+              <Link href="/" className="text-center text-[11px] text-[#a1a1aa]">
+                다시 기록하러 가기 ↩
+              </Link>
             </div>
           )}
         </>

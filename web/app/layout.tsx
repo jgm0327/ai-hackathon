@@ -31,7 +31,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="ko"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col bg-zinc-50 text-zinc-900">
+      <body className="min-h-full flex flex-col bg-[#f1f1f3] text-[#18181b]">
         <ServiceWorkerRegistration />
         <div className="mx-auto flex w-full max-w-md flex-1 flex-col">
           <main className="flex-1 pb-6">{children}</main>
