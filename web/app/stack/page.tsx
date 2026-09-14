@@ -26,7 +26,12 @@ function formatCardDate(iso: string): string {
  * 프로젝트명 라벨을 붙인다.
  */
 export default function StackPage() {
-  const { projects, currentProject, loading: projectsLoading } = useProjects();
+  // ProjectSwitcher에도 그대로 넘겨서 훅 인스턴스를 하나로 공유한다 — 그래야 스위처에서
+  // 프로젝트를 바꾸는 즉시 이 페이지의 currentProject도 같이 바뀐다(구현 노트: 9/14
+  // ProjectSwitcher.tsx 참고 — 예전엔 각자 useProjects()를 불러서 전환해도 새로고침
+  // 전까진 카드 목록이 안 바뀌는 버그가 있었다).
+  const projectsState = useProjects();
+  const { projects, currentProject, loading: projectsLoading } = projectsState;
   const [cards, setCards] = useState<Card[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -157,7 +162,7 @@ export default function StackPage() {
 
       {/* 프로젝트 스위처 + 전체보기 토글 — CLAUDE.md 3장: 프로젝트별로 카드가 구분돼야 한다 */}
       <div className="flex items-center gap-2">
-        <ProjectSwitcher />
+        <ProjectSwitcher projectsState={projectsState} />
         {projects.length > 1 && (
           <button
             type="button"

@@ -7,6 +7,7 @@ import { ProjectSwitcher } from "@/components/ProjectSwitcher";
 import { CardResultSkeleton } from "@/components/Skeleton";
 import { VoiceInput } from "@/components/VoiceInput";
 import { ApiError, Card, Profile, createCard, getProfile, syncNotion } from "@/lib/api";
+import { useProjects } from "@/lib/useProjects";
 
 /** `job_field`/`job_detail`/`years_segment` 중 있는 값만으로 합성한다 — 없는 값을
  * 지어내 "시니어" 같은 라벨을 붙이지 않는다 (CLAUDE.md 2.2 정신 — 프로필도 사실만). */
@@ -35,6 +36,9 @@ export default function HomePage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const [profile, setProfile] = useState<Profile | null>(null);
+  // ProjectSwitcher에 그대로 넘긴다 — 훅 인스턴스를 이 화면과 공유해야 전환이 즉시
+  // 반영된다(구현 노트: components/ProjectSwitcher.tsx 9/14 참고).
+  const projectsState = useProjects();
 
   // Figma "타깃 트랙" 행 — 연 1~3회 바꾸는 온보딩 프로필을 조회만 한다(2.1). 실패해도
   // 치명적이지 않으므로(행이 안 보일 뿐) 조용히 무시한다.
@@ -123,7 +127,7 @@ export default function HomePage() {
         <span className="text-[#a1a1aa]">›</span>
       </Link>
 
-      <ProjectSwitcher />
+      <ProjectSwitcher projectsState={projectsState} />
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-3">
         <div className="flex flex-col rounded-[14px] border-[1.5px] border-[#e5e7eb] bg-white px-[14px] pt-[14px] pb-[12px]">
