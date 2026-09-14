@@ -2,6 +2,11 @@
 
 _call_llm()을 모킹해서 실제 API 호출 없이 병합/환각방지 로직을 검증한다.
 tasks/track-a-prompt-engine.md의 필수 테스트 표를 그대로 따른다.
+
+**구현 노트 (9/14, ID 기반 매칭으로 전환)**: 모킹된 LLM 응답은 이제 `source_dates`
+대신 `source_indices`(프롬프트의 [번호], 카드 순번과 동일한 1-based 정수)를 쓴다.
+`source_dates`는 더 이상 LLM 응답에 안 실어도 된다 — 검증된 index로부터 백엔드가
+계산하기 때문.
 """
 import json
 
@@ -47,13 +52,14 @@ def test_build_resume_merges_time_gap_pair():
         "task": "응답 지연을 해소해야 했습니다.",
         "action": "Redis 캐싱 레이어를 도입했습니다.",
         "result": "결제 오류율을 0.8%에서 0.3%로 개선했습니다.",
-        "source_dates": ["02.14", "03.02"],
+        "source_indices": [1, 2],
     }])
     with patch("src.parsing.resume._call_llm", return_value=mock_response) as mock_llm:
         result = build_resume(cards)
         assert mock_llm.call_count == 1
         assert len(result) == 1
         assert result[0].source_dates == ["02.14", "03.02"]
+        assert result[0].source_card_ids == [1, 2]
         assert "0.3%" in result[0].result
 
 
@@ -71,12 +77,13 @@ def test_build_resume_merges_despite_vocabulary_mismatch():
         "task": "응답 지연과 오류를 해소해야 했습니다.",
         "action": "Redis 캐싱을 도입하고 쿠폰 버그를 수정했습니다.",
         "result": "결제 오류율을 0.8%에서 0.3%로 개선했습니다.",
-        "source_dates": ["02.14", "02.17", "03.02"],
+        "source_indices": [1, 2, 3],
     }])
     with patch("src.parsing.resume._call_llm", return_value=mock_response):
         result = build_resume(cards)
         assert len(result) == 1
         assert set(result[0].source_dates) == {"02.14", "02.17", "03.02"}
+        assert set(result[0].source_card_ids) == {1, 2, 3}
 
 
 def test_build_resume_no_number_leaves_result_empty():
@@ -89,7 +96,7 @@ def test_build_resume_no_number_leaves_result_empty():
         "task": "온보딩 과정을 표준화할 문서가 필요했습니다.",
         "action": "신규 입사자 온보딩 문서를 작성했습니다.",
         "result": "",
-        "source_dates": ["04.01"],
+        "source_indices": [1],
     }])
     with patch("src.parsing.resume._call_llm", return_value=mock_response):
         result = build_resume(cards)
@@ -106,12 +113,12 @@ def test_build_resume_unrelated_cards_produce_separate_items():
         {
             "title": "결제 API 성능 개선", "period": "02.14",
             "situation": "s", "task": "t", "action": "a", "result": "",
-            "source_dates": ["02.14"],
+            "source_indices": [1],
         },
         {
             "title": "CI 파이프라인 개선", "period": "05.01",
             "situation": "s", "task": "t", "action": "a", "result": "",
-            "source_dates": ["05.01"],
+            "source_indices": [2],
         },
     ])
     with patch("src.parsing.resume._call_llm", return_value=mock_response):
@@ -119,18 +126,56 @@ def test_build_resume_unrelated_cards_produce_separate_items():
         assert len(result) == 2
 
 
-def test_build_resume_filters_hallucinated_source_dates():
-    """LLM이 입력에 없는 날짜를 지어내도 최종 source_dates에는 절대 남지 않는다."""
+def test_build_resume_splits_same_date_unrelated_cards_by_index():
+    """9/14 실측 버그 재현 — 같은 날짜 카드 3장(2장 관련 + 1장 무관)이 LLM이 index로
+    정확히 2개 항목으로 나눠 답했을 때, source_card_ids가 절대 안 섞여야 한다.
+
+    날짜만으로 매칭했다면 전부 "09.14"라 하나로 뭉쳐졌을 상황 — ID 기반 매칭이 그
+    구조적 버그를 실제로 고쳤는지 확인하는 핵심 테스트.
+    """
+    cards = [
+        _card(10, "2026-09-14", "Redis를 활용하여 실시간 이체 시스템의 처리 속도를 향상시켰다",
+              ["캐싱기술", "성능최적화"]),
+        _card(11, "2026-09-14", "아웃박스 알림 상태를 저장하여 데이터 정합성을 유지함",
+              ["데이터관리", "정합성유지"]),
+        _card(12, "2026-09-14", "Redis를 이체 기능에 통합해 오류 감소율 90%, 성능 10배 개선",
+              ["성능최적화", "오류관리"]),
+    ]
+    mock_response = _llm_json([
+        {
+            "title": "실시간 이체 시스템 성능 개선", "period": "09.14",
+            "situation": "s", "task": "t", "action": "a",
+            "result": "오류 감소율 90%, 성능 10배 개선",
+            "source_indices": [1, 3],
+        },
+        {
+            "title": "알림 데이터 정합성 개선", "period": "09.14",
+            "situation": "s", "task": "t", "action": "a", "result": "",
+            "source_indices": [2],
+        },
+    ])
+    with patch("src.parsing.resume._call_llm", return_value=mock_response):
+        result = build_resume(cards)
+
+        assert len(result) == 2
+        assert result[0].source_card_ids == [10, 12]
+        assert result[1].source_card_ids == [11]
+        # 두 그룹의 카드가 겹치면 안 된다 — 날짜만으로 매칭했다면 실패했을 조건.
+        assert set(result[0].source_card_ids).isdisjoint(result[1].source_card_ids)
+
+
+def test_build_resume_filters_hallucinated_source_indices():
+    """LLM이 입력에 없는 번호를 지어내도 최종 결과에는 절대 남지 않는다."""
     cards = [_card(1, "2023-02-14", "결제 API에 Redis 캐싱 도입")]
     mock_response = _llm_json([{
         "title": "결제 API 성능 개선", "period": "02.14",
         "situation": "s", "task": "t", "action": "a", "result": "",
-        "source_dates": ["02.14", "99.99"],  # 99.99는 입력에 없는 지어낸 날짜
+        "source_indices": [1, 99],  # 99는 카드가 1장뿐이라 존재하지 않는 지어낸 번호
     }])
     with patch("src.parsing.resume._call_llm", return_value=mock_response):
         result = build_resume(cards)
         assert result[0].source_dates == ["02.14"]
-        assert "99.99" not in result[0].source_dates
+        assert result[0].source_card_ids == [1]
 
 
 def test_build_resume_jd_text_changes_prompt():
@@ -139,7 +184,7 @@ def test_build_resume_jd_text_changes_prompt():
     mock_response = _llm_json([{
         "title": "결제 API 성능 개선", "period": "02.14",
         "situation": "s", "task": "t", "action": "a", "result": "",
-        "source_dates": ["02.14"],
+        "source_indices": [1],
     }])
     with patch("src.parsing.resume._call_llm", return_value=mock_response) as mock_llm:
         build_resume(cards, jd_text="백엔드 성능 최적화 경험자 우대")
@@ -157,7 +202,7 @@ def test_build_resume_retries_once_on_invalid_json_then_succeeds():
     valid_response = _llm_json([{
         "title": "결제 API 성능 개선", "period": "02.14",
         "situation": "s", "task": "t", "action": "a", "result": "",
-        "source_dates": ["02.14"],
+        "source_indices": [1],
     }])
     with patch("src.parsing.resume._call_llm", side_effect=["이건 JSON이 아님", valid_response]) as mock_llm:
         result = build_resume(cards)
