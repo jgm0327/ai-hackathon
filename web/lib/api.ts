@@ -185,6 +185,35 @@ export function updateCardTags(id: number, skillTags: string[]): Promise<Card> {
   });
 }
 
+/**
+ * "4.1.1 AI 프로젝트 자동 제안" (9/14 신규) — project_id가 없는 카드끼리만 비교해서
+ * 비슷한 것들을 묶어 후보로 제시한다. 이미 프로젝트가 배정된 카드는 서버가 애초에
+ * 조회 대상으로도 삼지 않는다(CLAUDE.md 3장 안전장치).
+ */
+export interface CardCluster {
+  card_ids: number[];
+  cards: Card[];
+}
+
+export function getUnclassifiedSuggestions(): Promise<CardCluster[]> {
+  return request<{ clusters: CardCluster[] }>("/cards/unclassified/suggestions").then(
+    (res) => res.clusters,
+  );
+}
+
+/** 선택된 카드들을 새 프로젝트로 묶는다. 이름/시작일은 사용자가 직접 입력한 값
+ * 그대로 보낸다 — AI가 이름을 짓지 않는다(CLAUDE.md 2.2). */
+export function bundleCardsIntoProject(
+  cardIds: number[],
+  name: string,
+  startedAt: string,
+): Promise<Project> {
+  return request<Project>("/cards/bundle-into-project", {
+    method: "POST",
+    body: JSON.stringify({ card_ids: cardIds, name, started_at: startedAt }),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // 2. 프로젝트 — docs/05-api-contract.md §2
 // ---------------------------------------------------------------------------
