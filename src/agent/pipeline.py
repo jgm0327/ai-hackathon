@@ -38,7 +38,7 @@ from datetime import date
 
 from src.agent.tag_canonicalizer import canonicalize_tags
 from src.parsing.parser import ParsedEntry, parse_note
-from src.parsing.resume import StarItem, build_resume
+from src.parsing.resume import EnhancedItem, StarItem, build_resume, enhance_resume_items
 from src.storage.db import Card, get_card, get_current_project, list_cards, save_card, update_card
 
 logger = logging.getLogger(__name__)
@@ -105,3 +105,16 @@ def build_career_doc(user_id: int, project_id: int, jd_text: str | None = None) 
     """
     cards = list_cards(user_id, project_id)
     return build_resume(cards, jd_text=jd_text)
+
+
+def enhance_existing_resume(
+    user_id: int, project_id: int, existing_items: list[str]
+) -> list[EnhancedItem]:
+    """유저가 이미 써둔 경력기술서 문장을 프로젝트 카드 근거로 보강한다 (9/15 신규).
+
+    "기존 경력기술서 붙여넣기 → Before/After 대조" 기능(Figma 90:612/90:640). 다른
+    유저 프로젝트를 넘겨도 `list_cards()`가 빈 목록을 반환하므로 build_career_doc()과
+    동일하게 소유권이 자연히 지켜진다.
+    """
+    cards = list_cards(user_id, project_id)
+    return enhance_resume_items(existing_items, cards)

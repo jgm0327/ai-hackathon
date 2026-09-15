@@ -17,10 +17,13 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from src.agent.pipeline import build_career_doc
+from src.agent.pipeline import build_career_doc, enhance_existing_resume
 from src.api.schemas import (
+    EnhancedItemResponse,
     ResumeDraftResponse,
     ResumeDraftSaveRequest,
+    ResumeEnhanceRequest,
+    ResumeEnhanceResponse,
     ResumeRequest,
     ResumeResponse,
     StarItemResponse,
@@ -41,6 +44,14 @@ def create_resume(
 ) -> ResumeResponse:
     items = build_career_doc(current_user.id, payload.project_id, jd_text=payload.jd_text)
     return ResumeResponse(items=[StarItemResponse.model_validate(item) for item in items])
+
+
+@router.post("/resume/enhance", response_model=ResumeEnhanceResponse)
+def enhance_resume_endpoint(
+    payload: ResumeEnhanceRequest, current_user: db.User = Depends(get_current_user)
+) -> ResumeEnhanceResponse:
+    items = enhance_existing_resume(current_user.id, payload.project_id, payload.existing_items)
+    return ResumeEnhanceResponse(items=[EnhancedItemResponse.model_validate(item) for item in items])
 
 
 @router.get("/resume/draft", response_model=ResumeDraftResponse)
