@@ -6,7 +6,7 @@ docs/05-api-contract.md 1~3, 8절의 필드명/모양을 그대로 따른다. �
 """
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class _FromAttributes(BaseModel):
@@ -130,6 +130,25 @@ class ResumeDraftResponse(BaseModel):
 class ResumeDraftSaveRequest(BaseModel):
     project_id: int
     content: str
+
+
+# "기존 경력기술서 붙여넣기 → Before/After 대조" (9/15 신규, docs/05-api-contract.md
+# 3장). 완전히 선택 사항 — 위 STAR 생성/초안 저장 경로와 독립적으로 동작한다.
+class ResumeEnhanceRequest(BaseModel):
+    project_id: int
+    existing_items: list[str] = Field(max_length=10)
+
+
+class EnhancedItemResponse(_FromAttributes):
+    original: str
+    enhanced: str
+    gap_comment: str
+    source_dates: list[str]
+    source_card_ids: list[int]
+
+
+class ResumeEnhanceResponse(BaseModel):
+    items: list[EnhancedItemResponse]
 
 
 class HealthResponse(BaseModel):

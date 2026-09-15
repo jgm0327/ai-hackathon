@@ -13,7 +13,8 @@ import json
 import pytest
 from unittest.mock import patch
 
-from src.parsing.resume import StarItem, build_resume
+from src.parsing import resume
+from src.parsing.resume import EnhancedItem, StarItem, build_resume, enhance_resume_items
 from src.storage.db import Card
 
 
@@ -236,4 +237,123 @@ def test_build_resume_strips_markdown_code_fence():
         result = build_resume(cards)
         assert mock_llm.call_count == 1  # 재시도 없이 첫 시도에 바로 성공해야 함
         assert len(result) == 1
+        assert result[0].source_card_ids == [1]
+
+
+# --- enhance_resume_items() — "기존 경력기술서 붙여넣기 → Before/After 대조" (9/15 신규) ---
+
+
+def _enhance_llm_json(items: list[dict]) -> str:
+    return json.dumps({"items": items}, ensure_ascii=False)
+
+
+def test_enhance_resume_items_empty_existing_items_returns_empty_list():
+    cards = [_card(1, "2023-02-14", "결제 API에 Redis 캐싱 도입")]
+    assert enhance_resume_items([], cards) == []
+    assert enhance_resume_items(["   "], cards) == []  # 공백만 있는 줄은 제거됨
+
+
+def test_enhance_resume_items_no_cards_returns_original_unchanged():
+    result = enhance_resume_items(["결제 API 성능 개선 담당"], [])
+    assert result == [EnhancedItem(original="결제 API 성능 개선 담당", enhanced="결제 API 성능 개선 담당")]
+
+
+def test_enhance_resume_items_merges_matched_cards():
+    cards = [
+        _card(12, "2023-02-14", "결제 API 응답 지연을 해소하기 위해 Redis 캐싱 레이어를 도입함",
+              ["Redis", "성능최적화"]),
+        _card(13, "2023-02-18", "Redis 캐싱 적용 이후 결제 오류율을 0.8%에서 0.3%로 개선함",
+              ["성능최적화", "모니터링"]),
+    ]
+    mock_response = _enhance_llm_json([{
+        "item_index": 1,
+        "enhanced": "Redis 캐싱 레이어 도입으로 결제 API 응답 지연을 해소하고 오류율을 0.8%에서 0.3%로 개선했습니다.",
+        "gap_comment": "왜 Redis를 골랐는지가 없어요.",
+        "source_indices": [1, 2],
+    }])
+    with patch("src.parsing.resume._call_llm", return_value=mock_response) as mock_llm:
+        result = enhance_resume_items(["결제 API 성능 개선 담당"], cards)
+        # enhance는 별도 시스템 프롬프트를 명시적으로 넘겨야 한다 (build_resume과 공유 X)
+        assert mock_llm.call_args[0][1] == resume._ENHANCE_SYSTEM_PROMPT
+
+    assert len(result) == 1
+    assert result[0].original == "결제 API 성능 개선 담당"
+    assert "0.3%" in result[0].enhanced
+    assert result[0].gap_comment == "왜 Redis를 골랐는지가 없어요."
+    assert result[0].source_dates == ["02.14", "02.18"]
+    assert result[0].source_card_ids == [12, 13]
+
+
+def test_enhance_resume_items_no_match_keeps_original_and_ignores_llm_text():
+    """근거 카드가 없으면 LLM이 뭐라고 답했든 원문 그대로 유지한다 (2.2 원칙)."""
+    cards = [_card(1, "2023-05-01", "사내 CI 파이프라인을 개선함")]
+    mock_response = _enhance_llm_json([{
+        "item_index": 1,
+        "enhanced": "이건 근거 없이 지어낸 보강 문장입니다.",
+        "gap_comment": "",
+        "source_indices": [],
+    }])
+    with patch("src.parsing.resume._call_llm", return_value=mock_response):
+        result = enhance_resume_items(["신규 회원 온보딩 플로우 기획"], cards)
+
+    assert result[0].original == "신규 회원 온보딩 플로우 기획"
+    assert result[0].enhanced == "신규 회원 온보딩 플로우 기획"
+    assert result[0].source_card_ids == []
+
+
+def test_enhance_resume_items_filters_hallucinated_source_indices():
+    cards = [_card(1, "2023-02-14", "결제 API에 Redis 캐싱 도입")]
+    mock_response = _enhance_llm_json([{
+        "item_index": 1,
+        "enhanced": "보강된 문장",
+        "gap_comment": "",
+        "source_indices": [1, 99],  # 99는 카드가 1장뿐이라 존재하지 않는 지어낸 번호
+    }])
+    with patch("src.parsing.resume._call_llm", return_value=mock_response):
+        result = enhance_resume_items(["결제 API 성능 개선 담당"], cards)
+
+    assert result[0].source_card_ids == [1]
+
+
+def test_enhance_resume_items_missing_response_entry_falls_back_to_original():
+    """LLM이 특정 item_index에 대해 아예 답하지 않아도 그 문장은 원문 그대로 반환된다."""
+    cards = [_card(1, "2023-02-14", "결제 API에 Redis 캐싱 도입")]
+    mock_response = _enhance_llm_json([{
+        "item_index": 1,
+        "enhanced": "보강된 문장",
+        "gap_comment": "",
+        "source_indices": [1],
+    }])
+    with patch("src.parsing.resume._call_llm", return_value=mock_response):
+        result = enhance_resume_items(
+            ["결제 API 성능 개선 담당", "신규 회원 온보딩 플로우 기획"], cards
+        )
+
+    assert len(result) == 2
+    assert result[1].original == "신규 회원 온보딩 플로우 기획"
+    assert result[1].enhanced == "신규 회원 온보딩 플로우 기획"
+
+
+def test_enhance_resume_items_retries_once_on_invalid_json_then_succeeds():
+    cards = [_card(1, "2023-02-14", "결제 API에 Redis 캐싱 도입")]
+    valid_response = _enhance_llm_json([{
+        "item_index": 1, "enhanced": "보강된 문장", "gap_comment": "", "source_indices": [1],
+    }])
+    with patch(
+        "src.parsing.resume._call_llm", side_effect=["이건 JSON이 아님", valid_response]
+    ) as mock_llm:
+        result = enhance_resume_items(["결제 API 성능 개선 담당"], cards)
+        assert mock_llm.call_count == 2
+        assert len(result) == 1
+
+
+def test_enhance_resume_items_strips_markdown_code_fence():
+    cards = [_card(1, "2023-02-14", "결제 API에 Redis 캐싱 도입")]
+    valid_response = _enhance_llm_json([{
+        "item_index": 1, "enhanced": "보강된 문장", "gap_comment": "", "source_indices": [1],
+    }])
+    fenced = "```json\n" + valid_response + "\n```"
+    with patch("src.parsing.resume._call_llm", return_value=fenced) as mock_llm:
+        result = enhance_resume_items(["결제 API 성능 개선 담당"], cards)
+        assert mock_llm.call_count == 1
         assert result[0].source_card_ids == [1]

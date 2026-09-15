@@ -204,6 +204,43 @@ AI(LLM+캐노니컬라이제이션)가 자동으로 채우고, 이건 저장 후
 프로젝트당 초안 1개(upsert) — 여러 버전을 관리하는 기능은 없다(CLAUDE.md 2.4 정신:
 최소 기능만).
 
+### `POST /api/resume/enhance` (9/15 신규)
+
+유저가 이미 써둔 경력기술서 문장을 프로젝트 카드로 보강해 Before/After로 대조한다
+(Figma `90:612`/`90:640`, "기존 항목 붙여넣기 → Before·After 대조"). **완전히 선택
+사항** — 안 써도 `POST /api/resume`로 새로 생성하는 기존 경로가 그대로 있다.
+
+```jsonc
+// 요청
+{
+  "project_id": 3,
+  "existing_items": ["결제 API 성능 개선 담당", "신규 회원 온보딩 플로우 기획"]  // 줄바꿈 분리, 최대 10개
+}
+
+// 응답 200
+{
+  "items": [
+    {
+      "original": "결제 API 성능 개선 담당",
+      "enhanced": "프로모션 트래픽 급증으로 발생한 결제 API 응답 지연을 Redis 캐싱 레이어 도입으로 해소하고, 응답 시간을 200ms 단축했습니다.",
+      "gap_comment": "왜 Redis를 골랐는지가 없어요. 한 줄 더하면 판단 근거가 생깁니다.",
+      "source_dates": ["02.14", "02.18"],
+      "source_card_ids": [12, 13]
+    }
+  ]
+}
+```
+
+- 관련 카드가 없으면 `enhanced`는 `original`과 동일하게 오고, `source_dates`/
+  `source_card_ids`/`gap_comment`는 전부 비어 있다 — 근거 없이 보강된 것처럼 보이게
+  만들지 않는다(2.2 원칙).
+- `gap_comment`는 빈 문자열일 수 있다. 매칭된 카드에 없는 정보를 지어내 지적하지 않는다.
+- `POST /resume`과 마찬가지로 `source_card_ids`로 카드를 매칭할 것(`source_dates`는
+  화면 표시용).
+- **AI가 만든 보강 결과 자체는 저장하지 않는다.** 유저가 "적용"한 최종 텍스트만
+  프론트가 모아 기존 `PUT /resume/draft`로 저장한다(CLAUDE.md 3장).
+- URL을 받는 필드는 없다(2.4 배제 목록 유지).
+
 ---
 
 ## 4. JD 매칭 (P1)

@@ -96,6 +96,51 @@ _SYSTEM_PROMPT = """\
 """
 
 
+_ENHANCE_SYSTEM_PROMPT = """\
+당신은 유저가 이미 써둔 경력기술서 문장을, 그 이후 쌓인 업무 기록(카드)으로 보강해주는
+전문 커리어 코치입니다.
+
+입력: 두 목록이 주어집니다.
+1) 업무 기록 목록 (각 줄 "[번호] [MM.DD] 정제된 문장 #태그..." 형식, 번호는 고유함)
+2) 유저가 이미 써둔 경력기술서 문장 목록 (각 줄 "[E번호] 문장" 형식)
+
+출력: 반드시 아래 JSON 스키마로만 응답하세요. 다른 설명은 붙이지 마세요.
+
+{{
+  "items": [
+    {{
+      "item_index": E번호(정수, 위 [E번호]를 그대로 씀),
+      "enhanced": "관련 기록으로 보강한 문장. 관련 기록이 없으면 원문과 동일하게 쓸 것",
+      "gap_comment": "보강한 문장에서 명백히 빠진 인과관계가 있으면 한 줄로 지적. 없으면 빈 문자열",
+      "source_indices": [이 문장을 보강하는 데 쓴 업무 기록의 번호(정수) 목록. 관련 기록이 없으면 빈 배열]
+    }}
+  ]
+}}
+
+규칙 (반드시 지킬 것):
+1. 각 경력기술서 문장에 대해 실제로 관련 있는 업무 기록만 골라 보강하세요. 관련 기록이
+   없으면 억지로 만들지 말고 enhanced를 원문 그대로 두고 source_indices를 빈 배열로
+   남기세요.
+2. 보강 문장에는 업무 기록에 실제로 적힌 숫자만 쓰세요. 기록에 없는 숫자를 추정하거나
+   지어내면 안 됩니다. 이것이 가장 중요한 규칙입니다.
+3. source_indices에는 입력에 실제로 주어진 업무 기록 번호만 쓰세요. 없는 번호를
+   만들어내면 안 됩니다.
+4. gap_comment는 실제로 참고한 업무 기록에 없는 정보(예: 어떤 기술을 왜 선택했는지)가
+   명백히 빠졌을 때만 한 줄로 쓰세요. 억지로 지적을 만들지 마세요 — 애매하면 빈 문자열로
+   두세요.
+5. 서로 다른 경력기술서 문장에 같은 업무 기록을 중복해서 참고할 수 있습니다(문장끼리는
+   서로 독립적으로 판단하세요).
+
+예시:
+업무 기록:
+[1] [02.14] 결제 API 응답 지연을 해소하기 위해 Redis 캐싱 레이어를 도입함 #Redis #성능최적화
+[2] [02.18] Redis 캐싱 적용 이후 결제 오류율을 0.8%에서 0.3%로 개선함 #성능최적화 #모니터링
+경력기술서 문장:
+[E1] 결제 API 성능 개선 담당
+출력: {{"items": [{{"item_index": 1, "enhanced": "결제 API 응답 지연을 Redis 캐싱 레이어 도입으로 해소하고, 오류율을 0.8%에서 0.3%로 개선했습니다.", "gap_comment": "왜 Redis를 골랐는지가 없어요. 한 줄 더하면 판단 근거가 생깁니다.", "source_indices": [1, 2]}}]}}
+"""
+
+
 @dataclass
 class StarItem:
     title: str
@@ -108,6 +153,21 @@ class StarItem:
     # 9/14 신규 — 카드를 정확히 식별하는 필드. source_dates는 화면 표시(근거 토글)용으로
     # 남겨두지만, 카드 매칭(예: /stack "인과관계로 묶어보기")은 반드시 이걸로 해야 한다 —
     # 날짜만으로는 같은 날짜 카드 여러 장을 구분할 수 없다.
+    source_card_ids: list[int] = field(default_factory=list)
+
+
+@dataclass
+class EnhancedItem:
+    """유저가 이미 써둔 경력기술서 문장 하나를 카드 근거로 보강한 Before/After 대조 결과.
+
+    (9/15 신규 — "기존 경력기술서 붙여넣기" 기능. StarItem과 달리 새로 항목을 만드는 게
+    아니라, 유저가 준 문장 하나하나를 그대로 유지한 채 보강만 시도한다.)
+    """
+
+    original: str
+    enhanced: str
+    gap_comment: str = ""
+    source_dates: list[str] = field(default_factory=list)
     source_card_ids: list[int] = field(default_factory=list)
 
 
@@ -183,16 +243,98 @@ def _dict_to_star_item(data: dict, cards: list[Card]) -> StarItem:
     )
 
 
+def enhance_resume_items(existing_items: list[str], cards: list[Card]) -> list[EnhancedItem]:
+    """유저가 이미 써둔 경력기술서 문장을 프로젝트 카드 근거로 보강한다 (9/15 신규).
+
+    관련 카드를 찾지 못한 문장은 enhanced를 original과 동일하게 반환한다 — 근거 없이
+    보강된 것처럼 보이게 만들지 않는다(CLAUDE.md 2.2). `build_resume()`과 동일한
+    JSON 파싱 재시도 + 환각 방지(사후 index 검증) 패턴을 그대로 따른다.
+    """
+    existing_items = [item for item in existing_items if item.strip()]
+    if not existing_items:
+        return []
+    if not cards:
+        return [EnhancedItem(original=item, enhanced=item) for item in existing_items]
+
+    user_prompt = _format_enhance_prompt(existing_items, cards)
+
+    for attempt in range(2):
+        raw_response = _call_llm(user_prompt, _ENHANCE_SYSTEM_PROMPT)
+        try:
+            data = json.loads(_strip_code_fence(raw_response))
+            return _dicts_to_enhanced_items(data["items"], existing_items, cards)
+        except (json.JSONDecodeError, KeyError, TypeError):
+            if attempt == 1:
+                raise
+    raise RuntimeError("unreachable")
+
+
+def _format_enhance_prompt(existing_items: list[str], cards: list[Card]) -> str:
+    card_lines = []
+    for i, card in enumerate(cards, start=1):
+        tags = " ".join(f"#{tag}" for tag in card.skill_tags)
+        card_lines.append(f"[{i}] [{_short_date(card.created_at)}] {card.refined_sentence} {tags}".rstrip())
+    existing_lines = [f"[E{i}] {text}" for i, text in enumerate(existing_items, start=1)]
+    return (
+        "업무 기록:\n" + "\n".join(card_lines)
+        + "\n\n경력기술서 문장:\n" + "\n".join(existing_lines)
+    )
+
+
+def _dicts_to_enhanced_items(
+    data: list[dict], existing_items: list[str], cards: list[Card]
+) -> list[EnhancedItem]:
+    # item_index(E번호)로 응답을 찾는다 — LLM이 순서를 바꿔 답해도 원문 문장과
+    # 정확히 매칭하기 위함. 없거나 범위 밖이면 무시(첫 등장만 채택).
+    by_index: dict[int, dict] = {}
+    for entry in data:
+        idx = entry.get("item_index")
+        if isinstance(idx, int) and 1 <= idx <= len(existing_items) and idx not in by_index:
+            by_index[idx] = entry
+
+    results: list[EnhancedItem] = []
+    for i, original in enumerate(existing_items, start=1):
+        entry = by_index.get(i)
+        if entry is None:
+            results.append(EnhancedItem(original=original, enhanced=original))
+            continue
+
+        # 환각 방지(CLAUDE.md 2.2): build_resume()의 _dict_to_star_item과 동일하게,
+        # source_indices는 입력에 실재하는 번호(1..len(cards))만 남긴다.
+        seen: set[int] = set()
+        valid_indices: list[int] = []
+        for src in entry.get("source_indices", []):
+            if isinstance(src, int) and 1 <= src <= len(cards) and src not in seen:
+                seen.add(src)
+                valid_indices.append(src)
+        matched_cards = [cards[j - 1] for j in valid_indices]
+
+        if not matched_cards:
+            # 근거 카드가 없으면 LLM이 뭐라고 답했든 무시하고 원문 그대로 둔다 —
+            # 근거 없이 보강된 것처럼 보이는 문장이 나가면 안 된다.
+            results.append(EnhancedItem(original=original, enhanced=original))
+            continue
+
+        results.append(EnhancedItem(
+            original=original,
+            enhanced=entry.get("enhanced") or original,
+            gap_comment=entry.get("gap_comment") or "",
+            source_dates=[_short_date(c.created_at) for c in matched_cards],
+            source_card_ids=[c.id for c in matched_cards],
+        ))
+    return results
+
+
 @lru_cache(maxsize=1)
 def _get_client() -> anthropic.Anthropic:
     return anthropic.Anthropic(api_key=settings.llm_api_key)
 
 
-def _call_llm_anthropic(user_prompt: str) -> str:
+def _call_llm_anthropic(user_prompt: str, system_prompt: str = _SYSTEM_PROMPT) -> str:
     response = _get_client().messages.create(
         model=settings.llm_model,
         max_tokens=4096,
-        system=_SYSTEM_PROMPT,
+        system=system_prompt,
         messages=[{"role": "user", "content": user_prompt}],
     )
     return _extract_text(response)
@@ -212,13 +354,13 @@ def _extract_text(response: anthropic.types.Message) -> str:
     raise ValueError(f"Anthropic 응답에 텍스트 블록이 없습니다: {response.content!r}")
 
 
-def _call_llm_ollama(user_prompt: str) -> str:
+def _call_llm_ollama(user_prompt: str, system_prompt: str = _SYSTEM_PROMPT) -> str:
     response = requests.post(
         f"{settings.ollama_base_url}/api/chat",
         json={
             "model": settings.ollama_model,
             "messages": [
-                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
             "format": "json",
@@ -231,7 +373,12 @@ def _call_llm_ollama(user_prompt: str) -> str:
     return response.json()["message"]["content"]
 
 
-def _call_llm(user_prompt: str) -> str:
+def _call_llm(user_prompt: str, system_prompt: str = _SYSTEM_PROMPT) -> str:
+    """LLM 호출 단일 창구. `build_resume()`과 `enhance_resume_items()`가 공유한다.
+
+    system_prompt는 기본값(_SYSTEM_PROMPT, STAR 생성용)이라 build_resume() 호출부는
+    바꿀 필요 없다 — enhance_resume_items()만 _ENHANCE_SYSTEM_PROMPT를 명시적으로 넘긴다.
+    """
     if settings.llm_provider == "ollama":
-        return _call_llm_ollama(user_prompt)
-    return _call_llm_anthropic(user_prompt)
+        return _call_llm_ollama(user_prompt, system_prompt)
+    return _call_llm_anthropic(user_prompt, system_prompt)

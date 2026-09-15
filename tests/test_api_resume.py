@@ -224,6 +224,90 @@ def test_put_resume_draft_rejects_project_not_owned_by_user(client, current_user
     assert db.get_resume_draft(other_user_id, other_project_id) is None
 
 
+# --- POST /api/resume/enhance (9/15 신규) ---
+
+
+_MOCK_ENHANCE_RESPONSE = json.dumps(
+    {
+        "items": [
+            {
+                "item_index": 1,
+                "enhanced": "Redis 캐싱 레이어 도입으로 결제 API 응답 지연을 해소하고 오류율을 0.8%에서 0.3%로 개선했습니다.",
+                "gap_comment": "왜 Redis를 골랐는지가 없어요.",
+                "source_indices": [1, 2],
+            }
+        ]
+    },
+    ensure_ascii=False,
+)
+
+
+def test_enhance_resume_requires_login(client):
+    response = client.post(
+        "/api/resume/enhance", json={"project_id": 1, "existing_items": ["결제 API 성능 개선 담당"]}
+    )
+    assert response.status_code == 401
+
+
+def test_enhance_resume_merges_matched_cards(client, current_user_id):
+    project_id = db.create_project(current_user_id, "A은행 차세대", "2023-02-01")
+    _seed_cards(current_user_id, project_id)
+
+    with patch("src.parsing.resume._call_llm", return_value=_MOCK_ENHANCE_RESPONSE):
+        response = client.post(
+            "/api/resume/enhance",
+            json={"project_id": project_id, "existing_items": ["결제 API 성능 개선 담당"]},
+        )
+
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert len(items) == 1
+    assert items[0]["original"] == "결제 API 성능 개선 담당"
+    assert "0.3%" in items[0]["enhanced"]
+    seeded = db.list_cards(current_user_id, project_id)
+    assert items[0]["source_card_ids"] == [seeded[0].id, seeded[1].id]
+
+
+def test_enhance_resume_no_matching_cards_keeps_original(client, current_user_id):
+    project_id = db.create_project(current_user_id, "빈 프로젝트", "2023-02-01")
+
+    response = client.post(
+        "/api/resume/enhance",
+        json={"project_id": project_id, "existing_items": ["결제 API 성능 개선 담당"]},
+    )
+
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["enhanced"] == "결제 API 성능 개선 담당"
+    assert item["source_card_ids"] == []
+
+
+def test_enhance_resume_ignores_another_users_project_cards(client, current_user_id):
+    other_user_id = db.upsert_user("other-kakao-id", "다른유저", None, "2026-01-01T00:00:00")
+    other_project_id = db.create_project(other_user_id, "다른 유저 프로젝트", "2023-02-01")
+    _seed_cards(other_user_id, other_project_id)
+
+    response = client.post(
+        "/api/resume/enhance",
+        json={"project_id": other_project_id, "existing_items": ["결제 API 성능 개선 담당"]},
+    )
+
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["enhanced"] == "결제 API 성능 개선 담당"
+
+
+def test_enhance_resume_rejects_more_than_ten_items(client, current_user_id):
+    project_id = db.create_project(current_user_id, "A은행 차세대", "2023-02-01")
+
+    response = client.post(
+        "/api/resume/enhance",
+        json={"project_id": project_id, "existing_items": [f"항목 {i}" for i in range(11)]},
+    )
+
+    assert response.status_code == 422
+
+
 def test_get_resume_draft_does_not_leak_another_users_draft(client, current_user_id):
     other_user_id = db.upsert_user("other-kakao-id", "다른유저", None, "2026-01-01T00:00:00")
     other_project_id = db.create_project(other_user_id, "다른 유저 프로젝트", "2023-02-01")
