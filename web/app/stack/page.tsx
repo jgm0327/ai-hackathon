@@ -15,7 +15,7 @@ import {
   deleteCard,
   getUnclassifiedSuggestions,
   listCards,
-  updateCardTags,
+  updateCard,
 } from "@/lib/api";
 import { buildResumeCached } from "@/lib/resumeCache";
 import { useProjects } from "@/lib/useProjects";
@@ -335,9 +335,11 @@ function StackPageContent() {
     }
   };
 
-  // 카테고리(스킬 태그) 직접 수정 (9/14 신규) — 저장 시점엔 AI가 자동으로 뽑고,
-  // 이건 그 뒤에 가끔(연 몇 회) 손으로 고치는 별도 경로다 (CLAUDE.md 2.1).
+  // 문장·카테고리(스킬 태그) 직접 수정 (9/14 태그, 9/15 문장 추가) — 저장 시점엔
+  // AI가 자동으로 채우고, 이건 그 뒤에 가끔(연 몇 회) 손으로 고치는 별도 경로다
+  // (CLAUDE.md 2.1).
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [editSentence, setEditSentence] = useState("");
   const [editTags, setEditTags] = useState<string[]>([]);
   const [newTagInput, setNewTagInput] = useState("");
   const [savingTags, setSavingTags] = useState(false);
@@ -459,6 +461,7 @@ function StackPageContent() {
 
   const startEditingTags = (card: Card) => {
     setEditingId(card.id);
+    setEditSentence(card.refined_sentence);
     setEditTags([...card.skill_tags]);
     setNewTagInput("");
     setTagError(null);
@@ -466,6 +469,7 @@ function StackPageContent() {
 
   const cancelEditingTags = () => {
     setEditingId(null);
+    setEditSentence("");
     setEditTags([]);
     setNewTagInput("");
     setTagError(null);
@@ -484,14 +488,22 @@ function StackPageContent() {
 
   const saveEditingTags = async () => {
     if (editingId == null) return;
+    const trimmedSentence = editSentence.trim();
+    if (!trimmedSentence) {
+      setTagError("문장을 비워둘 수 없습니다.");
+      return;
+    }
     setSavingTags(true);
     setTagError(null);
     try {
-      const updated = await updateCardTags(editingId, editTags);
+      const updated = await updateCard(editingId, {
+        skillTags: editTags,
+        refinedSentence: trimmedSentence,
+      });
       setCards((prev) => prev.map((c) => (c.id === editingId ? updated : c)));
       cancelEditingTags();
     } catch {
-      setTagError("태그 저장에 실패했습니다. 다시 시도해 주세요.");
+      setTagError("저장에 실패했습니다. 다시 시도해 주세요.");
     } finally {
       setSavingTags(false);
     }
@@ -528,6 +540,13 @@ function StackPageContent() {
 
       {editingId === card.id && (
         <div className="flex flex-col gap-2 border-t border-[#e5e7eb] pt-2">
+          <textarea
+            value={editSentence}
+            onChange={(e) => setEditSentence(e.target.value)}
+            rows={3}
+            placeholder="문장을 입력하세요"
+            className="w-full resize-none rounded-md border border-zinc-200 p-2 text-[12px] leading-relaxed focus:border-zinc-400 focus:outline-none"
+          />
           <div className="flex flex-wrap gap-1.5">
             {editTags.length === 0 && (
               <p className="text-[11px] text-zinc-400">태그 없음</p>
@@ -908,7 +927,7 @@ function StackPageContent() {
             }}
             className="rounded-lg px-3 py-3 text-left text-sm text-zinc-900 transition-colors hover:bg-zinc-50"
           >
-            태그 수정
+            문장·태그 수정
           </button>
           <button
             type="button"

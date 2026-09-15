@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { StarItemSection, formatStarItemForClipboard } from "@/components/StarItemCard";
 import { StarItemSkeleton } from "@/components/Skeleton";
 import { ApiError, Profile, StarItem, getResumeDraft, getProfile, saveResumeDraft } from "@/lib/api";
-import { buildResumeCached, peekCachedResume } from "@/lib/resumeCache";
+import { buildResumeCached, peekCachedResume, updateCachedResumeItems } from "@/lib/resumeCache";
 import { useProjects } from "@/lib/useProjects";
 
 /** 프로필/프로젝트에서 실제로 있는 값만으로 문서 제목을 만든다 — 없는 정보를
@@ -79,6 +79,10 @@ export default function ResumePage() {
   const [showBuildForm, setShowBuildForm] = useState(true);
   const [copyStatus, setCopyStatus] = useState<"markdown" | "notion" | null>(null);
 
+  // "숫자 되묻기" 인라인 입력(9/15 신규)이 캐시를 정확한 키로 갱신하려면, 지금
+  // 보고 있는 items가 어떤 jdText로 생성됐는지 알아야 한다(캐시 키 = projectId+jdText).
+  const [builtJdText, setBuiltJdText] = useState<string | undefined>(undefined);
+
   const [mode, setMode] = useState<"ai" | "edit">("ai");
   const [draftContent, setDraftContent] = useState("");
   const [draftUpdatedAt, setDraftUpdatedAt] = useState<string | null>(null);
@@ -123,6 +127,7 @@ export default function ResumePage() {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setItems(cached);
       setShowBuildForm(false);
+      setBuiltJdText(undefined); // 이 캐시 조회 자체가 jdText 없이 한 것과 같은 키
     }
   }, [currentProject]);
 
@@ -152,8 +157,10 @@ export default function ResumePage() {
     try {
       // 카드 구성이 지난 생성 때와 같으면 재호출 없이 캐시에서 반환한다 (9/14, LLM
       // 호출 비용 절감 — web/lib/resumeCache.ts 참고).
-      const result = await buildResumeCached(currentProject.id, { jdText: jdText.trim() || undefined });
+      const usedJdText = jdText.trim() || undefined;
+      const result = await buildResumeCached(currentProject.id, { jdText: usedJdText });
       setItems(result);
+      setBuiltJdText(usedJdText);
       setShowBuildForm(false);
       setMode("ai");
     } catch (err) {
@@ -175,6 +182,18 @@ export default function ResumePage() {
     } catch {
       // 클립보드 접근 실패 — 조용히 무시
     }
+  };
+
+  // "숫자 되묻기" 인라인 입력 적용 (9/15 신규) — 서버에 저장하지 않는다(StarItem은
+  // 원래도 비영속 값, CLAUDE.md 3장). 화면 state와 로컬 캐시만 갱신해서 새로고침해도
+  // 남아있게 한다.
+  const handleApplyResult = (index: number, value: string) => {
+    setItems((prev) => {
+      if (!prev) return prev;
+      const next = prev.map((it, i) => (i === index ? { ...it, result: value } : it));
+      if (currentProject) updateCachedResumeItems(currentProject.id, next, builtJdText);
+      return next;
+    });
   };
 
   const startEditing = () => {
@@ -338,7 +357,7 @@ export default function ResumePage() {
                   )}
                   {items.map((item, i) => (
                     <div key={`${item.title}-${i}`}>
-                      <StarItemSection item={item} />
+                      <StarItemSection item={item} onApplyResult={(v) => handleApplyResult(i, v)} />
                       {i < items.length - 1 && <div className="h-px w-full bg-[#e5e7eb]" />}
                     </div>
                   ))}

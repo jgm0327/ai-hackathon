@@ -23,6 +23,10 @@ export interface Card {
   skill_tags: string[];
   confidence: number;
   created_at: string;
+  /** 9/15 신규 — POST 응답에서 LLM 파싱이 실패해 원문 그대로 폴백 저장됐을 때만
+   * true. GET/PATCH 응답에서는 항상 false(또는 생략)이다 — DB 컬럼이 아니라
+   * 생성 시점에만 서버가 채워 넣는 값이라서. */
+  refinement_failed?: boolean;
 }
 
 export interface Project {
@@ -174,15 +178,27 @@ export function deleteCard(id: number): Promise<void> {
 }
 
 /**
- * 카테고리(스킬 태그)를 직접 수정한다 (9/14 신규). 매일 쓰는 저장 경로(POST)는 여전히
- * AI가 자동으로 태그를 뽑고, 이건 저장 후 가끔(`/stack`에서) 손으로 고치는 별도 경로다
- * (CLAUDE.md 2.1 — 매일 쓰는 경로에는 선택지를 넣지 않는다).
+ * 카테고리(스킬 태그)/문장을 직접 수정한다 (9/14 태그, 9/15 문장 추가). 매일 쓰는
+ * 저장 경로(POST)는 여전히 AI가 자동으로 채우고, 이건 저장 후 가끔(`/stack`에서)
+ * 손으로 고치는 별도 경로다(CLAUDE.md 2.1). 둘 다 optional이지만 최소 하나는
+ * 있어야 한다(서버가 400으로 검증).
  */
-export function updateCardTags(id: number, skillTags: string[]): Promise<Card> {
+export function updateCard(
+  id: number,
+  patch: { skillTags?: string[]; refinedSentence?: string },
+): Promise<Card> {
   return request<Card>(`/cards/${id}`, {
     method: "PATCH",
-    body: JSON.stringify({ skill_tags: skillTags }),
+    body: JSON.stringify({
+      ...(patch.skillTags !== undefined && { skill_tags: patch.skillTags }),
+      ...(patch.refinedSentence !== undefined && { refined_sentence: patch.refinedSentence }),
+    }),
   });
+}
+
+/** 폴백 저장된(원문 그대로인) 카드를 다시 AI로 정리해본다 (9/15 신규). */
+export function refineCard(id: number): Promise<Card> {
+  return request<Card>(`/cards/${id}/refine`, { method: "POST" });
 }
 
 /**
