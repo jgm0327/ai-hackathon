@@ -6,7 +6,17 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { BottomSheet } from "@/components/BottomSheet";
 import { ProjectSwitcher } from "@/components/ProjectSwitcher";
 import { SkeletonLine } from "@/components/Skeleton";
-import { ApiError, Card, StarItem, deleteCard, listCards, updateCardTags } from "@/lib/api";
+import {
+  ApiError,
+  Card,
+  CardCluster,
+  StarItem,
+  bundleCardsIntoProject,
+  deleteCard,
+  getUnclassifiedSuggestions,
+  listCards,
+  updateCardTags,
+} from "@/lib/api";
 import { buildResumeCached } from "@/lib/resumeCache";
 import { useProjects } from "@/lib/useProjects";
 
@@ -130,6 +140,74 @@ function StackPageContent() {
   const [actionSheetCard, setActionSheetCard] = useState<Card | null>(null);
   const [deleteConfirmCard, setDeleteConfirmCard] = useState<Card | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  // "4.1.1 AI 프로젝트 자동 제안" (9/14 신규) — project_id가 없는 카드끼리만 비교해서
+  // 비슷한 것들을 묶어 후보로 제시한다. 이미 프로젝트가 배정된 카드는 서버가 애초에
+  // 조회 대상으로도 삼지 않는다(CLAUDE.md 3장 안전장치, resilient-waddling-simon.md
+  // 참고). 한 번에 클러스터 1개(가장 먼저 온 것)만 검토하게 해서 화면을 단순하게
+  // 유지 — 처리 후 남은 제안이 있으면 다시 배너가 뜬다.
+  const [suggestions, setSuggestions] = useState<CardCluster[]>([]);
+  const [suggestionsSheetOpen, setSuggestionsSheetOpen] = useState(false);
+  const [selectedCardIds, setSelectedCardIds] = useState<Set<number>>(new Set());
+  const [newProjectName, setNewProjectName] = useState("");
+  const [newProjectStartedAt, setNewProjectStartedAt] = useState("");
+  const [bundling, setBundling] = useState(false);
+  const [bundleError, setBundleError] = useState<string | null>(null);
+
+  const refreshSuggestions = () => {
+    getUnclassifiedSuggestions()
+      .then(setSuggestions)
+      .catch(() => {}); // 실패해도 배너가 안 뜰 뿐 — 화면 전체를 막을 정도는 아니다
+  };
+
+  useEffect(() => {
+    refreshSuggestions();
+  }, []);
+
+  const openSuggestions = () => {
+    const first = suggestions[0];
+    if (!first) return;
+    setSelectedCardIds(new Set(first.card_ids));
+    setNewProjectName("");
+    setNewProjectStartedAt("");
+    setBundleError(null);
+    setSuggestionsSheetOpen(true);
+  };
+
+  const toggleSelectedCard = (id: number) => {
+    setSelectedCardIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleBundle = async () => {
+    if (selectedCardIds.size === 0 || !newProjectName.trim() || !newProjectStartedAt) {
+      setBundleError("이름과 시작일을 입력하고, 최소 1개 이상 선택해 주세요.");
+      return;
+    }
+    setBundling(true);
+    setBundleError(null);
+    try {
+      await bundleCardsIntoProject(
+        Array.from(selectedCardIds),
+        newProjectName.trim(),
+        newProjectStartedAt,
+      );
+      setSuggestionsSheetOpen(false);
+      // 새 프로젝트가 자동으로 현재 프로젝트가 된다(create_project()의 기존 동작) —
+      // projectsState.refresh()가 currentProject.id를 바꾸면 카드 목록을 불러오는
+      // 기존 effect가 알아서 다시 실행돼 방금 옮긴 카드들을 보여준다.
+      await projectsState.refresh();
+      refreshSuggestions();
+    } catch (err) {
+      setBundleError(err instanceof ApiError ? err.detail : "묶기에 실패했습니다.");
+    } finally {
+      setBundling(false);
+    }
+  };
 
   // 인과관계 그룹(부모-자식) 보기 (9/14 신규) — 기본은 꺼짐. 켜면 그 순간에만
   // build_resume()을 호출해 "조치→결과" 시간차 묶음을 계산한다. DB에 저장하지 않고
@@ -471,6 +549,19 @@ function StackPageContent() {
 
       {groupsError && <p className="text-[12px] text-red-600">{groupsError}</p>}
 
+      {/* "4.1.1 AI 프로젝트 자동 제안" 배너 (9/14 신규) — 미분류 카드가 서로 비슷해
+          보일 때만 뜬다. 평소엔 안 보이는 화면이라 2.1 원칙(매일 경로 마찰 금지)에
+          영향 없음 */}
+      {suggestions.length > 0 && (
+        <button
+          type="button"
+          onClick={openSuggestions}
+          className="rounded-[12px] bg-indigo-50 px-3 py-2.5 text-left text-[12px] text-indigo-700"
+        >
+          미분류 기록 {suggestions[0].card_ids.length}개가 비슷해 보여요 — 프로젝트로 묶어볼까요?
+        </button>
+      )}
+
       {!groupedView && tags.length > 0 && (
         <div className="flex flex-wrap gap-[7px]">
           <button
@@ -652,6 +743,66 @@ function StackPageContent() {
               </button>
             </div>
           </>
+        )}
+      </BottomSheet>
+
+      {/* 미분류 기록 묶기 검토 (Figma "4.2.1 범위 선택" 참고 — 다만 이름은 AI가
+          안 짓고 사용자가 직접 입력한다) */}
+      <BottomSheet
+        open={suggestionsSheetOpen}
+        onClose={() => setSuggestionsSheetOpen(false)}
+        title="비슷한 기록을 프로젝트로 묶기"
+      >
+        {suggestions[0] && (
+          <div className="flex flex-col gap-3">
+            <p className="text-xs text-zinc-500">
+              체크된 기록만 새 프로젝트에 포함됩니다. 관련 없는 기록은 체크를 해제해 주세요.
+            </p>
+            <ul className="flex max-h-48 flex-col gap-1.5 overflow-y-auto">
+              {suggestions[0].cards.map((card) => (
+                <li key={card.id}>
+                  <label className="flex items-start gap-2 rounded-lg px-2 py-2 text-sm hover:bg-zinc-50">
+                    <input
+                      type="checkbox"
+                      checked={selectedCardIds.has(card.id)}
+                      onChange={() => toggleSelectedCard(card.id)}
+                      className="mt-0.5"
+                    />
+                    <span className="text-zinc-800">{card.refined_sentence}</span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+            <input
+              type="text"
+              value={newProjectName}
+              onChange={(e) => setNewProjectName(e.target.value)}
+              placeholder="프로젝트 이름 (예: A은행 차세대)"
+              className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
+            />
+            <input
+              type="date"
+              value={newProjectStartedAt}
+              onChange={(e) => setNewProjectStartedAt(e.target.value)}
+              className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
+            />
+            {bundleError && <p className="text-xs text-red-600">{bundleError}</p>}
+            <button
+              type="button"
+              onClick={handleBundle}
+              disabled={bundling || selectedCardIds.size === 0}
+              className="w-full rounded-xl bg-zinc-900 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-zinc-800 disabled:opacity-40"
+            >
+              {bundling ? "묶는 중…" : `선택한 ${selectedCardIds.size}개를 프로젝트로 묶기`}
+            </button>
+            <button
+              type="button"
+              onClick={() => setSuggestionsSheetOpen(false)}
+              className="text-center text-xs text-zinc-400"
+            >
+              나중에
+            </button>
+          </div>
         )}
       </BottomSheet>
     </div>
