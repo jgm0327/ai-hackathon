@@ -27,12 +27,19 @@ Track C는 이 문서만 보고 작업하고, 백엔드는 이 문서를 먼저 
   "refined_sentence": "결제 API 응답 지연을 해소하기 위해 Redis 캐싱 레이어를 도입했습니다.",
   "skill_tags": ["Redis", "성능최적화", "결제시스템"],
   "confidence": 0.91,
-  "created_at": "2026-02-14T18:45:00+09:00"
+  "created_at": "2026-02-14T18:45:00+09:00",
+  "refinement_failed": false     // 9/15 신규 — 아래 설명 참고
 }
 ```
 
 > **JD 매칭을 여기서 하지 않는다.** 이직 준비 때만 필요한 걸 매일 돌릴 이유가 없다.
 > 응답은 3~10초 걸린다. 프론트는 스켈레톤을 띄운다.
+
+> **`refinement_failed` (9/15 신규)**: LLM 파싱이 실패해도 카드는 반드시 저장된다
+> (CLAUDE.md P0 "저장소 없으면 제품이 없다") — 이 경우 `refined_sentence`는 원문과
+> 동일하고 `skill_tags`는 빈 배열, `confidence`는 0.0, `refinement_failed`는 true로
+> 온다. 이 필드는 DB에 저장되는 값이 아니라 **생성 시점에만** 라우터가 채워 넣는다
+> — 이후 `GET`/`PATCH` 응답에서는 항상 `false`.
 
 ### `GET /api/cards?project_id=3`
 `project_id` 생략 시 전체. 최신순 정렬.
@@ -43,6 +50,24 @@ Track C는 이 문서만 보고 작업하고, 백엔드는 이 문서를 먼저 
 
 ### `DELETE /api/cards/{id}`
 응답 204.
+
+### `PATCH /api/cards/{id}`
+카테고리(스킬 태그)와 문장(정제된 문장)을 손으로 고친다 — 저장 시점엔 여전히
+AI(LLM+캐노니컬라이제이션)가 자동으로 채우고, 이건 저장 후 가끔(`/stack`에서)
+고치는 별도 경로다(CLAUDE.md 2.1). 두 필드 다 optional이지만 **최소 하나는
+있어야 한다** — 둘 다 없으면 400.
+
+```jsonc
+// 요청 (둘 중 하나 이상, 둘 다 가능)
+{ "skill_tags": ["결제/정산"], "refined_sentence": "사람이 직접 고친 문장" }
+
+// 응답 200 — 위 카드 객체와 동일한 모양(refinement_failed는 항상 false)
+```
+
+### `POST /api/cards/{id}/refine` (9/15 신규)
+폴백 저장된(원문 그대로인) 카드를 다시 AI로 정리해본다. 요청 바디 없음. 성공하면
+`refined_sentence`/`skill_tags`/`confidence`가 갱신된 카드 객체를 200으로 반환한다.
+다시 실패하면 500 — 폴백 저장이 이미 끝난 상태라 데이터 유실 위험은 없다.
 
 ### `GET /api/cards/unclassified/suggestions` (9/14 신규)
 "4.1.1 AI 프로젝트 자동 제안" — `project_id`가 없는(아직 프로젝트 미배정) 카드끼리만

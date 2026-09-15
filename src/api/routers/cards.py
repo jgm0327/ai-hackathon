@@ -7,14 +7,21 @@ JD 매칭을 여기서 하지 않는다(run_pipeline이 이미 그렇게 되어 
 로그인 유저를 받아 그 id로 storage를 스코핑한다 — 다른 유저의 카드는 존재 자체가
 안 보인다(db.get_card/delete_card가 user_id로 필터링).
 
-**구현 노트 (9/14, 카테고리 직접 수정)**: PATCH는 `skill_tags`만 받는다 — 매일 쓰는
-저장 경로(POST)는 여전히 LLM+캐노니컬라이제이션이 자동으로 태그를 뽑고, 사람이 손대는
+**구현 노트 (9/14, 카테고리 직접 수정 / 9/15, 문장 직접 수정 추가)**: PATCH는
+`skill_tags`/`refined_sentence`만 받는다(둘 다 optional, 최소 하나) — 매일 쓰는
+저장 경로(POST)는 여전히 LLM+캐노니컬라이제이션이 자동으로 뽑고, 사람이 손대는
 건 저장 후 가끔(`/stack`에서)뿐이다. 2.1(매일 경로에 선택지 금지)을 지키는 설계.
+
+**구현 노트 (9/15, 변환 실패 폴백)**: POST가 `run_pipeline()`에서 LLM 파싱 실패를
+전파받으면 예전엔 카드가 통째로 안 저장됐다(CLAUDE.md P0 "저장소 없으면 제품이
+없다"와 충돌). 이제 `run_pipeline()` 자체가 파싱 실패 시 원문을 그대로 폴백
+저장하고 `refinement_failed` 플래그를 반환하므로, 이 라우터는 그 플래그를
+응답에 얹기만 한다. `POST /cards/{id}/refine`으로 나중에 다시 정리를 시도할 수 있다.
 """
 from fastapi import APIRouter, Depends, HTTPException
 
 from src.agent.card_clustering import suggest_clusters
-from src.agent.pipeline import run_pipeline
+from src.agent.pipeline import retry_refinement, run_pipeline
 from src.api.schemas import (
     BundleIntoProjectRequest,
     CardClusterSuggestion,
@@ -37,6 +44,23 @@ def create_card(
 ) -> CardResponse:
     result = run_pipeline(current_user.id, payload.raw_text)
     card = db.get_card(current_user.id, result["card_id"])
+    response = CardResponse.model_validate(card)
+    response.refinement_failed = result["refinement_failed"]
+    return response
+
+
+@router.post("/cards/{card_id}/refine", response_model=CardResponse)
+def refine_card_endpoint(
+    card_id: int, current_user: db.User = Depends(get_current_user)
+) -> CardResponse:
+    """폴백 저장된(원문 그대로인) 카드를 다시 AI로 정리해본다 (9/15 신규).
+
+    실패하면 그대로 예외가 전파돼 500이 된다 — 폴백 저장이 이미 끝난 상태라
+    재시도가 또 실패해도 데이터 유실은 없다(그대로 남아있음).
+    """
+    card = retry_refinement(current_user.id, card_id)
+    if card is None:
+        raise HTTPException(status_code=404, detail="카드를 찾을 수 없습니다")
     return CardResponse.model_validate(card)
 
 
@@ -61,7 +85,14 @@ def update_card_tags_endpoint(
     payload: CardTagsUpdateRequest,
     current_user: db.User = Depends(get_current_user),
 ) -> CardResponse:
-    card = db.update_card_tags(current_user.id, card_id, payload.skill_tags)
+    if payload.skill_tags is None and payload.refined_sentence is None:
+        raise HTTPException(status_code=400, detail="skill_tags 또는 refined_sentence 중 하나는 있어야 합니다")
+    card = db.update_card(
+        current_user.id,
+        card_id,
+        skill_tags=payload.skill_tags,
+        refined_sentence=payload.refined_sentence,
+    )
     if card is None:
         raise HTTPException(status_code=404, detail="카드를 찾을 수 없습니다")
     return CardResponse.model_validate(card)

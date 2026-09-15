@@ -328,24 +328,55 @@ def get_card(user_id: int, card_id: int) -> Card | None:
     return _row_to_card(row) if row else None
 
 
-def update_card_tags(user_id: int, card_id: int, skill_tags: list[str]) -> Card | None:
-    """카드의 skill_tags를 통째로 덮어쓴다 (9/14 신규 — 카테고리 직접 수정).
+def update_card(
+    user_id: int,
+    card_id: int,
+    *,
+    skill_tags: list[str] | None = None,
+    refined_sentence: str | None = None,
+    confidence: float | None = None,
+) -> Card | None:
+    """카드의 skill_tags/refined_sentence/confidence를 손으로(또는 재정리로) 고친다
+    (9/14 카테고리 수정 신규, 9/15 문장 수정 + confidence 추가).
 
-    LLM이 자동으로 뽑은 태그를 나중에(연 몇 회, `/stack`에서) 사람이 손으로 고칠 수
+    LLM이 자동으로 뽑은 결과를 나중에(연 몇 회, `/stack`에서) 사람이 손으로 고칠 수
     있게 하는 기능이다 — 매일 쓰는 입력 경로에는 선택지를 안 넣는다는 원칙(CLAUDE.md
     2.1)과, 저장 시점엔 LLM/임베딩이 자동으로 분류한다는 원칙(2.3)은 그대로 유지하고,
     "저장된 다음에 가끔 고쳐 쓰는" 별개의 경로로만 추가한다.
+
+    `confidence`는 사람이 직접 고르는 값이 아니라 `pipeline.retry_refinement()`가
+    재파싱 결과를 반영할 때만 쓴다 — PATCH API 스키마에는 노출하지 않는다.
+
+    아무 것도 안 넘기면(호출부가 실수한 경우) 아무 것도 안 건드리고 현재 카드를 그대로
+    반환한다 — 라우터 쪽에서 이미 "최소 하나"를 강제하지만, 여기서도 안전하게 둔다.
 
     이 유저 소유가 아니거나 존재하지 않으면 아무것도 안 바꾸고 None을 반환한다
     (다른 카드 함수들과 동일한 소유권 규칙).
     """
     init_db()
-    with _connect() as conn:
-        conn.execute(
-            "UPDATE cards SET skill_tags = ? WHERE id = ? AND user_id = ?",
-            (json.dumps(skill_tags, ensure_ascii=False), card_id, user_id),
-        )
+    sets: list[str] = []
+    params: list[object] = []
+    if skill_tags is not None:
+        sets.append("skill_tags = ?")
+        params.append(json.dumps(skill_tags, ensure_ascii=False))
+    if refined_sentence is not None:
+        sets.append("refined_sentence = ?")
+        params.append(refined_sentence)
+    if confidence is not None:
+        sets.append("confidence = ?")
+        params.append(confidence)
+    if sets:
+        with _connect() as conn:
+            conn.execute(
+                f"UPDATE cards SET {', '.join(sets)} WHERE id = ? AND user_id = ?",
+                (*params, card_id, user_id),
+            )
     return get_card(user_id, card_id)
+
+
+def update_card_tags(user_id: int, card_id: int, skill_tags: list[str]) -> Card | None:
+    """`update_card()`의 태그 전용 래퍼 — 기존 호출부 시그니처를 그대로 유지한다."""
+    return update_card(user_id, card_id, skill_tags=skill_tags)
 
 
 def create_project(user_id: int, name: str, started_at: str) -> int:

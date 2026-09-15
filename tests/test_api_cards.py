@@ -148,6 +148,84 @@ def test_patch_missing_card_tags_returns_404(client, current_user_id):
     assert response.status_code == 404
 
 
+def test_patch_card_sentence_only_leaves_tags_untouched(client, current_user_id):
+    """9/15 신규 — 문장 직접 수정. skill_tags를 안 보내면 그대로 유지된다."""
+    with patch("src.parsing.parser._call_llm", return_value=MOCK_LLM_RESPONSE):
+        created = client.post("/api/cards", json={"raw_text": "결제 API 느려서 레디스 캐시 붙임"}).json()
+
+    response = client.patch(f"/api/cards/{created['id']}", json={"refined_sentence": "사람이 직접 고친 문장"})
+
+    assert response.status_code == 200
+    assert response.json()["refined_sentence"] == "사람이 직접 고친 문장"
+    assert response.json()["skill_tags"] == created["skill_tags"]
+
+
+def test_patch_card_with_empty_body_returns_400(client, current_user_id):
+    with patch("src.parsing.parser._call_llm", return_value=MOCK_LLM_RESPONSE):
+        created = client.post("/api/cards", json={"raw_text": "결제 API 느려서 레디스 캐시 붙임"}).json()
+
+    response = client.patch(f"/api/cards/{created['id']}", json={})
+
+    assert response.status_code == 400
+
+
+def test_create_card_llm_failure_falls_back_to_raw_text(client, current_user_id):
+    """9/15 신규 — LLM 파싱이 실패해도 카드는 원문 그대로 저장돼야 한다(CLAUDE.md
+    P0 "저장소 없으면 제품이 없다")."""
+    with patch("src.parsing.parser._call_llm", side_effect=RuntimeError("LLM 타임아웃")):
+        response = client.post("/api/cards", json={"raw_text": "결제 API 느려서 레디스 캐시 붙임"})
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["refinement_failed"] is True
+    assert body["raw_text"] == "결제 API 느려서 레디스 캐시 붙임"
+    assert body["refined_sentence"] == "결제 API 느려서 레디스 캐시 붙임"
+    assert body["skill_tags"] == []
+    # 재조회해도 폴백 저장된 카드가 실제로 남아있어야 한다.
+    cards = client.get("/api/cards").json()["cards"]
+    assert len(cards) == 1
+
+
+def test_create_card_success_has_refinement_failed_false(client, current_user_id):
+    with patch("src.parsing.parser._call_llm", return_value=MOCK_LLM_RESPONSE):
+        response = client.post("/api/cards", json={"raw_text": "결제 API 느려서 레디스 캐시 붙임"})
+
+    assert response.json()["refinement_failed"] is False
+
+
+def test_refine_card_endpoint_updates_fallback_card(client, current_user_id):
+    """9/15 신규 — 폴백 저장된 카드를 다시 정리."""
+    with patch("src.parsing.parser._call_llm", side_effect=RuntimeError("LLM 타임아웃")):
+        created = client.post("/api/cards", json={"raw_text": "결제 API 느려서 레디스 캐시 붙임"}).json()
+    assert created["refinement_failed"] is True
+
+    with patch("src.parsing.parser._call_llm", return_value=MOCK_LLM_RESPONSE):
+        response = client.post(f"/api/cards/{created['id']}/refine")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["refined_sentence"] == "결제 API 응답 지연을 해소하기 위해 Redis 캐싱 레이어를 도입했습니다."
+    assert body["skill_tags"] == ["Redis", "성능최적화", "결제시스템"]
+
+
+def test_refine_missing_card_returns_404(client, current_user_id):
+    response = client.post("/api/cards/9999/refine")
+    assert response.status_code == 404
+
+
+def test_refine_another_users_card_returns_404(client, current_user_id):
+    other_user_id = db.upsert_user("other-kakao-id", "다른유저", None, "2026-01-01T00:00:00")
+    other_card_id = db.save_card(
+        other_user_id, None,
+        ParsedEntry(raw_text="다른 유저 카드", refined_sentence="다른 유저 카드", skill_tags=[], confidence=0.0),
+        "2023-02-14",
+    )
+
+    response = client.post(f"/api/cards/{other_card_id}/refine")
+
+    assert response.status_code == 404
+
+
 def test_patch_another_users_card_tags_returns_404(client, current_user_id):
     other_user_id = db.upsert_user("other-kakao-id", "다른유저", None, "2026-01-01T00:00:00")
     other_card_id = db.save_card(

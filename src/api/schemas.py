@@ -18,13 +18,14 @@ class CardCreateRequest(BaseModel):
 
 
 class CardTagsUpdateRequest(BaseModel):
-    """PATCH /api/cards/{id} — 카테고리(스킬 태그) 직접 수정 (9/14 신규).
+    """PATCH /api/cards/{id} — 카테고리(스킬 태그)/문장 직접 수정 (9/14 태그, 9/15 문장 추가).
 
-    이름/문장 등 다른 필드는 안 받는다 — 태그 수정만 지원(가끔 손보는 용도, CLAUDE.md 2.4
-    정신: 폴더 CRUD처럼 여기도 최소 기능만).
+    가끔(연 몇 회, `/stack`에서) 손보는 용도라 두 필드 다 optional — 최소 하나는
+    와야 하고(라우터가 체크, 둘 다 없으면 400), 넘어온 것만 바뀐다.
     """
 
-    skill_tags: list[str]
+    skill_tags: list[str] | None = None
+    refined_sentence: str | None = None
 
 
 class CardResponse(_FromAttributes):
@@ -39,6 +40,10 @@ class CardResponse(_FromAttributes):
     # `date.today().isoformat()`로 날짜만("2026-02-14") 기록한다. 저장소 계약을 조율 없이
     # 바꾸지 않기 위해 실제 저장된 값을 그대로 반환한다 — 불일치는 최종 보고에 기록.
     created_at: str
+    # 9/15 신규 — POST /api/cards가 LLM 파싱에 실패해 원문을 그대로 폴백 저장했을 때만
+    # true. DB 컬럼이 아니라 생성 시점에 라우터가 채워 넣는 값이라, GET/PATCH 응답은
+    # 항상 기본값 False다 (docs/05-api-contract.md 참고).
+    refinement_failed: bool = False
 
 
 class CardListResponse(BaseModel):

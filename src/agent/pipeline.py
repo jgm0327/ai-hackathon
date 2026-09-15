@@ -25,13 +25,23 @@ CLAUDE.md 2.1 원칙("일상 입력 비용은 거의 0")에도 어긋난다. 대
 **구현 노트 (9/14, 카카오 로그인 Phase B)**: 모든 함수가 `user_id`를 맨 앞 인자로
 받는다 — 호출부(라우터)가 `Depends(get_current_user)`로 받은 로그인 유저의 id를
 그대로 넘긴다. 이 모듈 자체는 "누가 로그인했는지" 판단하지 않는다(그건 라우터의 몫).
+
+**구현 노트 (9/15, 변환 실패 폴백 추가)**: `parse_note()`가 LLM 호출 실패(타임아웃,
+API 오류, JSON 파싱 재시도까지 실패 등)로 예외를 던지면 예전엔 카드가 통째로
+저장되지 않았다 — 새로고침하면 방금 쓴 메모가 사라졌다(CLAUDE.md P0 "저장소 없으면
+제품이 없다" 원칙 위반). 이제 파싱 실패 시 원문을 그대로 폴백 저장하고
+`refinement_failed=True`를 반환한다 — **저장 자체는 파싱 성공 여부와 무관하게
+항상 일어난다.** `retry_refinement()`로 나중에 다시 정리를 시도할 수 있다.
 """
+import logging
 from datetime import date
 
 from src.agent.tag_canonicalizer import canonicalize_tags
-from src.parsing.parser import parse_note
+from src.parsing.parser import ParsedEntry, parse_note
 from src.parsing.resume import StarItem, build_resume
-from src.storage.db import get_current_project, list_cards, save_card
+from src.storage.db import Card, get_card, get_current_project, list_cards, save_card, update_card
+
+logger = logging.getLogger(__name__)
 
 
 def run_pipeline(user_id: int, raw_text: str) -> dict:
@@ -43,14 +53,44 @@ def run_pipeline(user_id: int, raw_text: str) -> dict:
         {
             "parsed": ParsedEntry,
             "card_id": int,
+            "refinement_failed": bool,
         }
     """
-    parsed = parse_note(raw_text)
-    parsed.skill_tags = canonicalize_tags(parsed.skill_tags)
+    try:
+        parsed = parse_note(raw_text)
+        parsed.skill_tags = canonicalize_tags(parsed.skill_tags)
+        refinement_failed = False
+    except Exception:
+        # 어떤 이유로든(LLM 타임아웃/오류, JSON 파싱 재시도까지 실패 등) 정리에
+        # 실패해도 유저가 쓴 메모 자체는 반드시 남겨야 한다 — 원문을 그대로 폴백.
+        logger.warning("parse_note 실패 — 원문 그대로 폴백 저장", exc_info=True)
+        parsed = ParsedEntry(raw_text=raw_text, refined_sentence=raw_text, skill_tags=[], confidence=0.0)
+        refinement_failed = True
     current_project = get_current_project(user_id)
     project_id = current_project.id if current_project else None
     card_id = save_card(user_id, project_id, parsed, date.today().isoformat())
-    return {"parsed": parsed, "card_id": card_id}
+    return {"parsed": parsed, "card_id": card_id, "refinement_failed": refinement_failed}
+
+
+def retry_refinement(user_id: int, card_id: int) -> Card | None:
+    """폴백 저장된(원문 그대로인) 카드를 다시 AI로 정리한다 (9/15 신규).
+
+    이 유저 소유가 아니거나 없으면 None. 파싱이 다시 실패하면 예외를 그대로
+    전파한다(카드는 이미 저장돼 있으니 데이터 유실 위험이 없다 — 호출부가 그냥
+    "다시 실패했다"고만 알리면 된다).
+    """
+    card = get_card(user_id, card_id)
+    if card is None:
+        return None
+    parsed = parse_note(card.raw_text)
+    parsed.skill_tags = canonicalize_tags(parsed.skill_tags)
+    return update_card(
+        user_id,
+        card_id,
+        skill_tags=parsed.skill_tags,
+        refined_sentence=parsed.refined_sentence,
+        confidence=parsed.confidence,
+    )
 
 
 def run_pipeline_batch(user_id: int, raw_texts: list[str]) -> list[dict]:
