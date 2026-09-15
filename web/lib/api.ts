@@ -290,6 +290,29 @@ export function saveResumeDraft(projectId: number, content: string): Promise<Res
   });
 }
 
+/**
+ * "기존 경력기술서 붙여넣기 → Before/After 대조" (9/15 신규, Figma 90:612/90:640).
+ * 완전히 선택 사항 — `buildResume()`과 독립적으로 동작한다.
+ *
+ * 관련 카드가 없으면 `enhanced`는 `original`과 동일하게 오고 `source_dates`/
+ * `source_card_ids`/`gap_comment`는 전부 비어 있다 — 근거 없이 보강된 것처럼
+ * 보이게 만들지 않는다(CLAUDE.md 2.2). `source_card_ids`로 카드를 매칭할 것.
+ */
+export interface EnhancedItem {
+  original: string;
+  enhanced: string;
+  gap_comment: string;
+  source_dates: string[];
+  source_card_ids: number[];
+}
+
+export function enhanceResume(projectId: number, existingItems: string[]): Promise<EnhancedItem[]> {
+  return request<{ items: EnhancedItem[] }>("/resume/enhance", {
+    method: "POST",
+    body: JSON.stringify({ project_id: projectId, existing_items: existingItems }),
+  }).then((res) => res.items);
+}
+
 // ---------------------------------------------------------------------------
 // 5. 노션 (읽기 전용) — docs/05-api-contract.md §5
 // ---------------------------------------------------------------------------

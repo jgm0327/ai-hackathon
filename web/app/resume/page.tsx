@@ -2,9 +2,19 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { ResumeCompareCarousel } from "@/components/ResumeCompareCarousel";
 import { StarItemSection, formatStarItemForClipboard } from "@/components/StarItemCard";
 import { StarItemSkeleton } from "@/components/Skeleton";
-import { ApiError, Profile, StarItem, getResumeDraft, getProfile, saveResumeDraft } from "@/lib/api";
+import {
+  ApiError,
+  EnhancedItem,
+  Profile,
+  StarItem,
+  enhanceResume,
+  getResumeDraft,
+  getProfile,
+  saveResumeDraft,
+} from "@/lib/api";
 import { buildResumeCached, peekCachedResume, updateCachedResumeItems } from "@/lib/resumeCache";
 import { useProjects } from "@/lib/useProjects";
 
@@ -90,6 +100,14 @@ export default function ResumePage() {
   const [saveStatus, setSaveStatus] = useState<"saved" | null>(null);
   const [draftError, setDraftError] = useState<string | null>(null);
 
+  // "기존 경력기술서 붙여넣기 → Before/After 대조" (9/15 신규, Figma 90:612/90:640).
+  // 완전히 선택 사항이라 기본은 접혀있다 — JD 폼처럼 매번 노출되면 2.1 위반.
+  const [showPasteSection, setShowPasteSection] = useState(false);
+  const [pasteText, setPasteText] = useState("");
+  const [enhancing, setEnhancing] = useState(false);
+  const [enhanceError, setEnhanceError] = useState<string | null>(null);
+  const [compareItems, setCompareItems] = useState<EnhancedItem[] | null>(null);
+
   useEffect(() => {
     let cancelled = false;
     getProfile()
@@ -113,6 +131,10 @@ export default function ResumePage() {
     setDraftUpdatedAt(null);
     setError(null);
     setDraftError(null);
+    setShowPasteSection(false);
+    setPasteText("");
+    setEnhanceError(null);
+    setCompareItems(null);
   }, [currentProject?.id]);
 
   // 새로고침해도 방금 만든 경력기술서가 사라진 것처럼 보이지 않게, 마운트 시점에
@@ -171,6 +193,49 @@ export default function ResumePage() {
   };
 
   const heading = buildResumeHeading(profile, currentProject?.name ?? null);
+
+  const handleEnhance = async () => {
+    if (!currentProject) return;
+    const existingItems = pasteText
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .slice(0, 10);
+    if (existingItems.length === 0) return;
+    setEnhancing(true);
+    setEnhanceError(null);
+    try {
+      const result = await enhanceResume(currentProject.id, existingItems);
+      setCompareItems(result);
+    } catch (err) {
+      setEnhanceError(err instanceof ApiError ? err.detail : "보강에 실패했습니다.");
+    } finally {
+      setEnhancing(false);
+    }
+  };
+
+  // 캐러셀을 다 돌면(적용/그대로 두기 선택 완료) 최종 텍스트를 자유 텍스트 초안에
+  // 합쳐 곧바로 저장한다 — 새 저장 구조 없이 기존 PUT /resume/draft를 재사용한다
+  // (CLAUDE.md 3장, AI가 만든 보강 결과 자체는 저장하지 않는다).
+  const handleFinishCompare = async (finalTexts: string[]) => {
+    const bulletLines = finalTexts.map((text) => `- ${text}`).join("\n");
+    const markdown = heading ? `# ${heading}\n\n${bulletLines}` : bulletLines;
+
+    setCompareItems(null);
+    setShowPasteSection(false);
+    setPasteText("");
+    setDraftContent(markdown);
+    setMode("edit");
+    setShowBuildForm(false);
+
+    if (!currentProject) return;
+    try {
+      const saved = await saveResumeDraft(currentProject.id, markdown);
+      setDraftUpdatedAt(saved.updated_at);
+    } catch (err) {
+      setDraftError(err instanceof ApiError ? err.detail : "저장에 실패했습니다.");
+    }
+  };
 
   const handleCopy = async (kind: "markdown" | "notion") => {
     const text = mode === "edit" ? draftContent : items ? buildResumeMarkdown(heading, items) : "";
@@ -289,6 +354,12 @@ export default function ResumePage() {
             </Link>
           </div>
         </div>
+      ) : compareItems ? (
+        <ResumeCompareCarousel
+          items={compareItems}
+          onCancel={() => setCompareItems(null)}
+          onFinish={handleFinishCompare}
+        />
       ) : (
         <>
           {(!items || showBuildForm) && (
@@ -308,6 +379,62 @@ export default function ResumePage() {
               >
                 {loading ? "경력기술서 만드는 중… (최대 10초)" : "경력기술서 만들기"}
               </button>
+
+              <div className="h-px w-full bg-[#e5e7eb]" />
+
+              {showPasteSection ? (
+                <div className="flex flex-col gap-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[13px] font-semibold text-[#18181b]">
+                      이미 쓰신 경력기술서가 있나요?
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setShowPasteSection(false)}
+                      className="shrink-0 text-xs font-medium text-zinc-400 underline underline-offset-2"
+                    >
+                      건너뛰기
+                    </button>
+                  </div>
+                  <p className="text-xs text-zinc-500">
+                    한 항목만 붙여넣으면 쌓인 기록으로 얼마나 보강되는지 바로 비교해서 보여드려요.
+                  </p>
+                  <textarea
+                    value={pasteText}
+                    onChange={(e) => setPasteText(e.target.value)}
+                    placeholder={"결제 API 성능 개선 담당"}
+                    rows={3}
+                    className="w-full resize-none rounded-xl border border-zinc-200 bg-white p-3 text-sm shadow-sm focus:border-zinc-400 focus:outline-none"
+                  />
+                  <div className="rounded-xl bg-zinc-50 p-3 text-xs text-zinc-500">
+                    <p className="font-medium text-zinc-600">이런 식으로 한 줄이면 충분해요</p>
+                    <p className="mt-1">결제 API 성능 개선 담당</p>
+                    <p>신규 회원 온보딩 플로우 기획</p>
+                  </div>
+                  {enhanceError && (
+                    <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{enhanceError}</p>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleEnhance}
+                    disabled={!pasteText.trim() || !currentProject || enhancing}
+                    className="w-full rounded-xl bg-zinc-900 py-3 text-sm font-semibold text-white transition-colors hover:bg-zinc-800 disabled:opacity-40"
+                  >
+                    {enhancing ? "보강하는 중…" : "보강해서 비교하기"}
+                  </button>
+                  <p className="text-center text-[11px] text-zinc-400">
+                    없으면 건너뛰세요. 새 경력기술서로 만들어 드려요.
+                  </p>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowPasteSection(true)}
+                  className="text-left text-xs font-medium text-zinc-500 underline underline-offset-2"
+                >
+                  이미 쓰신 경력기술서가 있나요? (선택)
+                </button>
+              )}
             </div>
           )}
 
