@@ -45,6 +45,13 @@ class Settings:
     # 코사인 거리 기준값 — 낮을수록 "확실히 같은 개념"일 때만 합친다. 시드 데이터로
     # 수동 검증한 값이라 데이터가 늘어나면 재튜닝 필요(tasks/track-b-agent-pipeline.md 참고).
     tag_canonicalize_threshold: float = float(os.getenv("TAG_CANONICALIZE_THRESHOLD", "0.15"))
+    # 미분류 카드 유사도 클러스터링(9/14 신규, "4.1.1 AI 프로젝트 자동 제안") —
+    # project_id가 없는 카드끼리만 비교해서 "비슷해 보이는 것들"을 묶어 제안한다
+    # (CLAUDE.md 3장: 이미 프로젝트가 배정된 카드는 절대 건드리지 않음). 태그보다
+    # 문장 단위라 표현이 더 다양하므로 태그 임계값(0.15)보다 느슨하게 잡았다 —
+    # 실측 튜닝 전 초기값, tag_canonicalize_threshold와 같은 "코사인 거리, 낮을수록
+    # 유사" 기준이다.
+    card_cluster_threshold: float = float(os.getenv("CARD_CLUSTER_THRESHOLD", "0.25"))
     # Tier 2 푸시 알림(Track E). PRIVATE는 서버(push_sender.py)만, PUBLIC은 프론트 JS의
     # pushManager.subscribe(applicationServerKey=...)에 그대로 노출해도 안전(공개키라서 그렇다).
     vapid_private_key: str = os.getenv("VAPID_PRIVATE_KEY", "")

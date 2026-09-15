@@ -281,6 +281,42 @@ def list_cards(user_id: int, project_id: int | None = None) -> list[Card]:
     return [_row_to_card(row) for row in rows]
 
 
+def list_unassigned_cards(user_id: int) -> list[Card]:
+    """프로젝트가 아직 배정되지 않은(`project_id IS NULL`) 카드만 반환한다 (9/14 신규).
+
+    "4.1.1 AI 프로젝트 자동 제안" 기능 전용 — 이미 어떤 프로젝트에 배정된 카드는
+    이 함수가 절대 건드리지 않는다. `list_cards(user_id)`는 그대로 두고(기존 계약
+    변경 없음) 병행 함수로 추가했다.
+    """
+    init_db()
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM cards WHERE user_id = ? AND project_id IS NULL ORDER BY created_at",
+            (user_id,),
+        ).fetchall()
+    return [_row_to_card(row) for row in rows]
+
+
+def bulk_assign_cards_to_project(user_id: int, card_ids: list[int], project_id: int) -> int:
+    """주어진 카드들의 project_id를 한 번에 갱신한다 (9/14 신규 — "미분류 카드를
+    새 프로젝트로 묶기" 전용).
+
+    이 유저 소유가 아닌 card_id는 조용히 무시한다(다른 카드 함수들과 동일한 소유권
+    규칙 — `WHERE ... AND user_id = ?`). 반환값은 실제로 갱신된 행 수라, 호출부가
+    "몇 개가 가로채기당해 무시됐는지"를 감지할 수 있다.
+    """
+    if not card_ids:
+        return 0
+    init_db()
+    placeholders = ",".join("?" for _ in card_ids)
+    with _connect() as conn:
+        cur = conn.execute(
+            f"UPDATE cards SET project_id = ? WHERE id IN ({placeholders}) AND user_id = ?",
+            (project_id, *card_ids, user_id),
+        )
+        return cur.rowcount
+
+
 def get_card(user_id: int, card_id: int) -> Card | None:
     """카드 하나를 id로 조회한다. 이 유저 소유가 아니면(다른 유저 카드이거나 존재하지
     않으면) None — 둘을 구분해서 알려주지 않는다(다른 유저 데이터 존재 여부가 새면 안 됨)."""
@@ -323,6 +359,18 @@ def create_project(user_id: int, name: str, started_at: str) -> int:
         project_id = cur.lastrowid
     set_current_project(user_id, project_id)
     return project_id
+
+
+def get_project(user_id: int, project_id: int) -> Project | None:
+    """프로젝트 하나를 id로 조회한다 (9/14 신규 — "미분류 카드 묶기"에서 방금 만든
+    프로젝트를 응답에 바로 실어 보내려고 추가). 이 유저 소유가 아니면(다른 유저
+    프로젝트이거나 존재하지 않으면) None — `get_card`와 동일한 소유권 규칙."""
+    init_db()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM projects WHERE id = ? AND user_id = ?", (project_id, user_id)
+        ).fetchone()
+    return _row_to_project(row) if row else None
 
 
 def list_projects(user_id: int) -> list[Project]:

@@ -161,3 +161,107 @@ def test_patch_another_users_card_tags_returns_404(client, current_user_id):
 
     assert response.status_code == 404
     assert db.get_card(other_user_id, other_card_id).skill_tags == ["Redis"]
+
+
+# --- GET /api/cards/unclassified/suggestions, POST /api/cards/bundle-into-project (9/14 신규) ---
+
+
+def _unassigned_card(user_id: int, sentence: str, created_at="2023-02-14") -> int:
+    return db.save_card(
+        user_id, None,
+        ParsedEntry(raw_text=sentence, refined_sentence=sentence, skill_tags=[], confidence=0.9),
+        created_at,
+    )
+
+
+def test_get_unclassified_suggestions_requires_login(client):
+    response = client.get("/api/cards/unclassified/suggestions")
+    assert response.status_code == 401
+
+
+def test_get_unclassified_suggestions_returns_empty_when_no_unassigned_cards(client, current_user_id):
+    response = client.get("/api/cards/unclassified/suggestions")
+    assert response.status_code == 200
+    assert response.json() == {"clusters": []}
+
+
+def test_get_unclassified_suggestions_never_includes_already_assigned_cards(client, current_user_id):
+    """이미 프로젝트가 배정된 카드는 후보로도 안 뜬다 (CLAUDE.md 3장 안전장치)."""
+    project_id = db.create_project(current_user_id, "A은행 차세대", "2023-02-01")
+    db.save_card(
+        current_user_id, project_id,
+        ParsedEntry(raw_text="배정된 카드", refined_sentence="배정된 카드", skill_tags=[], confidence=0.9),
+        "2023-02-14",
+    )
+
+    with patch(
+        "src.agent.vectorstore._get_embedding_function",
+        return_value=lambda input: [[1.0, 0.0, 0.0] for _ in input],
+    ):
+        response = client.get("/api/cards/unclassified/suggestions")
+
+    assert response.json() == {"clusters": []}
+
+
+def test_get_unclassified_suggestions_returns_clusters_with_full_card_info(client, current_user_id):
+    id_a = _unassigned_card(current_user_id, "결제 API 캐싱 도입")
+    id_b = _unassigned_card(current_user_id, "결제 API 캐싱 도입 후속")
+
+    with patch(
+        "src.agent.vectorstore._get_embedding_function",
+        return_value=lambda input: [[1.0, 0.0, 0.0] for _ in input],  # 전부 동일 벡터 -> 무조건 유사
+    ):
+        response = client.get("/api/cards/unclassified/suggestions")
+
+    assert response.status_code == 200
+    clusters = response.json()["clusters"]
+    assert len(clusters) == 1
+    assert set(clusters[0]["card_ids"]) == {id_a, id_b}
+    assert {c["refined_sentence"] for c in clusters[0]["cards"]} == {
+        "결제 API 캐싱 도입",
+        "결제 API 캐싱 도입 후속",
+    }
+
+
+def test_bundle_cards_into_project_requires_login(client):
+    response = client.post(
+        "/api/cards/bundle-into-project",
+        json={"card_ids": [1], "name": "새 프로젝트", "started_at": "2023-02-01"},
+    )
+    assert response.status_code == 401
+
+
+def test_bundle_cards_into_project_creates_project_and_moves_cards(client, current_user_id):
+    id_a = _unassigned_card(current_user_id, "결제 API 캐싱 도입")
+    id_b = _unassigned_card(current_user_id, "결제 API 캐싱 도입 후속")
+
+    response = client.post(
+        "/api/cards/bundle-into-project",
+        json={"card_ids": [id_a, id_b], "name": "결제 API 개선 프로젝트", "started_at": "2023-02-14"},
+    )
+
+    assert response.status_code == 201
+    project = response.json()
+    assert project["name"] == "결제 API 개선 프로젝트"
+
+    cards = client.get(f"/api/cards?project_id={project['id']}").json()["cards"]
+    assert {c["id"] for c in cards} == {id_a, id_b}
+    # 사용자가 직접 입력한 이름 그대로 저장됐다 — AI가 이름을 짓지 않는다(CLAUDE.md 2.2).
+    assert db.list_unassigned_cards(current_user_id) == []
+
+
+def test_bundle_cards_into_project_ignores_another_users_card_ids(client, current_user_id):
+    """다른 유저 card_id를 섞어 보내도 그 카드만 조용히 무시되고, 내 카드는 정상 처리된다."""
+    other_user_id = db.upsert_user("other-kakao-id", "다른유저", None, "2026-01-01T00:00:00")
+    other_card_id = _unassigned_card(other_user_id, "다른 유저 카드")
+    my_card_id = _unassigned_card(current_user_id, "내 카드")
+
+    response = client.post(
+        "/api/cards/bundle-into-project",
+        json={"card_ids": [my_card_id, other_card_id], "name": "새 프로젝트", "started_at": "2023-02-14"},
+    )
+
+    assert response.status_code == 201
+    project_id = response.json()["id"]
+    assert db.get_card(current_user_id, my_card_id).project_id == project_id
+    assert db.get_card(other_user_id, other_card_id).project_id is None
