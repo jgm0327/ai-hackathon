@@ -36,6 +36,18 @@ function buildResumeMarkdown(heading: string | null, items: StarItem[]): string 
   return parts.join("\n\n");
 }
 
+/** 저장 시각(ISO)을 "9월 14일 21:05" 형태로. 유효하지 않으면 원본 문자열 그대로. */
+function formatSavedAt(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return new Intl.DateTimeFormat("ko-KR", {
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(d);
+}
+
 /**
  * 경력기술서 빌더 (`/resume`) — 이직 준비 경로. 무거운 호출이라 로딩 표시가 중요하다
  * (`docs/02-architecture.md` §2.2 — 입력 200토큰/150토큰짜리 매일 경로와 달리
@@ -69,6 +81,7 @@ export default function ResumePage() {
 
   const [mode, setMode] = useState<"ai" | "edit">("ai");
   const [draftContent, setDraftContent] = useState("");
+  const [draftUpdatedAt, setDraftUpdatedAt] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"saved" | null>(null);
   const [draftError, setDraftError] = useState<string | null>(null);
@@ -93,6 +106,7 @@ export default function ResumePage() {
     setShowBuildForm(true);
     setMode("ai");
     setDraftContent("");
+    setDraftUpdatedAt(null);
     setError(null);
     setDraftError(null);
   }, [currentProject?.id]);
@@ -121,6 +135,7 @@ export default function ResumePage() {
       .then((draft) => {
         if (cancelled || !draft.content) return;
         setDraftContent(draft.content);
+        setDraftUpdatedAt(draft.updated_at);
         setMode("edit");
         setShowBuildForm(false);
       })
@@ -172,7 +187,8 @@ export default function ResumePage() {
     setSaving(true);
     setDraftError(null);
     try {
-      await saveResumeDraft(currentProject.id, draftContent);
+      const saved = await saveResumeDraft(currentProject.id, draftContent);
+      setDraftUpdatedAt(saved.updated_at);
       setSaveStatus("saved");
       setTimeout(() => setSaveStatus(null), 1500);
     } catch (err) {
@@ -201,7 +217,14 @@ export default function ResumePage() {
       {mode === "edit" ? (
         <div className="flex flex-col gap-3">
           <div className="flex items-center justify-between">
-            <p className="text-xs font-medium text-zinc-500">직접 수정 중 — 저장하면 다음에 열 때도 그대로 보입니다.</p>
+            <p className="text-xs font-medium text-zinc-500">
+              직접 수정 중 — 저장하면 다음에 열 때도 그대로 보입니다.
+              {draftUpdatedAt && (
+                <span className="block text-[11px] text-zinc-400">
+                  마지막 저장: {formatSavedAt(draftUpdatedAt)}
+                </span>
+              )}
+            </p>
             <button
               type="button"
               onClick={() => setMode("ai")}

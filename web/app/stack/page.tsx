@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { BottomSheet } from "@/components/BottomSheet";
 import { ProjectSwitcher } from "@/components/ProjectSwitcher";
 import { SkeletonLine } from "@/components/Skeleton";
 import { ApiError, Card, StarItem, deleteCard, listCards, updateCardTags } from "@/lib/api";
@@ -15,6 +16,42 @@ function formatCardDate(iso: string): string {
   const mm = `${d.getMonth() + 1}`.padStart(2, "0");
   const dd = `${d.getDate()}`.padStart(2, "0");
   return `${mm}.${dd}`;
+}
+
+/** `card.created_at`과 동일한 "YYYY-MM-DD" 형식으로, 로컬(뷰어) 달력 기준 날짜를
+ * 만든다. `Date.toISOString()`은 UTC 기준이라 자정 근처에 하루가 밀리는 문제가
+ * 생길 수 있어 로컬 컴포넌트로 직접 조립한다. */
+function toDateKey(d: Date): string {
+  const y = d.getFullYear();
+  const m = `${d.getMonth() + 1}`.padStart(2, "0");
+  const day = `${d.getDate()}`.padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * 최근 7일(오늘 포함) 중 카드가 있었던 날 boolean 배열 + 오늘부터 거꾸로 센
+ * 연속 기록일수를 계산한다 (9/14 신규 — Figma "주간 기록 스트릭").
+ *
+ * **구현 노트**: 새 API 없이 이미 로드된 `cards`에서 순수 계산한다 — `created_at`이
+ * 시간 없는 순수 날짜 문자열이라(`src/storage/db.py` `Card.created_at`) 문자열
+ * 동등 비교만으로 충분하다. `showAllProjects` 토글 상태를 그대로 반영한다(그
+ * 시점에 로드된 `cards` 자체가 이미 그 필터를 반영하고 있으므로 별도 분기 불필요).
+ */
+function computeStreak(cards: Card[]): { days: boolean[]; consecutive: number } {
+  const dateSet = new Set(cards.map((c) => c.created_at));
+  const today = new Date();
+  const days: boolean[] = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    days.push(dateSet.has(toDateKey(d)));
+  }
+  let consecutive = 0;
+  for (let i = days.length - 1; i >= 0; i--) {
+    if (!days[i]) break;
+    consecutive++;
+  }
+  return { days, consecutive };
 }
 
 interface CardGroup {
@@ -86,7 +123,12 @@ function StackPageContent() {
   const [error, setError] = useState<string | null>(null);
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [showAllProjects, setShowAllProjects] = useState(false);
-  const [confirmId, setConfirmId] = useState<number | null>(null);
+  // 카드 액션시트 (9/14, BottomSheet 고도화) — 예전엔 "⋯" 탭 시 같은 줄에서
+  // 태그수정/삭제/취소를 인라인으로 보여줬는데, Figma "4.1-a 카드 액션 시트"에
+  // 맞춰 진짜 바텀시트로 교체했다. 삭제는 한 번 더 확인하는 별도 시트를 거친다
+  // (Figma "4.1-c 삭제 확인 다이얼로그").
+  const [actionSheetCard, setActionSheetCard] = useState<Card | null>(null);
+  const [deleteConfirmCard, setDeleteConfirmCard] = useState<Card | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
   // 인과관계 그룹(부모-자식) 보기 (9/14 신규) — 기본은 꺼짐. 켜면 그 순간에만
@@ -206,13 +248,13 @@ function StackPageContent() {
 
   const visibleCards = activeTag ? cards.filter((c) => c.skill_tags.includes(activeTag)) : cards;
 
+  const streak = useMemo(() => computeStreak(cards), [cards]);
+
   const { groups, ungrouped } = useMemo(() => {
     if (!groupedView || !starGroups) return { groups: [] as CardGroup[], ungrouped: visibleCards };
     return groupCardsByStarItems(visibleCards, starGroups);
   }, [groupedView, starGroups, visibleCards]);
 
-  // ⋯ 메뉴 — 최소 기능: 확인 후 바로 삭제. 별도 액션 시트 없이 인라인으로 처리한다
-  // (CLAUDE.md 2.1 정신 — 자주 안 쓰는 동작에 무거운 UI를 얹지 않는다).
   const handleDelete = async (id: number) => {
     setDeletingId(id);
     try {
@@ -222,7 +264,7 @@ function StackPageContent() {
       setError("삭제에 실패했습니다. 다시 시도해 주세요.");
     } finally {
       setDeletingId(null);
-      setConfirmId(null);
+      setDeleteConfirmCard(null);
     }
   };
 
@@ -231,7 +273,6 @@ function StackPageContent() {
     setEditTags([...card.skill_tags]);
     setNewTagInput("");
     setTagError(null);
-    setConfirmId(null);
   };
 
   const cancelEditingTags = () => {
@@ -286,41 +327,14 @@ function StackPageContent() {
           <p className="text-[11px] text-[#a1a1aa]">#{card.skill_tags[0]}</p>
         )}
         <div className="flex-1" />
-        {confirmId === card.id ? (
-          <div className="flex items-center gap-2.5">
-            <button
-              type="button"
-              onClick={() => startEditingTags(card)}
-              className="text-[11px] font-medium text-zinc-600 underline underline-offset-2"
-            >
-              태그 수정
-            </button>
-            <button
-              type="button"
-              onClick={() => handleDelete(card.id)}
-              disabled={deletingId === card.id}
-              className="text-[11px] font-medium text-red-600 disabled:opacity-50"
-            >
-              {deletingId === card.id ? "삭제 중…" : "삭제"}
-            </button>
-            <button
-              type="button"
-              onClick={() => setConfirmId(null)}
-              className="text-[11px] text-[#a1a1aa]"
-            >
-              취소
-            </button>
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setConfirmId(card.id)}
-            aria-label="카드 관리"
-            className="px-1 text-[13px] text-[#a1a1aa]"
-          >
-            ⋯
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={() => setActionSheetCard(card)}
+          aria-label="카드 관리"
+          className="px-1 text-[13px] text-[#a1a1aa]"
+        >
+          ⋯
+        </button>
       </div>
 
       {editingId === card.id && (
@@ -406,6 +420,23 @@ function StackPageContent() {
           ⚙
         </Link>
       </div>
+
+      {/* 주간 기록 스트릭 (9/14 신규) — 카드가 하나도 없으면 의미가 없어서 숨긴다 */}
+      {!loading && cards.length > 0 && (
+        <div className="flex items-center gap-2">
+          <div className="flex gap-1">
+            {streak.days.map((has, i) => (
+              <span
+                key={i}
+                className={`size-2 rounded-full ${has ? "bg-zinc-900" : "bg-zinc-200"}`}
+              />
+            ))}
+          </div>
+          {streak.consecutive > 0 && (
+            <p className="text-[11px] font-medium text-zinc-500">연속 {streak.consecutive}일</p>
+          )}
+        </div>
+      )}
 
       {/* 프로젝트 스위처 + 전체보기 토글 — CLAUDE.md 3장: 프로젝트별로 카드가 구분돼야 한다 */}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -501,7 +532,13 @@ function StackPageContent() {
       )}
 
       {!loading && !groupsLoading && !error && groups.length === 0 && ungrouped.length === 0 && (
-        <p className="px-1 py-8 text-center text-sm text-zinc-400">아직 남긴 기록이 없습니다.</p>
+        <div className="flex flex-col items-center gap-3 py-8">
+          {/* Figma 노드 41:695 "빈 스택 일러스트" — 실제로는 그림 없이 빈 점선
+              placeholder 박스뿐이었다(디자이너가 아직 못 채운 자리). 없는 그림을
+              지어내는 대신 그 placeholder 스타일 그대로만 가져왔다. */}
+          <div className="size-[120px] rounded-[18px] border-[1.5px] border-dashed border-[#e5e7eb] bg-[#f4f4f5]" />
+          <p className="text-center text-sm text-zinc-400">아직 남긴 기록이 없습니다.</p>
+        </div>
       )}
 
       {!loading && !groupsLoading && (
@@ -549,6 +586,74 @@ function StackPageContent() {
           마스터 경력기술서 초안 짜기
         </Link>
       </div>
+
+      {/* 카드 액션 시트 (Figma "4.1-a") */}
+      <BottomSheet open={actionSheetCard !== null} onClose={() => setActionSheetCard(null)}>
+        <div className="flex flex-col">
+          <button
+            type="button"
+            onClick={() => {
+              const card = actionSheetCard;
+              setActionSheetCard(null);
+              if (card) startEditingTags(card);
+            }}
+            className="rounded-lg px-3 py-3 text-left text-sm text-zinc-900 transition-colors hover:bg-zinc-50"
+          >
+            태그 수정
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const card = actionSheetCard;
+              setActionSheetCard(null);
+              setDeleteConfirmCard(card);
+            }}
+            className="rounded-lg px-3 py-3 text-left text-sm text-red-600 transition-colors hover:bg-zinc-50"
+          >
+            삭제
+          </button>
+          <div className="my-1 h-px bg-zinc-100" />
+          <button
+            type="button"
+            onClick={() => setActionSheetCard(null)}
+            className="rounded-lg px-3 py-3 text-left text-sm text-zinc-500 transition-colors hover:bg-zinc-50"
+          >
+            취소
+          </button>
+        </div>
+      </BottomSheet>
+
+      {/* 삭제 확인 (Figma "4.1-c") */}
+      <BottomSheet
+        open={deleteConfirmCard !== null}
+        onClose={() => setDeleteConfirmCard(null)}
+        title="이 기록을 삭제할까요?"
+      >
+        {deleteConfirmCard && (
+          <>
+            <p className="mb-4 line-clamp-2 text-sm text-zinc-500">
+              {deleteConfirmCard.refined_sentence}
+            </p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmCard(null)}
+                className="flex-1 rounded-xl border border-zinc-200 py-3 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDelete(deleteConfirmCard.id)}
+                disabled={deletingId === deleteConfirmCard.id}
+                className="flex-1 rounded-xl bg-red-600 py-3 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:opacity-50"
+              >
+                {deletingId === deleteConfirmCard.id ? "삭제 중…" : "삭제"}
+              </button>
+            </div>
+          </>
+        )}
+      </BottomSheet>
     </div>
   );
 }
