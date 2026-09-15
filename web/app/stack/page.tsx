@@ -318,10 +318,14 @@ function StackPageContent() {
     return map;
   }, [projects]);
 
+  // 태그 종류가 쌓일수록 필터 칩이 줄바꿈되며 화면을 밀어내는 걸 막기 위해
+  // 빈도순으로 정렬한다 — 자주 쓰는 태그가 스크롤 없이 먼저 보이도록.
   const tags = useMemo(() => {
-    const set = new Set<string>();
-    cards.forEach((c) => c.skill_tags.forEach((t) => set.add(t)));
-    return Array.from(set);
+    const counts = new Map<string, number>();
+    cards.forEach((c) => c.skill_tags.forEach((t) => counts.set(t, (counts.get(t) ?? 0) + 1)));
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([tag]) => tag);
   }, [cards]);
 
   const visibleCards = activeTag ? cards.filter((c) => c.skill_tags.includes(activeTag)) : cards;
@@ -563,11 +567,12 @@ function StackPageContent() {
       )}
 
       {!groupedView && tags.length > 0 && (
-        <div className="flex flex-wrap gap-[7px]">
+        // 태그 개수가 늘어나도 화면이 여러 줄로 밀리지 않도록 한 줄 가로 스크롤로 고정.
+        <div className="flex flex-nowrap gap-[7px] overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <button
             type="button"
             onClick={() => setActiveTag(null)}
-            className={`rounded-full px-3 py-[7px] text-[11px] font-medium transition-colors ${
+            className={`shrink-0 rounded-full px-3 py-[7px] text-[11px] font-medium transition-colors ${
               activeTag === null
                 ? "border border-black bg-black text-white hover:bg-zinc-800"
                 : "border border-[#e5e7eb] bg-white text-[#6b7280] hover:bg-zinc-50"
@@ -580,7 +585,7 @@ function StackPageContent() {
               key={tag}
               type="button"
               onClick={() => setActiveTag(tag)}
-              className={`rounded-full px-3 py-[7px] text-[11px] font-medium transition-colors ${
+              className={`shrink-0 rounded-full px-3 py-[7px] text-[11px] font-medium transition-colors ${
                 activeTag === tag
                   ? "border border-black bg-black text-white hover:bg-zinc-800"
                   : "border border-[#e5e7eb] bg-white text-[#6b7280] hover:bg-zinc-50"
