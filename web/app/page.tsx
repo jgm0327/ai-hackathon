@@ -6,7 +6,7 @@ import { BottomSheet } from "@/components/BottomSheet";
 import { ProjectSwitcher } from "@/components/ProjectSwitcher";
 import { CardResultSkeleton } from "@/components/Skeleton";
 import { VoiceInput } from "@/components/VoiceInput";
-import { ApiError, Card, Profile, createCard, getProfile, syncNotion } from "@/lib/api";
+import { ApiError, Card, Profile, createCard, getProfile, listCards, syncNotion } from "@/lib/api";
 import { useProjects } from "@/lib/useProjects";
 
 /** `job_field`/`job_detail`/`years_segment` 중 있는 값만으로 합성한다 — 없는 값을
@@ -18,6 +18,15 @@ function formatTrackLabel(profile: Profile | null): string | null {
     parts.push(profile.years_segment === "10+" ? "10년 이상" : `${profile.years_segment}년차`);
   }
   return parts.join(" · ");
+}
+
+/** `created_at`(YYYY-MM-DD)이 오늘 기준 며칠 전인지. 파싱 실패 시 매우 먼 과거로
+ * 취급해 배너가 안 뜨게 한다. */
+function daysSince(dateStr: string): number {
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return Infinity;
+  const startOfDay = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  return Math.round((startOfDay(new Date()) - startOfDay(d)) / 86_400_000);
 }
 
 /**
@@ -39,6 +48,30 @@ export default function HomePage() {
   // ProjectSwitcher에 그대로 넘긴다 — 훅 인스턴스를 이 화면과 공유해야 전환이 즉시
   // 반영된다(구현 노트: components/ProjectSwitcher.tsx 9/14 참고).
   const projectsState = useProjects();
+  const { currentProject } = projectsState;
+
+  // 이어 쓰기 배너 (9/14 신규, 근사치 버전) — "진행 중인 주제"라는 개념이 데이터
+  // 모델에 없어서, 실제로 저장된 가장 최근 카드 문장을 그대로 인용하는 식으로만
+  // 만든다(CLAUDE.md 2.2 — 없는 걸 지어내지 않음). 오늘/어제 기록한 카드가 있을
+  // 때만 뜨고, 눌러도 페이지 이동 없이 입력창에 포커스만 준다(2.1 — 매일 경로에
+  // 마찰 추가 금지).
+  const [recentCard, setRecentCard] = useState<Card | null>(null);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
+
+  useEffect(() => {
+    if (!currentProject) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setBannerDismissed(false); // 프로젝트를 바꾸면 새 프로젝트 기준으로 다시 판단
+    let cancelled = false;
+    listCards(currentProject.id)
+      .then((list) => {
+        if (!cancelled) setRecentCard(list[0] ?? null); // 최신순 정렬
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [currentProject]);
 
   // Figma "타깃 트랙" 행 — 연 1~3회 바꾸는 온보딩 프로필을 조회만 한다(2.1). 실패해도
   // 치명적이지 않으므로(행이 안 보일 뿐) 조용히 무시한다.
@@ -67,6 +100,7 @@ export default function HomePage() {
       const card = await createCard(text);
       setResult(card);
       setRawText("");
+      setBannerDismissed(true); // 방금 막 기록했으니 "이어서 기록" 배너는 더 이상 필요 없음
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : "저장에 실패했습니다. 다시 시도해 주세요.");
     } finally {
@@ -128,6 +162,26 @@ export default function HomePage() {
       </Link>
 
       <ProjectSwitcher projectsState={projectsState} />
+
+      {!bannerDismissed && recentCard && daysSince(recentCard.created_at) <= 1 && (
+        <div className="flex items-center gap-2 rounded-[12px] bg-amber-50 px-3 py-2.5">
+          <button
+            type="button"
+            onClick={() => textareaRef.current?.focus()}
+            className="flex-1 text-left text-[12px] text-amber-800"
+          >
+            최근 기록: “{recentCard.refined_sentence}” — 이어서 기록해보세요
+          </button>
+          <button
+            type="button"
+            onClick={() => setBannerDismissed(true)}
+            aria-label="닫기"
+            className="shrink-0 text-amber-600"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-3">
         <div className="flex flex-col rounded-[14px] border-[1.5px] border-[#e5e7eb] bg-white px-[14px] pt-[14px] pb-[12px]">
