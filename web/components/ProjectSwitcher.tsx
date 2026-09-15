@@ -19,6 +19,11 @@ import { BottomSheet } from "./BottomSheet";
  * `useProjects()`를 한 번만 호출해서 그 결과를 그대로 넘겨받는 controlled 컴포넌트로
  * 바꿔서 상태를 하나로 합쳤다.
  */
+
+// 프로젝트 개수가 이 이하면 검색창 없이도 한눈에 훑을 수 있어 굳이 안 보여준다
+// (CLAUDE.md 2.1 — 필요 없는 화면 요소를 늘리지 않는다).
+const PROJECT_SEARCH_THRESHOLD = 5;
+
 export function ProjectSwitcher({
   projectsState,
 }: {
@@ -31,6 +36,11 @@ export function ProjectSwitcher({
   const [startedAt, setStartedAt] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+
+  const filteredProjects = query.trim()
+    ? projects.filter((p) => p.name.toLowerCase().includes(query.trim().toLowerCase()))
+    : projects;
 
   const closeAll = () => {
     setOpen(false);
@@ -38,6 +48,7 @@ export function ProjectSwitcher({
     setName("");
     setStartedAt("");
     setFormError(null);
+    setQuery("");
   };
 
   const handleSwitch = async (id: number) => {
@@ -84,8 +95,18 @@ export function ProjectSwitcher({
       <BottomSheet open={open} onClose={closeAll} title="프로젝트">
         {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
 
+        {projects.length > PROJECT_SEARCH_THRESHOLD && (
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="프로젝트 이름 검색"
+            className="mb-2 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
+          />
+        )}
+
         <ul className="mb-3 max-h-64 overflow-y-auto">
-          {projects.map((p) => (
+          {filteredProjects.map((p) => (
             <li key={p.id}>
               <button
                 type="button"
@@ -103,6 +124,9 @@ export function ProjectSwitcher({
           ))}
           {projects.length === 0 && !loading && (
             <li className="px-3 py-2 text-sm text-zinc-500">아직 프로젝트가 없습니다.</li>
+          )}
+          {projects.length > 0 && filteredProjects.length === 0 && (
+            <li className="px-3 py-2 text-sm text-zinc-500">일치하는 프로젝트가 없습니다.</li>
           )}
         </ul>
 
