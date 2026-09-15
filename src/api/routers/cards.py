@@ -13,8 +13,18 @@ JD 매칭을 여기서 하지 않는다(run_pipeline이 이미 그렇게 되어 
 """
 from fastapi import APIRouter, Depends, HTTPException
 
+from src.agent.card_clustering import suggest_clusters
 from src.agent.pipeline import run_pipeline
-from src.api.schemas import CardCreateRequest, CardListResponse, CardResponse, CardTagsUpdateRequest
+from src.api.schemas import (
+    BundleIntoProjectRequest,
+    CardClusterSuggestion,
+    CardCreateRequest,
+    CardListResponse,
+    CardResponse,
+    CardTagsUpdateRequest,
+    ProjectResponse,
+    UnclassifiedSuggestionsResponse,
+)
 from src.auth.deps import get_current_user
 from src.storage import db
 
@@ -55,3 +65,42 @@ def update_card_tags_endpoint(
     if card is None:
         raise HTTPException(status_code=404, detail="카드를 찾을 수 없습니다")
     return CardResponse.model_validate(card)
+
+
+@router.get("/cards/unclassified/suggestions", response_model=UnclassifiedSuggestionsResponse)
+def get_unclassified_suggestions(
+    current_user: db.User = Depends(get_current_user),
+) -> UnclassifiedSuggestionsResponse:
+    """"4.1.1 AI 프로젝트 자동 제안" (9/14 신규) — project_id가 없는 카드끼리만
+    비교해서 비슷한 것들을 묶어 후보로 제시한다. 이미 프로젝트가 배정된 카드는
+    이 엔드포인트 자체가 조회 대상으로도 삼지 않는다(`db.list_unassigned_cards`).
+    """
+    cards = db.list_unassigned_cards(current_user.id)
+    clusters = suggest_clusters(cards)
+    cards_by_id = {c.id: c for c in cards}
+    return UnclassifiedSuggestionsResponse(
+        clusters=[
+            CardClusterSuggestion(
+                card_ids=cluster.card_ids,
+                cards=[CardResponse.model_validate(cards_by_id[cid]) for cid in cluster.card_ids],
+            )
+            for cluster in clusters
+        ]
+    )
+
+
+@router.post("/cards/bundle-into-project", response_model=ProjectResponse, status_code=201)
+def bundle_cards_into_project(
+    payload: BundleIntoProjectRequest, current_user: db.User = Depends(get_current_user)
+) -> ProjectResponse:
+    """선택된 카드들을 새 프로젝트로 묶는다 (9/14 신규). 프로젝트 이름은 AI가 짓지
+    않고 사용자가 이 요청에 직접 실어 보낸다 — `create_project()` 계약 그대로.
+
+    카드 소유권 검증은 `bulk_assign_cards_to_project()`가 `user_id` 조건으로
+    자동 처리한다(다른 유저 card_id를 섞어 보내도 그 카드만 조용히 무시됨) — 별도
+    사전 검증 없이도 안전하다.
+    """
+    project_id = db.create_project(current_user.id, payload.name, payload.started_at)
+    db.bulk_assign_cards_to_project(current_user.id, payload.card_ids, project_id)
+    project = db.get_project(current_user.id, project_id)
+    return ProjectResponse.model_validate(project)

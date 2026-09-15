@@ -45,6 +45,25 @@ class CardListResponse(BaseModel):
     cards: list[CardResponse]
 
 
+# 4.1.1 "AI 프로젝트 자동 제안" (9/14 신규). project_id가 없는 카드끼리만 비교해서
+# 후보를 만든다 — 이미 프로젝트가 배정된 카드는 절대 안 건드린다(CLAUDE.md 3장,
+# src/agent/card_clustering.py 참고). 프로젝트 이름은 AI가 짓지 않고 사용자가
+# 직접 입력한다.
+class CardClusterSuggestion(BaseModel):
+    card_ids: list[int]
+    cards: list[CardResponse]
+
+
+class UnclassifiedSuggestionsResponse(BaseModel):
+    clusters: list[CardClusterSuggestion]
+
+
+class BundleIntoProjectRequest(BaseModel):
+    card_ids: list[int]
+    name: str
+    started_at: str
+
+
 class ProjectCreateRequest(BaseModel):
     name: str
     started_at: str

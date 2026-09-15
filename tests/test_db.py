@@ -372,3 +372,75 @@ def test_get_resume_draft_does_not_leak_another_users_draft(user_id):
     db.save_resume_draft(other_user_id, other_project_id, "다른 유저 초안", "2026-09-14T00:00:00")
 
     assert db.get_resume_draft(user_id, other_project_id) is None
+
+
+# --- get_project (9/14 신규) ---
+
+
+def test_get_project_returns_matching_project(user_id):
+    project_id = db.create_project(user_id, "A은행 차세대", "2023-02-01")
+
+    project = db.get_project(user_id, project_id)
+
+    assert project is not None
+    assert project.id == project_id
+    assert project.name == "A은행 차세대"
+
+
+def test_get_project_returns_none_for_missing_or_other_users_project(user_id):
+    assert db.get_project(user_id, 9999) is None
+
+    other_user_id = db.upsert_user("other-kakao-id", "다른유저", None, "2026-01-01T00:00:00")
+    other_project_id = db.create_project(other_user_id, "다른유저 프로젝트", "2023-01-01")
+    assert db.get_project(user_id, other_project_id) is None
+
+
+# --- 4.1.1 AI 프로젝트 자동 제안: list_unassigned_cards / bulk_assign_cards_to_project (9/14 신규) ---
+
+
+def test_list_unassigned_cards_returns_only_null_project_cards(user_id):
+    project_id = db.create_project(user_id, "A은행 차세대", "2023-02-01")
+    assigned_id = db.save_card(user_id, project_id, _make_parsed("배정된 카드"), "2023-02-14")
+    unassigned_id = db.save_card(user_id, None, _make_parsed("미분류 카드"), "2023-02-15")
+
+    result = db.list_unassigned_cards(user_id)
+
+    result_ids = {c.id for c in result}
+    assert unassigned_id in result_ids
+    assert assigned_id not in result_ids
+
+
+def test_list_unassigned_cards_does_not_leak_another_users_cards(user_id):
+    other_user_id = db.upsert_user("other-kakao-id", "다른유저", None, "2026-01-01T00:00:00")
+    db.save_card(other_user_id, None, _make_parsed("다른 유저 미분류 카드"), "2023-02-14")
+
+    assert db.list_unassigned_cards(user_id) == []
+
+
+def test_bulk_assign_cards_to_project_moves_cards(user_id):
+    target_project_id = db.create_project(user_id, "새 프로젝트", "2023-02-01")
+    card_id_1 = db.save_card(user_id, None, _make_parsed("미분류1"), "2023-02-14")
+    card_id_2 = db.save_card(user_id, None, _make_parsed("미분류2"), "2023-02-15")
+
+    updated_count = db.bulk_assign_cards_to_project(user_id, [card_id_1, card_id_2], target_project_id)
+
+    assert updated_count == 2
+    assert db.get_card(user_id, card_id_1).project_id == target_project_id
+    assert db.get_card(user_id, card_id_2).project_id == target_project_id
+    assert db.list_unassigned_cards(user_id) == []
+
+
+def test_bulk_assign_cards_to_project_ignores_another_users_cards(user_id):
+    other_user_id = db.upsert_user("other-kakao-id", "다른유저", None, "2026-01-01T00:00:00")
+    other_card_id = db.save_card(other_user_id, None, _make_parsed("가로채기 대상"), "2023-02-14")
+    target_project_id = db.create_project(user_id, "새 프로젝트", "2023-02-01")
+
+    updated_count = db.bulk_assign_cards_to_project(user_id, [other_card_id], target_project_id)
+
+    assert updated_count == 0
+    assert db.get_card(other_user_id, other_card_id).project_id is None
+
+
+def test_bulk_assign_cards_to_project_empty_list_is_noop(user_id):
+    project_id = db.create_project(user_id, "새 프로젝트", "2023-02-01")
+    assert db.bulk_assign_cards_to_project(user_id, [], project_id) == 0
