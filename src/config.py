@@ -21,7 +21,11 @@ class Settings:
     # 이 경로만 분리했다 — 인과관계 병합처럼 실제 추론이 필요한 경력기술서 생성 경로는
     # 여전히 llm_model(Sonnet)을 쓴다.
     llm_model_fast: str = os.getenv("LLM_MODEL_FAST", "claude-haiku-4-5-20251001")
-    ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    # "127.0.0.1"을 쓴다 — "localhost"로 두면 Windows에서 requests가 IPv6(::1)를 먼저
+    # 시도하다 타임아웃 후 IPv4로 폴백하면서 호출마다 2~3초가 그냥 날아간다(9/15 실측,
+    # 발표 데모 체감 지연의 실제 원인 중 하나였다). 두 값 다 같은 로컬 Ollama 서버를
+    # 가리키지만 127.0.0.1은 DNS/주소체계 결정 자체가 필요 없어 이 문제가 없다.
+    ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
     ollama_model: str = os.getenv("OLLAMA_MODEL", "exaone3.5:2.4b")
     # "chroma_default"(기본, **배포용 — 확정**. 별도 서버 불필요, 대신 한국어 임베딩
     #   품질이 낮음. 실측: 4개 한국어 스킬 태그 쿼리 중 2개가 무관한 공고를 1순위로

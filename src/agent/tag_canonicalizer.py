@@ -67,6 +67,12 @@ def canonicalize_tags(raw_tags: list[str], threshold: float | None = None) -> li
     한 번의 호출로 전부 임베딩한다(Ollama `/api/embed`도 `input`이 리스트를 받는
     배치 API다) — 그래서 태그를 모아 query 1회 + upsert 1회로 묶어서 왕복 횟수를
     태그 수와 무관하게 최대 2회로 줄였다.
+
+    **구현 노트 (9/15, 2회 -> 최대 1회로 추가 축소)**: 위 배치화 이후에도 query
+    1회 + upsert 1회 = 임베딩 왕복 최대 2회가 남아 있었고, 실측(Ollama bge-m3)해보니
+    이것만으로도 ~5~9초가 걸려 Haiku로 바꾼 parse_note()(~1.3초)보다 훨씬 큰 병목이었다.
+    임베딩을 함수 안에서 한 번만 계산해 query_embeddings=/embeddings=로 재사용하도록
+    바꿔서 임베딩 함수 호출을 태그 수·신규 여부와 무관하게 최대 1회로 줄였다.
     """
     if not raw_tags:
         return []
@@ -87,8 +93,19 @@ def canonicalize_tags(raw_tags: list[str], threshold: float | None = None) -> li
     for tag in unique_tags:
         resolved[tag] = tag  # 기본값: 매칭되는 기존 태그가 없으면 자기 자신
 
+    # **구현 노트 (9/15, query/upsert 임베딩 중복 호출 제거 — 발표 데모 속도 개선)**:
+    # 원래는 query_texts=/documents=를 넘겨서 query()와 upsert()가 각자 내부적으로
+    # 임베딩 함수를 호출했다 — 로컬 Ollama(bge-m3)로 실측해보니 태그 1건당 임베딩
+    # 왕복이 최대 2회(쿼리 1회 + 신규 등록 1회)라 "경력 변환하기" 체감 지연의 실제
+    # 병목이었다(parse_note()는 Haiku 전환 후 ~1.3초인데 canonicalize_tags()가
+    # ~5~9초를 더 잡아먹었다). 임베딩을 여기서 한 번만 계산해 query_embeddings=/
+    # embeddings=로 그대로 재사용하면, 태그 수·신규 여부와 무관하게 임베딩 함수
+    # 호출이 항상 최대 1회로 끝난다.
+    embed_fn = vectorstore._get_embedding_function()
+    embeddings = embed_fn(unique_tags)
+
     if collection.count() > 0:
-        result = collection.query(query_texts=unique_tags, n_results=1)
+        result = collection.query(query_embeddings=embeddings, n_results=1)
         documents = result.get("documents") or []
         distances = result.get("distances") or []
         for i, tag in enumerate(unique_tags):
@@ -99,8 +116,14 @@ def canonicalize_tags(raw_tags: list[str], threshold: float | None = None) -> li
 
     # 매칭되는 기존 태그가 없었던(= 자기 자신으로 남은) 태그만 신규 캐노니컬로 등록.
     # id=문서 내용으로 둬서 같은 태그 재등록이 upsert로 자연스럽게 멱등 처리되게 한다.
-    new_tags = [tag for tag in unique_tags if resolved[tag] == tag]
-    if new_tags:
-        collection.upsert(ids=new_tags, documents=new_tags)
+    # embeddings=를 위에서 이미 계산한 값으로 직접 넘겨 upsert가 다시 임베딩 함수를
+    # 부르지 않게 한다(documents=는 저장용 텍스트로만 쓰임).
+    new_indices = [i for i, tag in enumerate(unique_tags) if resolved[tag] == tag]
+    if new_indices:
+        collection.upsert(
+            ids=[unique_tags[i] for i in new_indices],
+            documents=[unique_tags[i] for i in new_indices],
+            embeddings=[embeddings[i] for i in new_indices],
+        )
 
     return [resolved[tag] for tag in raw_tags]

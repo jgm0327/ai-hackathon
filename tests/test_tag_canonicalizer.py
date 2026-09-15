@@ -114,15 +114,17 @@ def test_canonicalize_is_idempotent_across_repeated_calls():
 
 
 def test_batches_embedding_calls_regardless_of_tag_count(_isolated_collection):
-    """태그별로 따로 임베딩 API를 부르지 않는지 검증한다 (9/14 성능 최적화 회귀 방지).
+    """태그별로 따로 임베딩 API를 부르지 않는지 검증한다 (9/14 배치화, 9/15 재축소).
 
     실측: 태그별로 query()+upsert()를 따로 부르던 예전 구현은 로컬 Ollama로 태그 3개
-    처리에 ~14초가 걸렸다(태그당 왕복 2회). 배치로 묶으면 태그 수와 무관하게 query 1회
-    + upsert 1회, 최대 2번의 임베딩 함수 호출로 끝나야 한다.
+    처리에 ~14초가 걸렸다(태그당 왕복 2회). 배치로 묶어 query 1회 + upsert 1회(최대
+    2번)로 줄였다가, 9/15에 임베딩을 함수 안에서 한 번만 계산해 query/upsert 양쪽에
+    재사용하도록 다시 바꿔 태그 수·신규 여부와 무관하게 임베딩 함수 호출이 **최대
+    1번**으로 끝나야 한다(query 1회 + upsert 1회 = 2번이 되면 이번 최적화가 깨진 것).
     """
     fake_embedding = _isolated_collection
 
-    # 첫 호출 — 컬렉션이 비어 있으므로 query 없이 upsert만 1번(신규 태그 4개를 한 번에).
+    # 첫 호출 — 컬렉션이 비어 있어도(query 스킵) 임베딩은 여전히 1번만 계산한다.
     canonicalize_tags(["성능최적화", "결제시스템", "캐싱기술", "시스템최적화"], threshold=0.01)
     assert fake_embedding.call_count == 1
     assert fake_embedding.call_sizes == [4]
@@ -130,12 +132,11 @@ def test_batches_embedding_calls_regardless_of_tag_count(_isolated_collection):
     fake_embedding.call_count = 0
     fake_embedding.call_sizes = []
 
-    # 두 번째 호출 — 컬렉션이 비어있지 않으므로 query 1번(태그 3개 배치) + 전부
-    # 기존 태그와 안 겹쳐 upsert 1번(태그 3개 배치) = 총 2번. 태그가 3개여도
-    # 6번(3개 × 2)이 되면 안 된다 — 이게 이번 배치 최적화의 핵심 검증.
+    # 두 번째 호출 — 컬렉션이 비어있지 않아 query까지 타지만, 임베딩은 미리 계산해둔
+    # 값을 query_embeddings=/embeddings=로 재사용하므로 여전히 1번(태그 3개 배치)뿐이다.
     canonicalize_tags(["완전히새로운태그1", "완전히새로운태그2", "완전히새로운태그3"], threshold=0.01)
-    assert fake_embedding.call_count == 2
-    assert fake_embedding.call_sizes == [3, 3]
+    assert fake_embedding.call_count == 1
+    assert fake_embedding.call_sizes == [3]
 
 
 def test_uses_configured_threshold_by_default(monkeypatch):
