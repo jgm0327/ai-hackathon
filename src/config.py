@@ -15,6 +15,12 @@ class Settings:
     llm_provider: str = os.getenv("LLM_PROVIDER", "anthropic")
     llm_api_key: str = os.getenv("LLM_API_KEY", "")
     llm_model: str = os.getenv("LLM_MODEL", "claude-sonnet-5")
+    # 매일 쓰는 "메모 한 줄 정리"(parser.py의 parse_note())는 문장 다듬기 + 태그 추출
+    # 뿐인 단순 구조화 작업이라 build_resume()/enhance_resume_items()만큼 무거운
+    # 추론이 필요 없다(9/15, 발표 데모 체감 속도 개선). Sonnet보다 훨씬 빠른 Haiku로
+    # 이 경로만 분리했다 — 인과관계 병합처럼 실제 추론이 필요한 경력기술서 생성 경로는
+    # 여전히 llm_model(Sonnet)을 쓴다.
+    llm_model_fast: str = os.getenv("LLM_MODEL_FAST", "claude-haiku-4-5-20251001")
     ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     ollama_model: str = os.getenv("OLLAMA_MODEL", "exaone3.5:2.4b")
     # "chroma_default"(기본, **배포용 — 확정**. 별도 서버 불필요, 대신 한국어 임베딩
