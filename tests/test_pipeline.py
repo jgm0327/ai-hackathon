@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 import pytest
 
-from src.agent.pipeline import build_career_doc, run_pipeline, run_pipeline_batch
+from src.agent.pipeline import build_career_doc, retry_refinement, run_pipeline, run_pipeline_batch
 from src.parsing.parser import ParsedEntry
 from src.parsing.resume import StarItem
 from src.storage import db
@@ -141,3 +141,68 @@ def test_build_career_doc_passes_jd_text_through(user_id):
         build_career_doc(user_id, project_id, jd_text="백엔드 성능 최적화 경험자 우대")
 
     assert mock_build.call_args.kwargs.get("jd_text") == "백엔드 성능 최적화 경험자 우대"
+
+
+# --- 변환 실패 시 원문 저장 폴백 (9/15 신규) ---
+
+
+def test_run_pipeline_falls_back_to_raw_text_when_parse_note_fails(user_id):
+    """parse_note()가 실패해도 카드는 반드시 저장돼야 한다 (CLAUDE.md P0)."""
+    with patch("src.agent.pipeline.parse_note", side_effect=RuntimeError("LLM 타임아웃")):
+        result = run_pipeline(user_id, "결제 버그 고침")
+
+    assert result["refinement_failed"] is True
+    assert result["parsed"].refined_sentence == "결제 버그 고침"
+    assert result["parsed"].skill_tags == []
+    assert result["parsed"].confidence == 0.0
+    cards = db.list_cards(user_id)
+    assert len(cards) == 1
+    assert cards[0].raw_text == "결제 버그 고침"
+    assert cards[0].refined_sentence == "결제 버그 고침"
+
+
+def test_run_pipeline_success_sets_refinement_failed_false(user_id):
+    with patch("src.agent.pipeline.parse_note", return_value=_make_parsed()):
+        result = run_pipeline(user_id, "결제 버그 고침")
+
+    assert result["refinement_failed"] is False
+
+
+def test_retry_refinement_updates_fallback_card_on_success(user_id):
+    with patch("src.agent.pipeline.parse_note", side_effect=RuntimeError("boom")):
+        result = run_pipeline(user_id, "결제 버그 고침")
+    card_id = result["card_id"]
+
+    with patch("src.agent.pipeline.parse_note", return_value=_make_parsed("결제 버그 고침")):
+        updated = retry_refinement(user_id, card_id)
+
+    assert updated.refined_sentence == "[정제됨] 결제 버그 고침"
+    assert updated.skill_tags == ["결제시스템"]
+    assert updated.confidence == 0.9
+
+
+def test_retry_refinement_returns_none_for_missing_card(user_id):
+    assert retry_refinement(user_id, 9999) is None
+
+
+def test_retry_refinement_returns_none_for_another_users_card(user_id):
+    other_user_id = db.upsert_user("other-kakao-id", "다른유저", None, "2026-01-01T00:00:00")
+    with patch("src.agent.pipeline.parse_note", side_effect=RuntimeError("boom")):
+        result = run_pipeline(other_user_id, "다른 유저 카드")
+
+    assert retry_refinement(user_id, result["card_id"]) is None
+
+
+def test_retry_refinement_propagates_exception_when_parse_fails_again(user_id):
+    """재시도가 또 실패하면 예외를 그대로 전파한다 — 폴백 저장이 이미 끝난 상태라
+    호출부가 "다시 실패했다"고만 알리면 되고, 데이터 유실은 없다."""
+    with patch("src.agent.pipeline.parse_note", side_effect=RuntimeError("boom")):
+        result = run_pipeline(user_id, "결제 버그 고침")
+    card_id = result["card_id"]
+
+    with patch("src.agent.pipeline.parse_note", side_effect=RuntimeError("again")):
+        with pytest.raises(RuntimeError):
+            retry_refinement(user_id, card_id)
+
+    # 재시도 실패해도 폴백 저장된 원문은 그대로 남아있다.
+    assert db.get_card(user_id, card_id).raw_text == "결제 버그 고침"

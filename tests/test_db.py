@@ -323,6 +323,48 @@ def test_update_card_tags_does_not_affect_another_users_card(user_id):
     assert db.get_card(other_user_id, other_card_id).skill_tags == ["Redis"]
 
 
+def test_update_card_sentence_only_leaves_tags_untouched(user_id):
+    """9/15 신규 — 문장 직접 수정. skill_tags를 안 넘기면 그대로 유지된다."""
+    card_id = db.save_card(user_id, None, _make_parsed(skill_tags=["Redis"]), "2023-02-14")
+
+    updated = db.update_card(user_id, card_id, refined_sentence="사람이 직접 고친 문장")
+
+    assert updated.refined_sentence == "사람이 직접 고친 문장"
+    assert updated.skill_tags == ["Redis"]
+
+
+def test_update_card_tags_only_leaves_sentence_untouched(user_id):
+    card_id = db.save_card(user_id, None, _make_parsed(), "2023-02-14")
+    original_sentence = db.get_card(user_id, card_id).refined_sentence
+
+    updated = db.update_card(user_id, card_id, skill_tags=["새태그"])
+
+    assert updated.refined_sentence == original_sentence
+    assert updated.skill_tags == ["새태그"]
+
+
+def test_update_card_both_fields_and_confidence(user_id):
+    """confidence는 PATCH API에는 안 노출되지만(재정리 전용), 함수 자체는 지원한다."""
+    card_id = db.save_card(user_id, None, _make_parsed(confidence=0.0), "2023-02-14")
+
+    updated = db.update_card(
+        user_id, card_id, skill_tags=["A"], refined_sentence="새 문장", confidence=0.95
+    )
+
+    assert updated.skill_tags == ["A"]
+    assert updated.refined_sentence == "새 문장"
+    assert updated.confidence == 0.95
+
+
+def test_update_card_with_nothing_changes_nothing(user_id):
+    card_id = db.save_card(user_id, None, _make_parsed(), "2023-02-14")
+    before = db.get_card(user_id, card_id)
+
+    updated = db.update_card(user_id, card_id)
+
+    assert updated == before
+
+
 # --- 경력기술서 초안 저장 (9/14 신규) ---
 
 
