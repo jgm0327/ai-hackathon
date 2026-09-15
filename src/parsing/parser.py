@@ -31,7 +31,9 @@ def _get_client() -> anthropic.Anthropic:
 
 def _call_llm_anthropic(raw_text: str) -> str:
     response = _get_client().messages.create(
-        model=settings.llm_model,
+        # 매일 쓰는 가벼운 경로라 llm_model(Sonnet, 경력기술서용)이 아니라
+        # llm_model_fast(Haiku)를 쓴다 — 9/15, 발표 데모 체감 속도 개선.
+        model=settings.llm_model_fast,
         max_tokens=512,
         system=SYSTEM_PROMPT,
         messages=[
