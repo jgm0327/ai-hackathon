@@ -36,6 +36,13 @@ export default function OnboardingPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [savedMessage, setSavedMessage] = useState<string | null>(null);
+
+  // 최초 온보딩인지, 이미 설정을 마친 뒤 다시 들어온(설정 변경) 건지 구분한다
+  // (9/15 신규 — "퇴근 시각을 바꾸려고 들어왔는데 저장하면 메인으로 튕겨서 다시
+  // 들어와야 한다"는 피드백 반영). 로드 시점의 스냅샷으로 한 번만 정하고, 그 뒤
+  // 폼을 만지는 동안에는 안 바뀐다 — 안 그러면 저장 전에 라벨이 계속 흔들린다.
+  const [hasExistingProfile, setHasExistingProfile] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -45,6 +52,7 @@ export default function OnboardingPage() {
         setJobField(profile.job_field);
         setJobDetail(profile.job_detail);
         setYearsSegment(profile.years_segment);
+        setHasExistingProfile(profile.job_field !== null && profile.years_segment !== null);
       })
       .catch(() => {
         // 프로필 조회 실패는 치명적이지 않다 — 빈 상태로 온보딩을 새로 시작하면 된다.
@@ -69,9 +77,16 @@ export default function OnboardingPage() {
     if (!jobField || !yearsSegment) return;
     setSaving(true);
     setError(null);
+    setSavedMessage(null);
     try {
       await updateProfile(jobField, yearsSegment, jobDetail ?? undefined);
-      router.push("/");
+      if (hasExistingProfile) {
+        // 설정 변경 방문이면 메인으로 돌려보내지 않는다 — 퇴근 알림도 여기서 같이
+        // 만지는 경우가 많아서, 저장 후에도 화면에 남아 확인/재조정할 수 있어야 한다.
+        setSavedMessage("저장했습니다.");
+      } else {
+        router.push("/");
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : "저장에 실패했습니다. 다시 시도해 주세요.");
     } finally {
@@ -90,9 +105,22 @@ export default function OnboardingPage() {
   return (
     <div className="flex flex-col gap-6 px-4 pt-4 pb-8">
       <div>
-        <h1 className="text-lg font-semibold text-zinc-900">커리어 스택 시작하기</h1>
+        {hasExistingProfile && (
+          <button
+            type="button"
+            onClick={() => router.back()}
+            className="mb-2 text-sm text-zinc-400 hover:text-zinc-600"
+          >
+            ‹ 뒤로
+          </button>
+        )}
+        <h1 className="text-lg font-semibold text-zinc-900">
+          {hasExistingProfile ? "직군·알림 설정" : "커리어 스택 시작하기"}
+        </h1>
         <p className="mt-1 text-sm text-zinc-500">
-          몇 가지만 알려주시면 기록을 더 잘 정리해 드려요. 나중에 언제든 바꿀 수 있어요.
+          {hasExistingProfile
+            ? "직군·연차나 퇴근 알림이 바뀌었으면 여기서 바꿀 수 있어요."
+            : "몇 가지만 알려주시면 기록을 더 잘 정리해 드려요. 나중에 언제든 바꿀 수 있어요."}
         </p>
       </div>
 
@@ -149,6 +177,11 @@ export default function OnboardingPage() {
       </section>
 
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
+      {savedMessage && (
+        <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+          {savedMessage}
+        </p>
+      )}
 
       <button
         type="button"
@@ -156,7 +189,7 @@ export default function OnboardingPage() {
         disabled={!canSubmit}
         className="w-full rounded-xl bg-zinc-900 py-3 text-base font-semibold text-white transition-colors hover:bg-zinc-800 disabled:opacity-40 disabled:hover:bg-zinc-900"
       >
-        {saving ? "저장하는 중…" : "내 커리어 스택 시작하기"}
+        {saving ? "저장하는 중…" : hasExistingProfile ? "저장" : "내 커리어 스택 시작하기"}
       </button>
     </div>
   );

@@ -17,8 +17,16 @@ import { getMe, getProfile } from "@/lib/api";
  * 규칙:
  *   1. 로그아웃 상태(getMe() -> null) + 현재 `/login`이 아니면 -> `/login`
  *   2. 로그인 + 프로필 미완성(job_field null) + 현재 `/onboarding`이 아니면 -> `/onboarding`
- *   3. 로그인 + 프로필 완성 + 현재 `/login`이나 `/onboarding`이면 -> `/` (되돌아갈 곳 없음)
+ *   3. 로그인 + 프로필 완성 + 현재 `/login`이면 -> `/` (로그인 화면엔 되돌아갈 곳 없음)
  *   4. 그 외엔 아무 것도 하지 않는다.
+ *
+ * **구현 노트 (9/15, `/onboarding` 강제 이탈 버그 수정)**: 원래 규칙 3이 `/onboarding`도
+ * 포함해서, 프로필을 이미 완성한 유저가 직군/연차나 퇴근 알림을 바꾸려고 `/onboarding`에
+ * 들어가는 즉시 `/`로 튕겨나갔다("계속 메인 페이지로 온다"는 사용자 지적). `/onboarding`은
+ * 최초 1회만 쓰는 화면이 아니라 설정 변경으로도 재방문하는 화면이라, `/login`과 달리
+ * "되돌아갈 곳이 없는" 화면이 아니다 — 이 가드에서 뺐다. `web/app/onboarding/page.tsx`가
+ * 이미 최초 온보딩 vs 설정 변경을 구분해서 저장 후 동작(메인으로 이동 vs 그 자리에 머무름)을
+ * 다르게 처리한다.
  */
 export function AuthGate() {
   const router = useRouter();
@@ -45,7 +53,7 @@ export function AuthGate() {
         return;
       }
 
-      if (pathname === "/login" || pathname === "/onboarding") {
+      if (pathname === "/login") {
         router.replace("/");
       }
     })();
