@@ -101,3 +101,16 @@ export function peekCachedResume(projectId: number, jdText?: string): StarItem[]
   const cached = readCache(cacheKey(projectId, jdText));
   return cached?.items ?? null;
 }
+
+/**
+ * "숫자 되묻기" 인라인 입력(9/15 신규)으로 사용자가 항목 하나를 직접 고쳤을 때,
+ * 새로고침해도 그 값이 남아있도록 캐시만 갱신한다 — `cardIds`(유효성 판단 기준)는
+ * 그대로 두고 `items`만 바꾼다. 캐시가 아예 없으면(비정상 상태) 조용히 넘어간다 —
+ * 화면 자체는 이미 React state로 반영돼 있어 지장 없다.
+ */
+export function updateCachedResumeItems(projectId: number, items: StarItem[], jdText?: string): void {
+  const key = cacheKey(projectId, jdText);
+  const cached = readCache(key);
+  if (!cached) return;
+  writeCache(key, { cardIds: cached.cardIds, items });
+}

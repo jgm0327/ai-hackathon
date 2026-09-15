@@ -25,15 +25,34 @@ export function formatStarItemForClipboard(item: StarItem): string {
  * 비워서 반환하기 때문 (CLAUDE.md 2.2). "결과 없음"을 렌더링하지 않고,
  * 대신 되묻기 칩을 보여준다.
  *
- * **구현 노트 (9/14)**: 되묻기 칩을 누르면 숫자를 직접 입력할 자리가 없으므로(여기서
- * 새 폼을 만들면 CLAUDE.md 2.1 정신에 어긋남 — 이 화면은 어쩌다 한 번 오는 이직 준비
- * 경로), 매일 쓰는 입력 화면(`/`)으로 보내서 새 메모로 남기게 한다. 원래는 onClick
- * 없이 title 툴팁 안내만 있었는데, `<button>`인데 눌러도 반응이 없어 혼란을 줄 수
- * 있다는 지적을 받아 실제 이동 동작을 붙였다.
+ * **구현 노트 (9/14 → 9/15, 인라인 입력으로 변경)**: 원래는 되묻기 칩을 누르면
+ * 매일 쓰는 입력 화면(`/`)으로 보내서 새 메모로 남기게 했다("이 화면에 폼을 새로
+ * 만들면 2.1 위반"이라는 판단이었는데, `/resume`는 이미 JD 텍스트박스·초안 편집
+ * textarea 같은 폼을 갖고 있는 화면이라 그 전제가 약했다). Figma "4.2-2 Before·After
+ * 대조" 컨셉을 반영해 그 자리에서 바로 숫자를 채워 넣는 인라인 입력으로 바꿨다.
+ * `/`로 새로 기록하는 기존 경로는 보조 링크로 축소해서 남겨뒀다.
  */
-export function StarItemSection({ item }: { item: StarItem }) {
+export function StarItemSection({
+  item,
+  onApplyResult,
+}: {
+  item: StarItem;
+  /** 인라인 입력에서 "적용"을 누르면 호출된다 — 부모가 items 배열의 이 항목만
+   * 갱신한다. 서버에는 저장하지 않는다(StarItem은 원래도 비영속 값, CLAUDE.md 3장). */
+  onApplyResult?: (value: string) => void;
+}) {
   const router = useRouter();
   const [showSources, setShowSources] = useState(false);
+  const [showResultInput, setShowResultInput] = useState(false);
+  const [resultInput, setResultInput] = useState("");
+
+  const handleApplyResult = () => {
+    const trimmed = resultInput.trim();
+    if (!trimmed) return;
+    onApplyResult?.(trimmed);
+    setShowResultInput(false);
+    setResultInput("");
+  };
 
   const rows: Array<{ label: string; value: string }> = [
     { label: "상황", value: item.situation },
@@ -66,15 +85,61 @@ export function StarItemSection({ item }: { item: StarItem }) {
           <div className="flex flex-1 flex-col gap-1.5">
             {item.result ? (
               <p className="text-[12px] leading-relaxed text-[#18181b]">{item.result}</p>
+            ) : showResultInput ? (
+              <div className="flex flex-col gap-1.5">
+                <input
+                  type="text"
+                  value={resultInput}
+                  onChange={(e) => setResultInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleApplyResult();
+                    }
+                  }}
+                  placeholder="예: 오류율 0.8%→0.3%, 처리 속도 10배"
+                  autoFocus
+                  className="w-full rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-[#18181b] placeholder:text-amber-400 focus:border-amber-400 focus:outline-none"
+                />
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={handleApplyResult}
+                    disabled={!resultInput.trim()}
+                    className="rounded-full bg-black px-2.5 py-1 text-xs font-medium text-white disabled:opacity-40"
+                  >
+                    적용
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowResultInput(false);
+                      setResultInput("");
+                    }}
+                    className="rounded-full border border-zinc-200 px-2.5 py-1 text-xs text-zinc-500"
+                  >
+                    취소
+                  </button>
+                </div>
+              </div>
             ) : (
-              <button
-                type="button"
-                title="기록에 숫자가 없어 비워두었습니다. 기억나신다면 입력 화면에서 새 메모로 남겨보세요."
-                onClick={() => router.push("/")}
-                className="w-fit rounded-full bg-amber-50 px-2.5 py-1 text-xs text-amber-700 transition-colors hover:bg-amber-100"
-              >
-                숫자를 기억하시나요? (건너뛰기)
-              </button>
+              <div className="flex flex-col items-start gap-1">
+                <button
+                  type="button"
+                  title="기록에 숫자가 없어 비워두었습니다. 기억나신다면 여기 바로 적어보세요."
+                  onClick={() => setShowResultInput(true)}
+                  className="w-fit rounded-full bg-amber-50 px-2.5 py-1 text-xs text-amber-700 transition-colors hover:bg-amber-100"
+                >
+                  숫자를 기억하시나요? (건너뛰기)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => router.push("/")}
+                  className="text-[11px] text-[#a1a1aa] underline underline-offset-2"
+                >
+                  또는 입력 화면에서 새 기록으로 남기기
+                </button>
+              </div>
             )}
 
             {item.source_dates.length > 0 && (

@@ -6,7 +6,16 @@ import { BottomSheet } from "@/components/BottomSheet";
 import { ProjectSwitcher } from "@/components/ProjectSwitcher";
 import { CardResultSkeleton } from "@/components/Skeleton";
 import { VoiceInput } from "@/components/VoiceInput";
-import { ApiError, Card, Profile, createCard, getProfile, listCards, syncNotion } from "@/lib/api";
+import {
+  ApiError,
+  Card,
+  Profile,
+  createCard,
+  getProfile,
+  listCards,
+  refineCard,
+  syncNotion,
+} from "@/lib/api";
 import { useProjects } from "@/lib/useProjects";
 
 /** `job_field`/`job_detail`/`years_segment` 중 있는 값만으로 합성한다 — 없는 값을
@@ -42,6 +51,11 @@ export default function HomePage() {
   const [result, setResult] = useState<Card | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copiedResult, setCopiedResult] = useState(false);
+  // 변환 실패 폴백 (9/15 신규) — result.refinement_failed가 true면 "다시 정리하기"로
+  // 재시도할 수 있다. 카드는 이미 원문 그대로 저장돼 있으므로(CLAUDE.md P0) 재시도가
+  // 또 실패해도 데이터 유실은 없다.
+  const [refining, setRefining] = useState(false);
+  const [refineError, setRefineError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -95,6 +109,7 @@ export default function HomePage() {
     setSubmitting(true);
     setError(null);
     setResult(null);
+    setRefineError(null);
     try {
       // 응답이 3~10초 걸린다 (docs/05-api-contract.md §1) — 스켈레톤으로 대기 표시.
       const card = await createCard(text);
@@ -130,6 +145,20 @@ export default function HomePage() {
       setTimeout(() => setCopiedResult(false), 1500);
     } catch {
       // 클립보드 접근 실패 — 조용히 무시
+    }
+  };
+
+  const handleRefine = async () => {
+    if (!result) return;
+    setRefining(true);
+    setRefineError(null);
+    try {
+      const updated = await refineCard(result.id);
+      setResult(updated);
+    } catch {
+      setRefineError("다시 정리하는 데 실패했어요. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setRefining(false);
     }
   };
 
@@ -235,44 +264,81 @@ export default function HomePage() {
               </button>
             </div>
 
-            <p className="text-[12px] text-[#6b7280]">오늘 기록을 이렇게 정리했어요.</p>
+            {result.refinement_failed ? (
+              <>
+                <p className="text-[12px] text-amber-700">
+                  AI 정리에 실패해서 원문 그대로 저장했어요. 기록은 안전하게 남아있어요.
+                </p>
 
-            <div className="flex gap-3 rounded-[14px] bg-[#f4f4f5] px-4 py-[18px]">
-              <div className="w-[3px] shrink-0 self-stretch rounded-full bg-black" />
-              <p className="flex-1 text-[14px] font-medium text-[#18181b]">
-                {result.refined_sentence}
-              </p>
-            </div>
+                <div className="flex gap-3 rounded-[14px] bg-amber-50 px-4 py-[18px]">
+                  <div className="w-[3px] shrink-0 self-stretch rounded-full bg-amber-400" />
+                  <p className="flex-1 text-[14px] font-medium text-[#18181b]">
+                    {result.raw_text}
+                  </p>
+                </div>
 
-            {result.skill_tags.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {result.skill_tags.map((tag) => (
-                  <span
-                    key={tag}
-                    className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs text-zinc-600"
+                {refineError && <p className="text-[12px] text-red-600">{refineError}</p>}
+
+                <div className="flex gap-2.5">
+                  <button
+                    type="button"
+                    onClick={handleRefine}
+                    disabled={refining}
+                    className="flex flex-1 items-center justify-center rounded-[12px] bg-black py-4 text-[14px] font-semibold text-white transition-colors hover:bg-zinc-800 active:scale-[0.98] disabled:opacity-40"
                   >
-                    {tag}
-                  </span>
-                ))}
-              </div>
-            )}
+                    {refining ? "정리하는 중…" : "다시 정리하기"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCloseResult}
+                    className="flex flex-1 items-center justify-center rounded-[12px] border-[1.5px] border-[#e5e7eb] bg-white py-4 text-[14px] font-semibold text-[#18181b] transition-colors hover:bg-zinc-50 active:scale-[0.98]"
+                  >
+                    확인
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-[12px] text-[#6b7280]">오늘 기록을 이렇게 정리했어요.</p>
 
-            <div className="flex gap-2.5">
-              <button
-                type="button"
-                onClick={handleCopyResult}
-                className="flex flex-1 items-center justify-center rounded-[12px] bg-black py-4 text-[14px] font-semibold text-white transition-colors hover:bg-zinc-800 active:scale-[0.98]"
-              >
-                {copiedResult ? "복사됨" : "복사"}
-              </button>
-              <button
-                type="button"
-                onClick={handleRetry}
-                className="flex flex-1 items-center justify-center rounded-[12px] border-[1.5px] border-[#e5e7eb] bg-white py-4 text-[14px] font-semibold text-[#18181b] transition-colors hover:bg-zinc-50 active:scale-[0.98]"
-              >
-                다시 변환
-              </button>
-            </div>
+                <div className="flex gap-3 rounded-[14px] bg-[#f4f4f5] px-4 py-[18px]">
+                  <div className="w-[3px] shrink-0 self-stretch rounded-full bg-black" />
+                  <p className="flex-1 text-[14px] font-medium text-[#18181b]">
+                    {result.refined_sentence}
+                  </p>
+                </div>
+
+                {result.skill_tags.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {result.skill_tags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs text-zinc-600"
+                      >
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex gap-2.5">
+                  <button
+                    type="button"
+                    onClick={handleCopyResult}
+                    className="flex flex-1 items-center justify-center rounded-[12px] bg-black py-4 text-[14px] font-semibold text-white transition-colors hover:bg-zinc-800 active:scale-[0.98]"
+                  >
+                    {copiedResult ? "복사됨" : "복사"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleRetry}
+                    className="flex flex-1 items-center justify-center rounded-[12px] border-[1.5px] border-[#e5e7eb] bg-white py-4 text-[14px] font-semibold text-[#18181b] transition-colors hover:bg-zinc-50 active:scale-[0.98]"
+                  >
+                    다시 변환
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         )}
       </BottomSheet>
