@@ -20,6 +20,13 @@ import {
 import { buildResumeCached } from "@/lib/resumeCache";
 import { useProjects } from "@/lib/useProjects";
 
+// 카드가 쌓일수록 목록이 한없이 길어지는 걸 막기 위한 페이지네이션 크기.
+const PAGE_SIZE = 10;
+
+// 태그 종류가 이 이하면 굳이 검색창을 안 보여준다(CLAUDE.md 2.1 — 불필요한 화면
+// 요소를 늘리지 않는다) — 스크롤 한 번으로도 충분히 훑을 수 있는 개수.
+const TAG_SEARCH_THRESHOLD = 6;
+
 function formatCardDate(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
@@ -133,6 +140,15 @@ function StackPageContent() {
   const [error, setError] = useState<string | null>(null);
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [showAllProjects, setShowAllProjects] = useState(false);
+  // 카드 목록 페이지네이션 (9/15 신규) — 카드가 쌓일수록 한 화면에 다 그리지 않도록
+  // 클라이언트 쪽에서만 나눠 보여준다. 그룹 뷰(인과관계로 묶어보기)는 항목 수가
+  // 훨씬 적어서 페이지 나누기 대상에서 뺀다.
+  const [page, setPage] = useState(1);
+  // 태그 검색 (9/15 신규) — 태그 종류가 많아지면 가로 스크롤 칩 사이에서 원하는
+  // 걸 찾기 번거로워서, 이름으로 좁혀볼 수 있는 검색창을 추가한다.
+  const [tagSearch, setTagSearch] = useState("");
+  const tagScrollRef = useRef<HTMLDivElement>(null);
+  const [tagScrollState, setTagScrollState] = useState({ left: false, right: false });
   // 카드 액션시트 (9/14, BottomSheet 고도화) — 예전엔 "⋯" 탭 시 같은 줄에서
   // 태그수정/삭제/취소를 인라인으로 보여줬는데, Figma "4.1-a 카드 액션 시트"에
   // 맞춰 진짜 바텀시트로 교체했다. 삭제는 한 번 더 확인하는 별도 시트를 거친다
@@ -236,27 +252,56 @@ function StackPageContent() {
     setGroupsError(null);
   }, [currentProject?.id]);
 
+  // 프로젝트를 바꾸거나 "전체 프로젝트 보기"를 토글하면 이전 목록 기준 페이지 번호는
+  // 더 이상 의미가 없다 — 1페이지로 되돌린다. (태그 필터/그룹 뷰 토글은 각 버튼의
+  // onClick에서 직접 setPage(1)을 호출한다 — 아래 딥링크 점프 effect가 계산해서
+  // 넣어주는 페이지 번호와 이 effect가 서로 덮어쓰지 않도록 의존성을 분리해뒀다.)
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPage(1);
+  }, [currentProject?.id, showAllProjects]);
+
   // /resume의 "이 문장의 근거" 날짜 칩에서 /stack?cardId=<id>로 넘어온 경우, 카드
   // 목록이 뜨면 그 카드로 스크롤 + 잠깐 하이라이트한다 (9/14 신규).
   const searchParams = useSearchParams();
   const targetCardId = searchParams.get("cardId");
   const [highlightedCardId, setHighlightedCardId] = useState<number | null>(null);
   const highlightedOnceRef = useRef(false);
+  const pendingScrollCardIdRef = useRef<number | null>(null);
 
+  // 1단계: 목표 카드가 태그 필터나 그룹 뷰에 가려져 있거나, 페이지네이션상 다른
+  // 페이지에 있으면 그 카드가 실제로 보이는 상태로 만든다 (9/15, 페이지네이션 추가
+  // 이후 신규 — 예전엔 카드가 항상 한 페이지에 다 있어서 이 계산이 필요 없었다).
   useEffect(() => {
     if (loading || !targetCardId || highlightedOnceRef.current) return;
     const id = Number(targetCardId);
-    if (!cards.some((c) => c.id === id)) return; // 아직 이 프로젝트에 없거나 다른 프로젝트 카드
+    const idx = cards.findIndex((c) => c.id === id);
+    if (idx < 0) return; // 아직 이 프로젝트에 없거나 다른 프로젝트 카드
     highlightedOnceRef.current = true;
-    const el = document.getElementById(`card-${id}`);
-    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    pendingScrollCardIdRef.current = id;
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setHighlightedCardId(id);
-    const timer = setTimeout(() => setHighlightedCardId(null), 2500);
-    return () => clearTimeout(timer);
+    setActiveTag(null);
+    setGroupedView(false);
+    setPage(Math.floor(idx / PAGE_SIZE) + 1);
   }, [loading, targetCardId, cards]);
 
+  // 2단계: 1단계가 정한 페이지가 실제로 렌더링된 뒤(다음 커밋) 그 카드 엘리먼트가
+  // DOM에 생기면 스크롤 + 하이라이트한다. 아직 없으면(아직 렌더 전) 조용히 넘어가고
+  // 다음 렌더에서 이 effect가 다시 실행돼 재시도한다.
+  useEffect(() => {
+    const id = pendingScrollCardIdRef.current;
+    if (id === null) return;
+    const el = document.getElementById(`card-${id}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    setHighlightedCardId(id);
+    pendingScrollCardIdRef.current = null;
+    const timer = setTimeout(() => setHighlightedCardId(null), 2500);
+    return () => clearTimeout(timer);
+  }, [page, cards, groupedView, loading]);
+
   const toggleGroupedView = async () => {
+    setPage(1); // 그룹 뷰는 페이지네이션 대상이 아니라, 껐다 켜면 항상 1페이지부터
     if (groupedView) {
       setGroupedView(false);
       return;
@@ -328,6 +373,15 @@ function StackPageContent() {
       .map(([tag]) => tag);
   }, [cards]);
 
+  // 태그 검색 (9/15 신규) — 이름 부분일치로 좁혀서 가로 스크롤 칩 중 원하는 걸
+  // 빨리 찾게 해준다. 검색 자체는 태그 필터(activeTag)와 별개다 — 검색은 "어떤
+  // 칩들을 보여줄지"만 정하고, 실제 카드 필터링은 여전히 칩을 눌러야 적용된다.
+  const filteredTags = useMemo(() => {
+    const q = tagSearch.trim().toLowerCase();
+    if (!q) return tags;
+    return tags.filter((t) => t.toLowerCase().includes(q));
+  }, [tags, tagSearch]);
+
   const visibleCards = activeTag ? cards.filter((c) => c.skill_tags.includes(activeTag)) : cards;
 
   const streak = useMemo(() => computeStreak(cards), [cards]);
@@ -336,6 +390,35 @@ function StackPageContent() {
     if (!groupedView || !starGroups) return { groups: [] as CardGroup[], ungrouped: visibleCards };
     return groupCardsByStarItems(visibleCards, starGroups);
   }, [groupedView, starGroups, visibleCards]);
+
+  // 페이지네이션 (9/15 신규) — 그룹 뷰는 항목이 적어 대상에서 뺀다(원래 ungrouped
+  // 그대로 전부 보여준다). 일반 목록만 PAGE_SIZE씩 잘라서 보여준다.
+  const totalPages = groupedView ? 1 : Math.max(1, Math.ceil(ungrouped.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pagedUngrouped = groupedView
+    ? ungrouped
+    : ungrouped.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  // 태그 칩 줄이 가로로 스크롤 가능하다는 걸 시각적으로 알려주는 화살표 버튼
+  // (9/15 신규) — 스크롤이 실제로 더 갈 수 있는 방향에서만 보인다.
+  const updateTagScrollState = () => {
+    const el = tagScrollRef.current;
+    if (!el) return;
+    setTagScrollState({
+      left: el.scrollLeft > 4,
+      right: el.scrollLeft + el.clientWidth < el.scrollWidth - 4,
+    });
+  };
+
+  useEffect(() => {
+    updateTagScrollState();
+    window.addEventListener("resize", updateTagScrollState);
+    return () => window.removeEventListener("resize", updateTagScrollState);
+  }, [filteredTags]);
+
+  const scrollTags = (direction: 1 | -1) => {
+    tagScrollRef.current?.scrollBy({ left: direction * 160, behavior: "smooth" });
+  };
 
   const handleDelete = async (id: number) => {
     setDeletingId(id);
@@ -567,33 +650,85 @@ function StackPageContent() {
       )}
 
       {!groupedView && tags.length > 0 && (
-        // 태그 개수가 늘어나도 화면이 여러 줄로 밀리지 않도록 한 줄 가로 스크롤로 고정.
-        <div className="flex flex-nowrap gap-[7px] overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          <button
-            type="button"
-            onClick={() => setActiveTag(null)}
-            className={`shrink-0 rounded-full px-3 py-[7px] text-[11px] font-medium transition-colors ${
-              activeTag === null
-                ? "border border-black bg-black text-white hover:bg-zinc-800"
-                : "border border-[#e5e7eb] bg-white text-[#6b7280] hover:bg-zinc-50"
-            }`}
-          >
-            전체
-          </button>
-          {tags.map((tag) => (
-            <button
-              key={tag}
-              type="button"
-              onClick={() => setActiveTag(tag)}
-              className={`shrink-0 rounded-full px-3 py-[7px] text-[11px] font-medium transition-colors ${
-                activeTag === tag
-                  ? "border border-black bg-black text-white hover:bg-zinc-800"
-                  : "border border-[#e5e7eb] bg-white text-[#6b7280] hover:bg-zinc-50"
-              }`}
+        <div className="flex flex-col gap-1.5">
+          {/* 태그 종류가 많을 때만 검색창을 보여준다 (CLAUDE.md 2.1) */}
+          {tags.length > TAG_SEARCH_THRESHOLD && (
+            <input
+              type="text"
+              value={tagSearch}
+              onChange={(e) => setTagSearch(e.target.value)}
+              placeholder="카테고리 검색"
+              className="w-full rounded-full border border-[#e5e7eb] bg-white px-3 py-[6px] text-[12px] text-[#18181b] placeholder:text-[#a1a1aa]"
+            />
+          )}
+
+          {/* 태그 개수가 늘어나도 화면이 여러 줄로 밀리지 않도록 한 줄 가로 스크롤로
+              고정. 스크롤이 더 가능한 방향에만 화살표 버튼을 겹쳐 보여준다 —
+              칩만 보면 옆으로 더 있는지 알 수 없다는 피드백 반영 (9/15). */}
+          <div className="relative">
+            {tagScrollState.left && (
+              <button
+                type="button"
+                onClick={() => scrollTags(-1)}
+                aria-label="이전 카테고리 보기"
+                className="absolute left-0 top-1/2 z-10 flex size-6 -translate-y-1/2 items-center justify-center rounded-full bg-white text-[#6b7280] shadow-[0_1px_4px_rgba(0,0,0,0.15)]"
+              >
+                ‹
+              </button>
+            )}
+            <div
+              ref={tagScrollRef}
+              onScroll={updateTagScrollState}
+              className="flex flex-nowrap gap-[7px] overflow-x-auto px-1 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             >
-              {tag}
-            </button>
-          ))}
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTag(null);
+                  setPage(1);
+                }}
+                className={`shrink-0 rounded-full px-3 py-[7px] text-[11px] font-medium transition-colors ${
+                  activeTag === null
+                    ? "border border-black bg-black text-white hover:bg-zinc-800"
+                    : "border border-[#e5e7eb] bg-white text-[#6b7280] hover:bg-zinc-50"
+                }`}
+              >
+                전체
+              </button>
+              {filteredTags.map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => {
+                    setActiveTag(tag);
+                    setPage(1);
+                  }}
+                  className={`shrink-0 rounded-full px-3 py-[7px] text-[11px] font-medium transition-colors ${
+                    activeTag === tag
+                      ? "border border-black bg-black text-white hover:bg-zinc-800"
+                      : "border border-[#e5e7eb] bg-white text-[#6b7280] hover:bg-zinc-50"
+                  }`}
+                >
+                  {tag}
+                </button>
+              ))}
+              {tagSearch.trim() && filteredTags.length === 0 && (
+                <p className="shrink-0 self-center px-1 text-[11px] text-[#a1a1aa]">
+                  일치하는 카테고리 없음
+                </p>
+              )}
+            </div>
+            {tagScrollState.right && (
+              <button
+                type="button"
+                onClick={() => scrollTags(1)}
+                aria-label="다음 카테고리 보기"
+                className="absolute right-0 top-1/2 z-10 flex size-6 -translate-y-1/2 items-center justify-center rounded-full bg-white text-[#6b7280] shadow-[0_1px_4px_rgba(0,0,0,0.15)]"
+              >
+                ›
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -662,7 +797,7 @@ function StackPageContent() {
               ))}
             </li>
           ))}
-          {ungrouped.map((card) => (
+          {pagedUngrouped.map((card) => (
             <li
               key={card.id}
               id={`card-${card.id}`}
@@ -672,6 +807,31 @@ function StackPageContent() {
             </li>
           ))}
         </ul>
+      )}
+
+      {/* 페이지네이션 (9/15 신규) — 목록이 1페이지뿐이면 숨긴다 */}
+      {!groupedView && !loading && totalPages > 1 && (
+        <div className="flex items-center justify-center gap-4 pt-1">
+          <button
+            type="button"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={currentPage <= 1}
+            className="rounded-full border border-[#e5e7eb] bg-white px-3 py-[6px] text-[12px] font-medium text-[#6b7280] transition-colors disabled:opacity-40"
+          >
+            이전
+          </button>
+          <p className="text-[12px] font-medium text-[#a1a1aa]">
+            {currentPage} / {totalPages}
+          </p>
+          <button
+            type="button"
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={currentPage >= totalPages}
+            className="rounded-full border border-[#e5e7eb] bg-white px-3 py-[6px] text-[12px] font-medium text-[#6b7280] transition-colors disabled:opacity-40"
+          >
+            다음
+          </button>
+        </div>
       )}
 
       <div className="pt-2 pb-4">
