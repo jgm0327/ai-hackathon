@@ -46,26 +46,31 @@ function toDateKey(d: Date): string {
 }
 
 /**
- * 최근 7일(오늘 포함) 중 카드가 있었던 날 boolean 배열 + 오늘부터 거꾸로 센
- * 연속 기록일수를 계산한다 (9/14 신규 — Figma "주간 기록 스트릭").
+ * 최근 7일(오늘 포함) 중 카드가 있었던 날 배열(날짜 + 기록 여부) + 오늘부터
+ * 거꾸로 센 연속 기록일수를 계산한다 (9/14 신규 — Figma "주간 기록 스트릭").
  *
  * **구현 노트**: 새 API 없이 이미 로드된 `cards`에서 순수 계산한다 — `created_at`이
  * 시간 없는 순수 날짜 문자열이라(`src/storage/db.py` `Card.created_at`) 문자열
  * 동등 비교만으로 충분하다. `showAllProjects` 토글 상태를 그대로 반영한다(그
  * 시점에 로드된 `cards` 자체가 이미 그 필터를 반영하고 있으므로 별도 분기 불필요).
+ *
+ * **구현 노트 (9/15, 점 클릭으로 그날 기록만 보기 추가)**: 원래 boolean만 반환해서
+ * 점이 그냥 장식이었다 — "반응이 없다"는 지적을 받아 각 점에 실제 날짜를 붙여서
+ * 클릭 가능하게 만든다.
  */
-function computeStreak(cards: Card[]): { days: boolean[]; consecutive: number } {
+function computeStreak(cards: Card[]): { days: { date: string; has: boolean }[]; consecutive: number } {
   const dateSet = new Set(cards.map((c) => c.created_at));
   const today = new Date();
-  const days: boolean[] = [];
+  const days: { date: string; has: boolean }[] = [];
   for (let i = 6; i >= 0; i--) {
     const d = new Date(today);
     d.setDate(d.getDate() - i);
-    days.push(dateSet.has(toDateKey(d)));
+    const date = toDateKey(d);
+    days.push({ date, has: dateSet.has(date) });
   }
   let consecutive = 0;
   for (let i = days.length - 1; i >= 0; i--) {
-    if (!days[i]) break;
+    if (!days[i].has) break;
     consecutive++;
   }
   return { days, consecutive };
@@ -139,6 +144,10 @@ function StackPageContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTag, setActiveTag] = useState<string | null>(null);
+  // 주간 기록 스트릭 점 클릭 필터 (9/15 신규) — 태그 필터와 동시에 걸면 "그날 +
+  // 그 태그"처럼 조건이 겹쳐 헷갈리므로, 점을 누르면 태그 필터는 끄고 그 반대도
+  // 마찬가지로 동작한다(아래 핸들러 참고).
+  const [activeStreakDate, setActiveStreakDate] = useState<string | null>(null);
   const [showAllProjects, setShowAllProjects] = useState(false);
   // 카드 목록 페이지네이션 (9/15 신규) — 카드가 쌓일수록 한 화면에 다 그리지 않도록
   // 클라이언트 쪽에서만 나눠 보여준다. 그룹 뷰(인과관계로 묶어보기)는 항목 수가
@@ -259,6 +268,7 @@ function StackPageContent() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setPage(1);
+    setActiveStreakDate(null);
   }, [currentProject?.id, showAllProjects]);
 
   // /resume의 "이 문장의 근거" 날짜 칩에서 /stack?cardId=<id>로 넘어온 경우, 카드
@@ -281,6 +291,7 @@ function StackPageContent() {
     pendingScrollCardIdRef.current = id;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setActiveTag(null);
+    setActiveStreakDate(null);
     setGroupedView(false);
     setPage(Math.floor(idx / PAGE_SIZE) + 1);
   }, [loading, targetCardId, cards]);
@@ -307,7 +318,8 @@ function StackPageContent() {
       return;
     }
     if (!currentProject) return;
-    setActiveTag(null); // 그룹 뷰에서는 태그 필터를 끈다 — 그룹이 태그로 쪼개지는 걸 방지
+    setActiveTag(null); // 그룹 뷰에서는 태그/날짜 필터를 끈다 — 그룹이 쪼개지는 걸 방지
+    setActiveStreakDate(null);
     setGroupedView(true);
     if (starGroups) return; // 이미 계산해둔 게 있으면 재호출하지 않는다
     setGroupsLoading(true);
@@ -382,9 +394,21 @@ function StackPageContent() {
     return tags.filter((t) => t.toLowerCase().includes(q));
   }, [tags, tagSearch]);
 
-  const visibleCards = activeTag ? cards.filter((c) => c.skill_tags.includes(activeTag)) : cards;
+  const visibleCards = activeStreakDate
+    ? cards.filter((c) => c.created_at === activeStreakDate)
+    : activeTag
+      ? cards.filter((c) => c.skill_tags.includes(activeTag))
+      : cards;
 
   const streak = useMemo(() => computeStreak(cards), [cards]);
+
+  // 스트릭 점 클릭 (9/15 신규) — 기록 있는 날만 클릭 가능. 같은 점을 다시 누르면
+  // 해제, 다른 날을 누르면 그 날로 전환. 태그 필터와는 배타적으로 동작한다.
+  const toggleStreakDate = (date: string) => {
+    setActiveStreakDate((prev) => (prev === date ? null : date));
+    setActiveTag(null);
+    setPage(1);
+  };
 
   const { groups, ungrouped } = useMemo(() => {
     if (!groupedView || !starGroups) return { groups: [] as CardGroup[], ungrouped: visibleCards };
@@ -586,19 +610,46 @@ function StackPageContent() {
         </Link>
       </div>
 
-      {/* 주간 기록 스트릭 (9/14 신규) — 카드가 하나도 없으면 의미가 없어서 숨긴다 */}
+      {/* 주간 기록 스트릭 (9/14 신규) — 카드가 하나도 없으면 의미가 없어서 숨긴다.
+          **구현 노트 (9/15)**: "점이 반응이 없다"는 피드백 반영 — 기록이 있는 날의
+          점만 눌러서 그날 카드만 볼 수 있게 했다. 기록 없는 날은 누를 게 없으니
+          그대로 비활성 점으로 둔다. */}
       {!loading && cards.length > 0 && (
         <div className="flex items-center gap-2">
           <div className="flex gap-1">
-            {streak.days.map((has, i) => (
-              <span
-                key={i}
-                className={`size-2 rounded-full ${has ? "bg-zinc-900" : "bg-zinc-200"}`}
-              />
-            ))}
+            {streak.days.map((day) =>
+              day.has ? (
+                <button
+                  key={day.date}
+                  type="button"
+                  onClick={() => toggleStreakDate(day.date)}
+                  aria-label={`${formatCardDate(day.date)} 기록만 보기`}
+                  aria-pressed={activeStreakDate === day.date}
+                  className="flex -m-1 items-center justify-center p-1"
+                >
+                  <span
+                    className={`block size-2 rounded-full transition-transform ${
+                      activeStreakDate === day.date ? "scale-125 bg-amber-500" : "bg-zinc-900"
+                    }`}
+                  />
+                </button>
+              ) : (
+                <span key={day.date} className="size-2 rounded-full bg-zinc-200" />
+              ),
+            )}
           </div>
-          {streak.consecutive > 0 && (
-            <p className="text-[11px] font-medium text-zinc-500">연속 {streak.consecutive}일</p>
+          {activeStreakDate ? (
+            <button
+              type="button"
+              onClick={() => toggleStreakDate(activeStreakDate)}
+              className="text-[11px] font-medium text-amber-600 underline underline-offset-2"
+            >
+              {formatCardDate(activeStreakDate)}만 보는 중 · 전체 보기
+            </button>
+          ) : (
+            streak.consecutive > 0 && (
+              <p className="text-[11px] font-medium text-zinc-500">연속 {streak.consecutive}일</p>
+            )
           )}
         </div>
       )}
@@ -685,10 +736,11 @@ function StackPageContent() {
                 type="button"
                 onClick={() => {
                   setActiveTag(null);
+                  setActiveStreakDate(null);
                   setPage(1);
                 }}
                 className={`shrink-0 rounded-full px-3 py-[7px] text-[11px] font-medium transition-colors ${
-                  activeTag === null
+                  activeTag === null && !activeStreakDate
                     ? "border border-black bg-black text-white hover:bg-zinc-800"
                     : "border border-[#e5e7eb] bg-white text-[#6b7280] hover:bg-zinc-50"
                 }`}
@@ -701,6 +753,7 @@ function StackPageContent() {
                   type="button"
                   onClick={() => {
                     setActiveTag(tag);
+                    setActiveStreakDate(null);
                     setPage(1);
                   }}
                   className={`shrink-0 rounded-full px-3 py-[7px] text-[11px] font-medium transition-colors ${
