@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ResumeCompareCarousel } from "@/components/ResumeCompareCarousel";
 import { StarItemSection, formatStarItemForClipboard } from "@/components/StarItemCard";
 import { StarItemSkeleton } from "@/components/Skeleton";
@@ -22,6 +22,7 @@ import {
   peekCachedResumeGeneratedAt,
   updateCachedResumeItems,
 } from "@/lib/resumeCache";
+import { applyFieldOverrides, clearFieldOverride, setFieldOverride, StarField } from "@/lib/resumeFieldOverrides";
 import { useProjects } from "@/lib/useProjects";
 
 /** 프로필/프로젝트에서 실제로 있는 값만으로 문서 제목을 만든다 — 없는 정보를
@@ -125,6 +126,9 @@ export default function ResumePage() {
   const [enhancing, setEnhancing] = useState(false);
   const [enhanceError, setEnhanceError] = useState<string | null>(null);
   const [compareItems, setCompareItems] = useState<EnhancedItem[] | null>(null);
+  // "문장 수정"(Figma 89:419) override는 localStorage에 있어 리액트 state가 아니다 —
+  // 이 카운터를 올려서 displayItems 메모를 강제로 다시 계산시킨다.
+  const [overridesVersion, setOverridesVersion] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -268,7 +272,8 @@ export default function ResumePage() {
   };
 
   const handleCopy = async (kind: "markdown" | "notion") => {
-    const text = mode === "edit" ? draftContent : items ? buildResumeMarkdown(heading, items) : "";
+    const text =
+      mode === "edit" ? draftContent : displayItems ? buildResumeMarkdown(heading, displayItems) : "";
     if (!text) return;
     try {
       await navigator.clipboard.writeText(text);
@@ -291,8 +296,28 @@ export default function ResumePage() {
     });
   };
 
+  // 재생성해도 유지되는 표시용 배열 — items(순수 AI 원본)는 그대로 두고 override만
+  // 덧씌워서, "AI 문장으로 되돌리기"가 항상 진짜 원본으로 돌아갈 수 있게 한다.
+  const displayItems = useMemo(
+    () => (items && currentProject ? applyFieldOverrides(items, currentProject.id) : items),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [items, currentProject, overridesVersion],
+  );
+
+  const handleEditField = (index: number, field: StarField, value: string) => {
+    if (!currentProject || !items) return;
+    setFieldOverride(currentProject.id, items[index].source_card_ids, field, value);
+    setOverridesVersion((v) => v + 1);
+  };
+
+  const handleRevertField = (index: number, field: StarField) => {
+    if (!currentProject || !items) return;
+    clearFieldOverride(currentProject.id, items[index].source_card_ids, field);
+    setOverridesVersion((v) => v + 1);
+  };
+
   const startEditing = () => {
-    if (items) setDraftContent(buildResumeMarkdown(heading, items));
+    if (displayItems) setDraftContent(buildResumeMarkdown(heading, displayItems));
     setMode("edit");
   };
 
@@ -540,18 +565,23 @@ export default function ResumePage() {
                   {(heading || generatedAt) && (
                     <>
                       {heading && <p className="text-[16px] font-bold text-[#18181b]">{heading}</p>}
-                      {generatedAt && (
+                      {generatedAt && displayItems && (
                         <p className="mt-1 text-[11px] text-zinc-400">
                           {formatGeneratedAt(generatedAt)} ·{" "}
-                          {buildResumeMarkdown(heading, items).length.toLocaleString()}자
+                          {buildResumeMarkdown(heading, displayItems).length.toLocaleString()}자
                         </p>
                       )}
                       <div className="my-3 h-px w-full bg-[#e5e7eb]" />
                     </>
                   )}
-                  {items.map((item, i) => (
+                  {(displayItems ?? items).map((item, i) => (
                     <div key={`${item.title}-${i}`}>
-                      <StarItemSection item={item} onApplyResult={(v) => handleApplyResult(i, v)} />
+                      <StarItemSection
+                        item={item}
+                        onApplyResult={(v) => handleApplyResult(i, v)}
+                        onEditField={(field, value) => handleEditField(i, field, value)}
+                        onRevertField={(field) => handleRevertField(i, field)}
+                      />
                       {i < items.length - 1 && <div className="h-px w-full bg-[#e5e7eb]" />}
                     </div>
                   ))}

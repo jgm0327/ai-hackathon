@@ -2,7 +2,9 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { BottomSheet } from "@/components/BottomSheet";
 import { StarItem } from "@/lib/api";
+import { StarField } from "@/lib/resumeFieldOverrides";
 
 export function formatStarItemForClipboard(item: StarItem): string {
   const lines = [
@@ -35,16 +37,25 @@ export function formatStarItemForClipboard(item: StarItem): string {
 export function StarItemSection({
   item,
   onApplyResult,
+  onEditField,
+  onRevertField,
 }: {
   item: StarItem;
   /** 인라인 입력에서 "적용"을 누르면 호출된다 — 부모가 items 배열의 이 항목만
    * 갱신한다. 서버에는 저장하지 않는다(StarItem은 원래도 비영속 값, CLAUDE.md 3장). */
   onApplyResult?: (value: string) => void;
+  /** "문장 수정" 바텀시트(Figma 89:419)에서 저장을 누르면 호출된다. 부모가
+   * `lib/resumeFieldOverrides.ts`에 저장해서 재생성해도 유지되게 한다. */
+  onEditField?: (field: StarField, value: string) => void;
+  /** "AI 문장으로 되돌리기" — 해당 필드의 override를 지운다. */
+  onRevertField?: (field: StarField) => void;
 }) {
   const router = useRouter();
   const [showSources, setShowSources] = useState(false);
   const [showResultInput, setShowResultInput] = useState(false);
   const [resultInput, setResultInput] = useState("");
+  const [editingField, setEditingField] = useState<StarField | null>(null);
+  const [editValue, setEditValue] = useState("");
 
   const handleApplyResult = () => {
     const trimmed = resultInput.trim();
@@ -54,10 +65,28 @@ export function StarItemSection({
     setResultInput("");
   };
 
-  const rows: Array<{ label: string; value: string }> = [
-    { label: "상황", value: item.situation },
-    { label: "과제", value: item.task },
-    { label: "행동", value: item.action },
+  const openEditSheet = (field: StarField, currentValue: string) => {
+    setEditingField(field);
+    setEditValue(currentValue);
+  };
+
+  const handleSaveEdit = () => {
+    if (!editingField) return;
+    const trimmed = editValue.trim();
+    if (trimmed) onEditField?.(editingField, trimmed);
+    setEditingField(null);
+  };
+
+  const handleRevertEdit = () => {
+    if (!editingField) return;
+    onRevertField?.(editingField);
+    setEditingField(null);
+  };
+
+  const rows: Array<{ label: string; field: StarField; value: string }> = [
+    { label: "상황", field: "situation", value: item.situation },
+    { label: "과제", field: "task", value: item.task },
+    { label: "행동", field: "action", value: item.action },
   ];
 
   return (
@@ -71,10 +100,18 @@ export function StarItemSection({
       <div className="flex flex-col gap-2">
         {rows.map((row) => (
           <div key={row.label} className="flex gap-[10px]">
-            <div className="w-[30px] shrink-0">
+            <div className="flex w-[30px] shrink-0 items-start gap-1">
               <p className="text-[11px] font-semibold text-black">{row.label}</p>
             </div>
             <p className="flex-1 text-[12px] leading-relaxed text-[#18181b]">{row.value}</p>
+            <button
+              type="button"
+              onClick={() => openEditSheet(row.field, row.value)}
+              aria-label={`${row.label} 문장 수정`}
+              className="shrink-0 text-[11px] text-[#a1a1aa] hover:text-zinc-600"
+            >
+              ✎
+            </button>
           </div>
         ))}
 
@@ -84,7 +121,17 @@ export function StarItemSection({
           </div>
           <div className="flex flex-1 flex-col gap-1.5">
             {item.result ? (
-              <p className="text-[12px] leading-relaxed text-[#18181b]">{item.result}</p>
+              <div className="flex gap-[10px]">
+                <p className="flex-1 text-[12px] leading-relaxed text-[#18181b]">{item.result}</p>
+                <button
+                  type="button"
+                  onClick={() => openEditSheet("result", item.result)}
+                  aria-label="결과 문장 수정"
+                  className="shrink-0 text-[11px] text-[#a1a1aa] hover:text-zinc-600"
+                >
+                  ✎
+                </button>
+              </div>
             ) : showResultInput ? (
               <div className="flex flex-col gap-1.5">
                 <input
@@ -178,6 +225,54 @@ export function StarItemSection({
           </div>
         </div>
       </div>
+
+      {/* "문장 수정" (Figma 89:419) — 개별 필드를 구조 유지한 채 고친다. 저장하면
+          부모가 lib/resumeFieldOverrides.ts에 담아 재생성해도 유지되게 한다. */}
+      <BottomSheet
+        open={editingField !== null}
+        onClose={() => setEditingField(null)}
+        hideHandle
+        panelClassName="relative w-full max-w-md rounded-tl-[24px] rounded-tr-[24px] bg-white px-5 pt-4 pb-[30px] shadow-xl"
+      >
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <button
+              type="button"
+              onClick={() => setEditingField(null)}
+              className="text-[13px] text-[#a1a1aa]"
+            >
+              취소
+            </button>
+            <p className="text-[14px] font-semibold text-[#18181b]">문장 수정</p>
+            <button
+              type="button"
+              onClick={handleSaveEdit}
+              disabled={!editValue.trim()}
+              className="text-[13px] font-semibold text-[#18181b] disabled:opacity-40"
+            >
+              저장
+            </button>
+          </div>
+          <textarea
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            autoFocus
+            rows={4}
+            className="w-full resize-none rounded-[12px] border border-[#e5e7eb] bg-white p-3 text-[13px] leading-relaxed text-[#18181b] focus:border-zinc-400 focus:outline-none"
+          />
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] text-[#a1a1aa]">직접 고친 문장은 다시 변환해도 유지돼요</p>
+            <p className="shrink-0 text-[11px] text-[#a1a1aa]">{editValue.length}자</p>
+          </div>
+          <button
+            type="button"
+            onClick={handleRevertEdit}
+            className="w-fit rounded-full bg-zinc-100 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-200"
+          >
+            AI 문장으로 되돌리기
+          </button>
+        </div>
+      </BottomSheet>
     </div>
   );
 }
