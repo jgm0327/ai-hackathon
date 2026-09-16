@@ -172,6 +172,64 @@ class ResumeEnhanceResponse(BaseModel):
     items: list[EnhancedItemResponse]
 
 
+# 공고 요구사항 매칭 (9/16 신규, Figma "4.2-j2"). build_resume()보다 앞선 단계 —
+# JD를 붙여넣은 직후, 실제로 초안을 만들기 전에 "요구사항 N개 중 M개에 기록이
+# 있어요"를 보여준다.
+class JdRequirementsRequest(BaseModel):
+    project_id: int
+    jd_text: str
+
+
+class JdRequirementResponse(_FromAttributes):
+    requirement: str
+    source_dates: list[str]
+    source_card_ids: list[int]
+
+
+class JdRequirementsResponse(BaseModel):
+    job_title: str
+    company: str
+    years_label: str
+    requirements: list[JdRequirementResponse]
+
+
+# AI 역질문 + 반영 (9/16 신규, Figma "4.2-3"/"4.2-2 모드 B"). StarItem은 DB에
+# 저장하지 않으므로(CLAUDE.md 3장) 프론트가 들고 있는 값을 그대로 왕복시킨다 —
+# StarItemResponse와 필드는 같지만 이건 입력(body)용이라 별도 모델로 둔다.
+class StarItemPayload(BaseModel):
+    title: str
+    period: str
+    situation: str
+    task: str
+    action: str
+    result: str
+    source_dates: list[str] = []
+    source_card_ids: list[int] = []
+
+
+class StarQuestionsRequest(BaseModel):
+    item: StarItemPayload
+
+
+class StarQuestionsResponse(BaseModel):
+    questions: list[str]
+
+
+class QaPair(BaseModel):
+    question: str
+    answer: str
+
+
+class StarApplyAnswersRequest(BaseModel):
+    item: StarItemPayload
+    answers: list[QaPair] = Field(max_length=3)
+
+
+class StarApplyAnswersResponse(BaseModel):
+    updated_item: StarItemResponse
+    changed_field: str
+
+
 class HealthResponse(BaseModel):
     status: str
     db: bool

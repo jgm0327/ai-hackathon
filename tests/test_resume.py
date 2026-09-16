@@ -14,7 +14,15 @@ import pytest
 from unittest.mock import patch
 
 from src.parsing import resume
-from src.parsing.resume import EnhancedItem, StarItem, build_resume, enhance_resume_items
+from src.parsing.resume import (
+    EnhancedItem,
+    StarItem,
+    apply_star_answers,
+    build_resume,
+    enhance_resume_items,
+    generate_star_questions,
+    match_jd_requirements,
+)
 from src.storage.db import Card
 
 
@@ -357,3 +365,136 @@ def test_enhance_resume_items_strips_markdown_code_fence():
         result = enhance_resume_items(["결제 API 성능 개선 담당"], cards)
         assert mock_llm.call_count == 1
         assert result[0].source_card_ids == [1]
+
+
+# --- match_jd_requirements() — "공고 요구사항 매칭" (9/16 신규) ---
+
+
+def _jd_llm_json(job_title="", company="", years_label="", requirements=None) -> str:
+    return json.dumps({
+        "job_title": job_title, "company": company, "years_label": years_label,
+        "requirements": requirements or [],
+    }, ensure_ascii=False)
+
+
+def test_match_jd_requirements_blank_jd_text_returns_empty_without_llm_call():
+    cards = [_card(1, "2023-02-14", "결제 API에 Redis 캐싱 도입")]
+    with patch("src.parsing.resume._call_llm") as mock_llm:
+        result = match_jd_requirements("   ", cards)
+        mock_llm.assert_not_called()
+        assert result.requirements == []
+
+
+def test_match_jd_requirements_no_cards_returns_empty_without_llm_call():
+    with patch("src.parsing.resume._call_llm") as mock_llm:
+        result = match_jd_requirements("백엔드 개발자 채용", [])
+        mock_llm.assert_not_called()
+        assert result.requirements == []
+
+
+def test_match_jd_requirements_matches_cards_to_requirements():
+    cards = [
+        _card(1, "2023-02-14", "Redis 캐싱 레이어 도입", ["Redis"]),
+        _card(2, "2023-02-18", "결제 오류율 개선", ["모니터링"]),
+    ]
+    mock_response = _jd_llm_json(
+        job_title="백엔드 엔지니어", company="A은행", years_label="경력 3~7년",
+        requirements=[
+            {"requirement": "캐싱 시스템 설계 경험", "source_indices": [1, 2]},
+            {"requirement": "Kubernetes 운영 경험", "source_indices": []},
+        ],
+    )
+    with patch("src.parsing.resume._call_llm", return_value=mock_response):
+        result = match_jd_requirements("백엔드 엔지니어 채용, A은행, 경력 3~7년", cards)
+
+    assert result.job_title == "백엔드 엔지니어"
+    assert result.company == "A은행"
+    assert result.years_label == "경력 3~7년"
+    assert len(result.requirements) == 2
+    assert result.requirements[0].source_card_ids == [1, 2]
+    assert result.requirements[1].source_card_ids == []
+
+
+def test_match_jd_requirements_filters_hallucinated_source_indices():
+    cards = [_card(1, "2023-02-14", "결제 API에 Redis 캐싱 도입")]
+    mock_response = _jd_llm_json(requirements=[
+        {"requirement": "캐싱 시스템 설계 경험", "source_indices": [1, 99]},
+    ])
+    with patch("src.parsing.resume._call_llm", return_value=mock_response):
+        result = match_jd_requirements("백엔드 채용", cards)
+        assert result.requirements[0].source_card_ids == [1]
+
+
+# --- generate_star_questions() / apply_star_answers() — "AI 역질문" (9/16 신규) ---
+
+
+def _star_item() -> StarItem:
+    return StarItem(
+        title="가입 배너 전환율 개선", period="02.14",
+        situation="가입 전환율이 낮았습니다.", task="전환율을 높여야 했습니다.",
+        action="가입 배너 문구를 A/B 테스트했습니다.", result="전환율을 3.2%p 개선했습니다.",
+        source_dates=["02.14"], source_card_ids=[1],
+    )
+
+
+def test_generate_star_questions_returns_questions_from_llm():
+    mock_response = json.dumps(
+        {"questions": ["왜 그 문구였나요?", "다른 대안은 없었나요?"]}, ensure_ascii=False
+    )
+    with patch("src.parsing.resume._call_llm", return_value=mock_response) as mock_llm:
+        questions = generate_star_questions(_star_item())
+        assert mock_llm.call_args[0][1] == resume._STAR_QUESTIONS_SYSTEM_PROMPT
+    assert questions == ["왜 그 문구였나요?", "다른 대안은 없었나요?"]
+
+
+def test_generate_star_questions_empty_when_already_clear():
+    mock_response = json.dumps({"questions": []}, ensure_ascii=False)
+    with patch("src.parsing.resume._call_llm", return_value=mock_response):
+        assert generate_star_questions(_star_item()) == []
+
+
+def test_generate_star_questions_caps_at_three():
+    mock_response = json.dumps(
+        {"questions": ["q1", "q2", "q3", "q4", "q5"]}, ensure_ascii=False
+    )
+    with patch("src.parsing.resume._call_llm", return_value=mock_response):
+        assert len(generate_star_questions(_star_item())) == 3
+
+
+def test_apply_star_answers_updates_named_field_only():
+    item = _star_item()
+    mock_response = json.dumps({
+        "field": "action",
+        "updated_text": "가입 단계 이탈이 문구에 몰려 있다고 판단해 배너 카피부터 A/B 테스트했습니다.",
+    }, ensure_ascii=False)
+    with patch("src.parsing.resume._call_llm", return_value=mock_response) as mock_llm:
+        result = apply_star_answers(item, [("왜 그 문구였나요?", "이탈이 문구에 몰려 있어서")])
+        assert mock_llm.call_args[0][1] == resume._STAR_APPLY_ANSWERS_SYSTEM_PROMPT
+
+    assert result.changed_field == "action"
+    assert "이탈" in result.updated_item.action
+    # 다른 필드는 그대로 유지돼야 한다
+    assert result.updated_item.situation == item.situation
+    assert result.updated_item.result == item.result
+    assert result.updated_item.source_card_ids == item.source_card_ids
+
+
+def test_apply_star_answers_skips_llm_when_all_answers_blank():
+    """건너뛴(빈 답변) 질문만 있으면 LLM을 부르지 않고 원본을 그대로 반환한다."""
+    item = _star_item()
+    with patch("src.parsing.resume._call_llm") as mock_llm:
+        result = apply_star_answers(item, [("왜 그 문구였나요?", "   ")])
+        mock_llm.assert_not_called()
+    assert result.updated_item == item
+
+
+def test_apply_star_answers_invalid_field_falls_back_to_action():
+    item = _star_item()
+    mock_response = json.dumps(
+        {"field": "situation", "updated_text": "지어낸 필드"}, ensure_ascii=False
+    )
+    with patch("src.parsing.resume._call_llm", return_value=mock_response):
+        result = apply_star_answers(item, [("q", "a")])
+        assert result.changed_field == "action"
+        assert result.updated_item.action == "지어낸 필드"
+        assert result.updated_item.situation == item.situation
