@@ -266,8 +266,12 @@ export default function HomePage() {
 
             {result.refinement_failed ? (
               <>
+                <div className="flex items-center gap-2">
+                  <span aria-hidden className="h-2 w-2 shrink-0 rounded-full bg-red-500" />
+                  <p className="text-[14px] font-semibold text-[#18181b]">변환에 실패했어요</p>
+                </div>
                 <p className="text-[12px] text-amber-700">
-                  AI 정리에 실패해서 원문 그대로 저장했어요. 기록은 안전하게 남아있어요.
+                  메모는 그대로 있습니다. 다시 시도하거나 원문만 저장할 수 있어요.
                 </p>
 
                 <div className="flex gap-3 rounded-[14px] bg-amber-50 px-4 py-[18px]">
@@ -286,14 +290,14 @@ export default function HomePage() {
                     disabled={refining}
                     className="flex flex-1 items-center justify-center rounded-[12px] bg-black py-4 text-[14px] font-semibold text-white transition-colors hover:bg-zinc-800 active:scale-[0.98] disabled:opacity-40"
                   >
-                    {refining ? "정리하는 중…" : "다시 정리하기"}
+                    {refining ? "정리하는 중…" : "다시 시도"}
                   </button>
                   <button
                     type="button"
                     onClick={handleCloseResult}
                     className="flex flex-1 items-center justify-center rounded-[12px] border-[1.5px] border-[#e5e7eb] bg-white py-4 text-[14px] font-semibold text-[#18181b] transition-colors hover:bg-zinc-50 active:scale-[0.98]"
                   >
-                    확인
+                    그냥 저장하기
                   </button>
                 </div>
               </>

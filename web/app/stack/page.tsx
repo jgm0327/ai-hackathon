@@ -840,7 +840,18 @@ function StackPageContent() {
               placeholder 박스뿐이었다(디자이너가 아직 못 채운 자리). 없는 그림을
               지어내는 대신 그 placeholder 스타일 그대로만 가져왔다. */}
           <div className="size-[120px] rounded-[18px] border-[1.5px] border-dashed border-[#e5e7eb] bg-[#f4f4f5]" />
-          <p className="text-center text-sm text-zinc-400">아직 남긴 기록이 없습니다.</p>
+          <div className="flex flex-col items-center gap-1">
+            <p className="text-center text-sm font-medium text-zinc-500">아직 적립된 기록이 없습니다</p>
+            <p className="text-center text-xs text-zinc-400">
+              [일지 기록] 탭에서 오늘 하루의 업무 메모를 한 줄 던져보세요
+            </p>
+          </div>
+          <Link
+            href="/"
+            className="rounded-full bg-zinc-900 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-zinc-800"
+          >
+            기록하러 가기
+          </Link>
         </div>
       )}
 
