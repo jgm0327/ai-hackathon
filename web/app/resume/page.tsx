@@ -13,6 +13,7 @@ import {
   Profile,
   StarItem,
   enhanceResume,
+  exportResumeDocx,
   getJdRequirements,
   getResumeDraft,
   getProfile,
@@ -111,7 +112,9 @@ export default function ResumePage() {
   // 카드 목록을 조회하는 김에 같이 채운다(별도 네트워크 호출 추가 없음).
   const [loadingCardCount, setLoadingCardCount] = useState<number | null>(null);
   const [showBuildForm, setShowBuildForm] = useState(true);
-  const [copyStatus, setCopyStatus] = useState<"markdown" | "notion" | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   // "숫자 되묻기" 인라인 입력(9/15 신규)이 캐시를 정확한 키로 갱신하려면, 지금
   // 보고 있는 items가 어떤 jdText로 생성됐는지 알아야 한다(캐시 키 = projectId+jdText).
@@ -324,16 +327,35 @@ export default function ResumePage() {
     }
   };
 
-  const handleCopy = async (kind: "markdown" | "notion") => {
-    const text =
-      mode === "edit" ? draftContent : displayItems ? buildResumeMarkdown(heading, displayItems) : "";
+  // "마크다운"/"노션 복사" 두 버튼으로 나뉘어 있었는데 실제로는 완전히 같은 텍스트를
+  // 복사했다 — 노션은 붙여넣기 시 마크다운 문법을 자동으로 블록으로 변환해주므로
+  // 별도 포맷이 필요 없다. 버튼 하나로 통합(9/16).
+  const currentText = () =>
+    mode === "edit" ? draftContent : displayItems ? buildResumeMarkdown(heading, displayItems) : "";
+
+  const handleCopy = async () => {
+    const text = currentText();
     if (!text) return;
     try {
       await navigator.clipboard.writeText(text);
-      setCopyStatus(kind);
-      setTimeout(() => setCopyStatus(null), 1500);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
     } catch {
       // 클립보드 접근 실패 — 조용히 무시
+    }
+  };
+
+  const handleExportDocx = async () => {
+    const text = currentText();
+    if (!text) return;
+    setExporting(true);
+    setExportError(null);
+    try {
+      await exportResumeDocx(text);
+    } catch (err) {
+      setExportError(err instanceof ApiError ? err.detail : "내보내기에 실패했습니다.");
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -472,6 +494,9 @@ export default function ResumePage() {
           {draftError && (
             <p className="rounded-lg bg-[#2a1614] px-3 py-2 text-sm text-[#f0645c]">{draftError}</p>
           )}
+          {exportError && (
+            <p className="rounded-lg bg-[#2a1614] px-3 py-2 text-sm text-[#f0645c]">{exportError}</p>
+          )}
           <div className="flex flex-col gap-[10px] rounded-[14px] border border-[#2e2e2e] bg-[#1e1e1e] p-4">
             <div className="flex gap-2">
               <button
@@ -484,17 +509,18 @@ export default function ResumePage() {
               </button>
               <button
                 type="button"
-                onClick={() => handleCopy("markdown")}
-                className="flex flex-1 items-center justify-center rounded-[11px] border-[1.5px] border-[#2e2e2e] bg-[#1c1c1c] py-[13px] text-[12px] font-semibold text-[#f2f2f2] transition-colors hover:bg-[#242424]"
+                onClick={handleExportDocx}
+                disabled={exporting}
+                className="flex flex-1 items-center justify-center rounded-[11px] border-[1.5px] border-[#2e2e2e] bg-[#1c1c1c] py-[13px] text-[12px] font-semibold text-[#f2f2f2] transition-colors hover:bg-[#242424] disabled:opacity-40"
               >
-                {copyStatus === "markdown" ? "복사됨" : "마크다운"}
+                {exporting ? "내보내는 중…" : "Word"}
               </button>
               <button
                 type="button"
-                onClick={() => handleCopy("notion")}
+                onClick={handleCopy}
                 className="flex flex-1 items-center justify-center rounded-[11px] border-[1.5px] border-[#2e2e2e] bg-[#1c1c1c] py-[13px] text-[12px] font-semibold text-[#f2f2f2] transition-colors hover:bg-[#242424]"
               >
-                {copyStatus === "notion" ? "복사됨" : "노션 복사"}
+                {copied ? "복사됨" : "복사"}
               </button>
             </div>
             <Link href="/" className="text-center text-[11px] text-[#828282]">
@@ -830,29 +856,26 @@ export default function ResumePage() {
 
               {items.length > 0 && (
                 <div className="flex flex-col gap-[10px] rounded-[14px] border border-[#2e2e2e] bg-[#1e1e1e] p-4">
+                  {exportError && (
+                    <p className="rounded-lg bg-[#2a1614] px-3 py-2 text-sm text-[#f0645c]">
+                      {exportError}
+                    </p>
+                  )}
                   <div className="flex gap-2">
                     <button
                       type="button"
-                      disabled
-                      title="Word(.docx) 내보내기는 아직 준비 중이에요"
-                      className="flex flex-1 cursor-not-allowed flex-col items-center justify-center gap-0.5 rounded-[11px] bg-[#181818] py-[13px] text-[#5e5e5e]"
+                      onClick={handleExportDocx}
+                      disabled={exporting}
+                      className="flex flex-1 items-center justify-center rounded-[11px] border-[1.5px] border-[#2e2e2e] bg-[#1c1c1c] py-[13px] text-[12px] font-semibold text-[#f2f2f2] transition-colors hover:bg-[#242424] disabled:opacity-40"
                     >
-                      <span className="text-[12px] font-semibold">Word</span>
-                      <span className="text-[9px]">준비 중</span>
+                      {exporting ? "내보내는 중…" : "Word"}
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleCopy("markdown")}
+                      onClick={handleCopy}
                       className="flex flex-1 items-center justify-center rounded-[11px] border-[1.5px] border-[#2e2e2e] bg-[#1c1c1c] py-[13px] text-[12px] font-semibold text-[#f2f2f2] transition-colors hover:bg-[#242424]"
                     >
-                      {copyStatus === "markdown" ? "복사됨" : "마크다운"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleCopy("notion")}
-                      className="flex flex-1 items-center justify-center rounded-[11px] border-[1.5px] border-[#2e2e2e] bg-[#1c1c1c] py-[13px] text-[12px] font-semibold text-[#f2f2f2] transition-colors hover:bg-[#242424]"
-                    >
-                      {copyStatus === "notion" ? "복사됨" : "노션 복사"}
+                      {copied ? "복사됨" : "복사"}
                     </button>
                   </div>
                   <Link href="/" className="text-center text-[11px] text-[#828282]">
