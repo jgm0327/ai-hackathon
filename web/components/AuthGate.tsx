@@ -3,6 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { getMe, getProfile } from "@/lib/api";
+import { isOnboardingSkipped } from "@/lib/onboardingSkip";
 
 /**
  * 진입 게이팅 — 로그인 여부 + 온보딩 완료 여부를 확인해 알맞은 화면으로 보낸다
@@ -16,7 +17,8 @@ import { getMe, getProfile } from "@/lib/api";
  *
  * 규칙:
  *   1. 로그아웃 상태(getMe() -> null) + 현재 `/login`이 아니면 -> `/login`
- *   2. 로그인 + 프로필 미완성(job_field null) + 현재 `/onboarding`이 아니면 -> `/onboarding`
+ *   2. 로그인 + 프로필 미완성(job_field null) + "나중에 설정하기"로 스킵 안 함
+ *      (`lib/onboardingSkip.ts`) + 현재 `/onboarding`이 아니면 -> `/onboarding`
  *   3. 로그인 + 프로필 완성 + 현재 `/login`이면 -> `/` (로그인 화면엔 되돌아갈 곳 없음)
  *   4. 그 외엔 아무 것도 하지 않는다.
  *
@@ -48,7 +50,7 @@ export function AuthGate() {
       if (cancelled) return;
 
       const onboarded = !!profile?.job_field;
-      if (!onboarded) {
+      if (!onboarded && !isOnboardingSkipped()) {
         if (pathname !== "/onboarding") router.replace("/onboarding");
         return;
       }
