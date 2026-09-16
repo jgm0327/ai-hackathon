@@ -340,6 +340,60 @@ export function enhanceResume(projectId: number, existingItems: string[]): Promi
   }).then((res) => res.items);
 }
 
+/**
+ * "공고 요구사항 매칭" (9/16 신규, Figma 100:692 "4.2-j2"). `buildResume()`보다 앞선
+ * 단계 — JD를 붙여넣으면 먼저 이걸로 "요구사항 N개 중 M개에 기록이 있어요"를 보여준
+ * 뒤, "이 공고에 맞춰 초안 만들기"를 누르면 그때 같은 jdText로 buildResume()을 부른다.
+ *
+ * `source_card_ids`가 빈 요구사항은 "기록 없음"으로 표시한다 — 없는 근거를 지어내
+ * 채우지 않는다(CLAUDE.md 2.2).
+ */
+export interface JdRequirement {
+  requirement: string;
+  source_dates: string[];
+  source_card_ids: number[];
+}
+
+export interface JdRequirementsResult {
+  job_title: string;
+  company: string;
+  years_label: string;
+  requirements: JdRequirement[];
+}
+
+export function getJdRequirements(projectId: number, jdText: string): Promise<JdRequirementsResult> {
+  return request<JdRequirementsResult>("/resume/jd-requirements", {
+    method: "POST",
+    body: JSON.stringify({ project_id: projectId, jd_text: jdText }),
+  });
+}
+
+/**
+ * "AI 역질문" (9/16 신규, Figma 100:692 "4.2-3"/"4.2-2 모드 B"). StarItem은 서버에
+ * 저장되지 않으므로(CLAUDE.md 3장) 화면이 들고 있는 값을 그대로 요청에 실어 보낸다.
+ */
+export function getStarQuestions(item: StarItem): Promise<string[]> {
+  return request<{ questions: string[] }>("/resume/star-questions", {
+    method: "POST",
+    body: JSON.stringify({ item }),
+  }).then((res) => res.questions);
+}
+
+export interface StarAnswerResult {
+  updated_item: StarItem;
+  changed_field: "action" | "result";
+}
+
+export function applyStarAnswers(
+  item: StarItem,
+  answers: { question: string; answer: string }[],
+): Promise<StarAnswerResult> {
+  return request<StarAnswerResult>("/resume/star-apply-answers", {
+    method: "POST",
+    body: JSON.stringify({ item, answers }),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // 5. 노션 (읽기 전용) — docs/05-api-contract.md §5
 // ---------------------------------------------------------------------------

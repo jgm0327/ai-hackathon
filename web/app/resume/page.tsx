@@ -5,14 +5,18 @@ import { useEffect, useMemo, useState } from "react";
 import { ResumeCompareCarousel } from "@/components/ResumeCompareCarousel";
 import { StarItemSection, formatStarItemForClipboard } from "@/components/StarItemCard";
 import { StarItemSkeleton } from "@/components/Skeleton";
+import { StarQuestionWizard } from "@/components/StarQuestionWizard";
 import {
   ApiError,
   EnhancedItem,
+  JdRequirementsResult,
   Profile,
   StarItem,
   enhanceResume,
+  getJdRequirements,
   getResumeDraft,
   getProfile,
+  getStarQuestions,
   listCards,
   saveResumeDraft,
 } from "@/lib/api";
@@ -133,6 +137,22 @@ export default function ResumePage() {
   // 이 카운터를 올려서 displayItems 메모를 강제로 다시 계산시킨다.
   const [overridesVersion, setOverridesVersion] = useState(0);
 
+  // "공고 요구사항 매칭" (9/16 신규, Figma 100:692 "4.2-j2") — JD를 붙여넣고 분석하면
+  // 실제 초안 생성 전에 먼저 보여준다. build_resume()보다 가벼운 별도 호출이라 로딩
+  // 상태를 분리해서 관리한다.
+  const [jdRequirements, setJdRequirements] = useState<JdRequirementsResult | null>(null);
+  const [loadingRequirements, setLoadingRequirements] = useState(false);
+  const [requirementsError, setRequirementsError] = useState<string | null>(null);
+
+  // "AI 역질문" (9/16 신규, Figma 100:692 "4.2-3"/"4.2-2 모드 B") — items 배열의 몇 번째
+  // 항목을 점검 중인지와 그 질문 목록. 질문이 하나도 없으면(이미 근거 충분) 위저드를
+  // 아예 열지 않고 짧은 안내만 보여준다.
+  const [wizardData, setWizardData] = useState<{ index: number; questions: string[] } | null>(null);
+  const [questionsLoadingIndex, setQuestionsLoadingIndex] = useState<number | null>(null);
+  const [questionsMessage, setQuestionsMessage] = useState<{ index: number; text: string } | null>(
+    null,
+  );
+
   useEffect(() => {
     let cancelled = false;
     getProfile()
@@ -161,6 +181,10 @@ export default function ResumePage() {
     setEnhanceError(null);
     setCompareItems(null);
     setGeneratedAt(null);
+    setJdRequirements(null);
+    setRequirementsError(null);
+    setWizardData(null);
+    setQuestionsMessage(null);
   }, [currentProject?.id]);
 
   // 새로고침해도 방금 만든 경력기술서가 사라진 것처럼 보이지 않게, 마운트 시점에
@@ -234,6 +258,27 @@ export default function ResumePage() {
     }
   };
 
+  // JD를 붙여넣고 "공고 분석하기"를 누르면 실제 초안 생성 전에 요구사항 매칭부터
+  // 보여준다(Figma "4.2-j2"). JD가 비어있으면 분석할 게 없으니 바로 handleBuild로.
+  const handleAnalyzeJd = async () => {
+    const trimmed = jdText.trim();
+    if (!trimmed) {
+      handleBuild();
+      return;
+    }
+    if (!currentProject) return;
+    setLoadingRequirements(true);
+    setRequirementsError(null);
+    try {
+      const result = await getJdRequirements(currentProject.id, trimmed);
+      setJdRequirements(result);
+    } catch (err) {
+      setRequirementsError(err instanceof ApiError ? err.detail : "공고 분석에 실패했습니다.");
+    } finally {
+      setLoadingRequirements(false);
+    }
+  };
+
   const heading = buildResumeHeading(profile, currentProject?.name ?? null);
 
   const handleEnhance = async () => {
@@ -302,6 +347,44 @@ export default function ResumePage() {
       if (currentProject) updateCachedResumeItems(currentProject.id, next, builtJdText);
       return next;
     });
+  };
+
+  // "AI로 초안 점검하기" (9/16 신규) — 질문을 먼저 조회해서, 이미 근거가 충분해
+  // 질문이 없는 항목이면 위저드를 아예 열지 않고 짧은 안내만 보여준다.
+  const handleStartQuestions = async (index: number) => {
+    const item = items?.[index];
+    if (!item) return;
+    setQuestionsLoadingIndex(index);
+    setQuestionsMessage(null);
+    try {
+      const questions = await getStarQuestions(item);
+      if (questions.length === 0) {
+        setQuestionsMessage({ index, text: "이미 근거가 충분해서 점검할 게 없어요." });
+      } else {
+        setWizardData({ index, questions });
+      }
+    } catch (err) {
+      setQuestionsMessage({
+        index,
+        text: err instanceof ApiError ? err.detail : "점검에 실패했습니다.",
+      });
+    } finally {
+      setQuestionsLoadingIndex(null);
+    }
+  };
+
+  // 역질문 반영 결과를 "적용"하면 items 배열의 그 항목만 교체한다 — "숫자 되묻기"
+  // 인라인 입력(handleApplyResult)과 동일하게 서버에는 저장하지 않는다(3장).
+  const handleApplyWizardResult = (updated: StarItem) => {
+    if (!wizardData) return;
+    const idx = wizardData.index;
+    setItems((prev) => {
+      if (!prev) return prev;
+      const next = prev.map((it, i) => (i === idx ? updated : it));
+      if (currentProject) updateCachedResumeItems(currentProject.id, next, builtJdText);
+      return next;
+    });
+    setWizardData(null);
   };
 
   // 재생성해도 유지되는 표시용 배열 — items(순수 AI 원본)는 그대로 두고 override만
@@ -419,6 +502,13 @@ export default function ResumePage() {
             </Link>
           </div>
         </div>
+      ) : wizardData ? (
+        <StarQuestionWizard
+          item={items![wizardData.index]}
+          questions={wizardData.questions}
+          onCancel={() => setWizardData(null)}
+          onApply={handleApplyWizardResult}
+        />
       ) : compareItems ? (
         <ResumeCompareCarousel
           items={compareItems}
@@ -458,7 +548,103 @@ export default function ResumePage() {
             </div>
           ) : (
             <>
-          {(!items || showBuildForm) && (
+          {(!items || showBuildForm) && jdRequirements && (
+            <div className="flex flex-col gap-3 rounded-[14px] border border-[#2e2e2e] bg-[#1e1e1e] p-4">
+              <div className="flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => setJdRequirements(null)}
+                  aria-label="뒤로"
+                  className="text-[17px] text-[#f2f2f2]"
+                >
+                  ←
+                </button>
+                <p className="text-sm font-semibold text-[#f2f2f2]">공고 분석 결과</p>
+                <button
+                  type="button"
+                  onClick={() => setJdRequirements(null)}
+                  className="text-[11px] font-medium text-[#828282] underline underline-offset-2"
+                >
+                  다시
+                </button>
+              </div>
+
+              {(jdRequirements.job_title || jdRequirements.company || jdRequirements.years_label) && (
+                <div>
+                  <p className="text-[14px] font-bold text-[#f2f2f2]">
+                    {jdRequirements.job_title || "채용 공고"}
+                  </p>
+                  <p className="text-[11px] text-[#828282]">
+                    {[jdRequirements.company, jdRequirements.years_label].filter(Boolean).join(" · ")}
+                  </p>
+                </div>
+              )}
+
+              {jdRequirements.requirements.length > 0 ? (
+                <>
+                  <p className="text-[18px] font-bold leading-snug text-[#f2f2f2]">
+                    요구사항 {jdRequirements.requirements.length}개 중{" "}
+                    {jdRequirements.requirements.filter((r) => r.source_card_ids.length > 0).length}개에
+                    기록이 있어요
+                  </p>
+                  <p className="text-[11px] text-[#a0a0a0]">기록이 있는 것만 골라서 경력기술서를 써요.</p>
+
+                  <div className="flex flex-col overflow-hidden rounded-[14px] border border-[#2e2e2e]">
+                    {jdRequirements.requirements.map((req, i) => {
+                      const hasEvidence = req.source_card_ids.length > 0;
+                      return (
+                        <div
+                          key={`${req.requirement}-${i}`}
+                          className={`flex flex-col gap-1 px-3 py-3 ${i > 0 ? "border-t border-[#2e2e2e]" : ""} ${hasEvidence ? "" : "opacity-50"}`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span
+                              aria-hidden
+                              className={`flex size-[13px] shrink-0 items-center justify-center rounded-full text-[8px] ${hasEvidence ? "bg-[#f2f2f2] text-[#171717]" : "bg-[#333] text-transparent"}`}
+                            >
+                              ✓
+                            </span>
+                            <p className="flex-1 text-[13px] text-[#f2f2f2]">{req.requirement}</p>
+                            <p className="shrink-0 text-[11px] text-[#a0a0a0]">
+                              {hasEvidence ? `기록 ${req.source_card_ids.length}` : "기록 없음"}
+                            </p>
+                          </div>
+                          {req.source_dates.length > 0 && (
+                            <p className="pl-[21px] text-[11px] text-[#828282]">
+                              {req.source_dates.join(" · ")}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {jdRequirements.requirements.some((r) => r.source_card_ids.length === 0) && (
+                    <div className="rounded-[10px] bg-[#181818] px-3 py-2.5">
+                      <p className="text-[11px] text-[#a0a0a0]">
+                        기록이 없는 요구사항은 초안에서 뒤로 밀려요. 지금 새로 기록하시면 반영돼요.
+                      </p>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p className="text-[13px] text-[#a0a0a0]">
+                  공고에서 뽑을 만한 요구사항을 찾지 못했어요. 그래도 초안은 만들 수 있어요.
+                </p>
+              )}
+
+              <button
+                type="button"
+                onClick={handleBuild}
+                disabled={!currentProject || loading}
+                className="w-full rounded-[999px] bg-[#f2f2f2] py-3 text-base font-semibold text-[#171717] transition-colors hover:bg-white disabled:opacity-40"
+              >
+                {loading ? "경력기술서 만드는 중… (최대 10초)" : "이 공고에 맞춰 초안 만들기"}
+              </button>
+            </div>
+          )}
+
+          {(!items || showBuildForm) && !jdRequirements && (
             <div className="flex flex-col gap-3 rounded-[14px] border border-[#2e2e2e] bg-[#1e1e1e] p-4">
               <p className="text-[15px] font-bold text-[#f2f2f2]">지원할 공고가 있나요?</p>
               <p className="text-xs leading-relaxed text-[#a0a0a0]">
@@ -472,17 +658,24 @@ export default function ResumePage() {
                 rows={4}
                 className="w-full resize-none rounded-[14px] border border-[#2e2e2e] bg-[#141414] p-3 text-sm text-[#f2f2f2] placeholder:text-[#5e5e5e] focus:border-[#5e5e5e] focus:outline-none"
               />
+              {requirementsError && (
+                <p className="rounded-lg bg-[#2a1614] px-3 py-2 text-sm text-[#f0645c]">
+                  {requirementsError}
+                </p>
+              )}
               <button
                 type="button"
-                onClick={handleBuild}
-                disabled={!currentProject || loading}
+                onClick={handleAnalyzeJd}
+                disabled={!currentProject || loading || loadingRequirements}
                 className="w-full rounded-[999px] bg-[#f2f2f2] py-3 text-base font-semibold text-[#171717] transition-colors hover:bg-white disabled:opacity-40 disabled:hover:bg-[#f2f2f2]"
               >
-                {loading
-                  ? "경력기술서 만드는 중… (최대 10초)"
-                  : jdText.trim()
-                    ? "공고 분석하기"
-                    : "공고 없이 마스터 버전 만들기"}
+                {loadingRequirements
+                  ? "공고 분석하는 중…"
+                  : loading
+                    ? "경력기술서 만드는 중… (최대 10초)"
+                    : jdText.trim()
+                      ? "공고 분석하기"
+                      : "공고 없이 마스터 버전 만들기"}
               </button>
 
               <div className="h-px w-full bg-[#2e2e2e]" />
@@ -547,7 +740,10 @@ export default function ResumePage() {
             <div className="flex items-center justify-between gap-2">
               <button
                 type="button"
-                onClick={() => setShowBuildForm(true)}
+                onClick={() => {
+                  setShowBuildForm(true);
+                  setJdRequirements(null);
+                }}
                 className="text-xs font-medium text-[#a0a0a0] underline underline-offset-2"
               >
                 JD를 바꿔 다시 만들기
@@ -615,6 +811,17 @@ export default function ResumePage() {
                         onEditField={(field, value) => handleEditField(i, field, value)}
                         onRevertField={(field) => handleRevertField(i, field)}
                       />
+                      <button
+                        type="button"
+                        onClick={() => handleStartQuestions(i)}
+                        disabled={questionsLoadingIndex === i}
+                        className="pb-2 text-left text-[11px] font-medium text-[#828282] underline underline-offset-2 disabled:opacity-50"
+                      >
+                        {questionsLoadingIndex === i ? "점검 중…" : "✨ AI로 초안 점검하기"}
+                      </button>
+                      {questionsMessage?.index === i && (
+                        <p className="pb-2 text-[11px] text-[#828282]">{questionsMessage.text}</p>
+                      )}
                       {i < items.length - 1 && <div className="h-px w-full bg-[#2e2e2e]" />}
                     </div>
                   ))}
