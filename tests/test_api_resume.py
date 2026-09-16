@@ -317,3 +317,128 @@ def test_get_resume_draft_does_not_leak_another_users_draft(client, current_user
 
     assert response.status_code == 200
     assert response.json() == {"project_id": other_project_id, "content": None, "updated_at": None}
+
+
+# --- POST /api/resume/jd-requirements (9/16 신규) ---
+
+
+_MOCK_JD_REQUIREMENTS_RESPONSE = json.dumps(
+    {
+        "job_title": "백엔드 엔지니어",
+        "company": "A은행",
+        "years_label": "경력 3~7년",
+        "requirements": [
+            {"requirement": "캐싱 시스템 설계 경험", "source_indices": [1, 2]},
+            {"requirement": "Kubernetes 운영 경험", "source_indices": []},
+        ],
+    },
+    ensure_ascii=False,
+)
+
+
+def test_jd_requirements_requires_login(client):
+    response = client.post(
+        "/api/resume/jd-requirements", json={"project_id": 1, "jd_text": "백엔드 채용"}
+    )
+    assert response.status_code == 401
+
+
+def test_jd_requirements_matches_cards(client, current_user_id):
+    project_id = db.create_project(current_user_id, "A은행 차세대", "2023-02-01")
+    _seed_cards(current_user_id, project_id)
+
+    with patch("src.parsing.resume._call_llm", return_value=_MOCK_JD_REQUIREMENTS_RESPONSE):
+        response = client.post(
+            "/api/resume/jd-requirements",
+            json={"project_id": project_id, "jd_text": "백엔드 엔지니어 채용, A은행, 경력 3~7년"},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["job_title"] == "백엔드 엔지니어"
+    assert len(body["requirements"]) == 2
+    seeded = db.list_cards(current_user_id, project_id)
+    assert body["requirements"][0]["source_card_ids"] == [seeded[0].id, seeded[1].id]
+    assert body["requirements"][1]["source_card_ids"] == []
+
+
+def test_jd_requirements_ignores_another_users_project_cards(client, current_user_id):
+    other_user_id = db.upsert_user("other-kakao-id", "다른유저", None, "2026-01-01T00:00:00")
+    other_project_id = db.create_project(other_user_id, "다른 유저 프로젝트", "2023-02-01")
+    _seed_cards(other_user_id, other_project_id)
+
+    with patch("src.parsing.resume._call_llm") as mock_llm:
+        response = client.post(
+            "/api/resume/jd-requirements",
+            json={"project_id": other_project_id, "jd_text": "백엔드 채용"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["requirements"] == []
+    mock_llm.assert_not_called()  # 카드가 안 보이니 매칭 자체가 호출되면 안 됨
+
+
+# --- POST /api/resume/star-questions, /api/resume/star-apply-answers (9/16 신규) ---
+
+
+_STAR_ITEM_PAYLOAD = {
+    "title": "가입 배너 전환율 개선",
+    "period": "02.14",
+    "situation": "가입 전환율이 낮았습니다.",
+    "task": "전환율을 높여야 했습니다.",
+    "action": "가입 배너 문구를 A/B 테스트했습니다.",
+    "result": "전환율을 3.2%p 개선했습니다.",
+    "source_dates": ["02.14"],
+    "source_card_ids": [1],
+}
+
+
+def test_star_questions_requires_login(client):
+    response = client.post("/api/resume/star-questions", json={"item": _STAR_ITEM_PAYLOAD})
+    assert response.status_code == 401
+
+
+def test_star_questions_returns_llm_questions(client, current_user_id):
+    mock_response = json.dumps(
+        {"questions": ["왜 그 문구였나요?", "다른 대안은 없었나요?"]}, ensure_ascii=False
+    )
+    with patch("src.parsing.resume._call_llm", return_value=mock_response):
+        response = client.post("/api/resume/star-questions", json={"item": _STAR_ITEM_PAYLOAD})
+
+    assert response.status_code == 200
+    assert response.json()["questions"] == ["왜 그 문구였나요?", "다른 대안은 없었나요?"]
+
+
+def test_star_apply_answers_updates_item(client, current_user_id):
+    mock_response = json.dumps(
+        {
+            "field": "action",
+            "updated_text": "가입 단계 이탈이 문구에 몰려 있다고 판단해 배너 카피부터 A/B 테스트했습니다.",
+        },
+        ensure_ascii=False,
+    )
+    with patch("src.parsing.resume._call_llm", return_value=mock_response):
+        response = client.post(
+            "/api/resume/star-apply-answers",
+            json={
+                "item": _STAR_ITEM_PAYLOAD,
+                "answers": [{"question": "왜 그 문구였나요?", "answer": "이탈이 문구에 몰려 있어서"}],
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["changed_field"] == "action"
+    assert "이탈" in body["updated_item"]["action"]
+    assert body["updated_item"]["situation"] == _STAR_ITEM_PAYLOAD["situation"]
+
+
+def test_star_apply_answers_rejects_more_than_three_answers(client, current_user_id):
+    response = client.post(
+        "/api/resume/star-apply-answers",
+        json={
+            "item": _STAR_ITEM_PAYLOAD,
+            "answers": [{"question": f"q{i}", "answer": f"a{i}"} for i in range(4)],
+        },
+    )
+    assert response.status_code == 422

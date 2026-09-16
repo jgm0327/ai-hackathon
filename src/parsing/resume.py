@@ -26,7 +26,7 @@ SDK를 직접 호출 + JSON 파싱 재시도 패턴을 써왔다. 새 의존성�
 튼튼해졌다(날짜를 잘못 쓸 방법 자체가 없어짐).
 """
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 
 import anthropic
@@ -141,6 +141,94 @@ _ENHANCE_SYSTEM_PROMPT = """\
 """
 
 
+_JD_REQUIREMENTS_SYSTEM_PROMPT = """\
+당신은 채용 공고문을 분석해 핵심 요구사항을 추출하고, 어떤 요구사항에 지원자의 업무
+기록이 있는지 판단하는 전문 커리어 코치입니다.
+
+입력:
+1) 채용 공고 본문
+2) 업무 기록 목록 (각 줄 "[번호] [MM.DD] 정제된 문장 #태그..." 형식, 번호는 고유함)
+
+출력: 반드시 아래 JSON 스키마로만 응답하세요. 다른 설명은 붙이지 마세요.
+
+{{
+  "job_title": "공고에 적힌 직무명 (없으면 빈 문자열)",
+  "company": "공고에 적힌 회사명 (없으면 빈 문자열)",
+  "years_label": "공고에 적힌 요구 연차/경력 (예: '경력 3~7년', 없으면 빈 문자열)",
+  "requirements": [
+    {{
+      "requirement": "요구사항 한 줄 요약 (공고 원문 표현을 최대한 살릴 것)",
+      "source_indices": [이 요구사항과 실제로 관련 있는 업무 기록 번호(정수). 없으면 빈 배열]
+    }}
+  ]
+}}
+
+규칙 (반드시 지킬 것):
+1. requirements는 공고 본문에 실제로 적힌 요구사항만 뽑으세요. 공고에 없는 요구사항을
+   지어내면 안 됩니다. 최대 8개까지만 추출하세요.
+2. source_indices는 그 요구사항과 실제로 관련 있는 기록만 넣으세요. 관련 기록이 없으면
+   억지로 끼워 맞추지 말고 빈 배열로 두세요.
+3. job_title/company/years_label은 공고 본문에 명시적으로 적혀 있을 때만 채우고,
+   추측해서 채우면 안 됩니다.
+"""
+
+
+_STAR_QUESTIONS_SYSTEM_PROMPT = """\
+당신은 경력기술서 STAR 항목을 검토해, 면접관이 파고들 만한 약한 인과관계나 근거
+부족을 찾아 짧은 질문을 만드는 전문 커리어 코치입니다.
+
+입력: STAR 항목 하나 (제목/상황/과제/행동/결과)
+
+출력: 반드시 아래 JSON 스키마로만 응답하세요. 다른 설명은 붙이지 마세요.
+
+{{
+  "questions": ["질문1", "질문2"]
+}}
+
+규칙 (반드시 지킬 것):
+1. 이미 인과관계와 근거가 충분히 명확한 항목이면 questions를 빈 배열로 반환하세요.
+   억지로 질문을 만들지 마세요.
+2. 질문은 최대 3개까지만, "왜 그 방법을 선택했나요?", "다른 대안은 없었나요?"처럼
+   실제 면접에서 나올 법한 것만 만드세요.
+3. 질문은 한 문장으로 짧게 쓰세요.
+"""
+
+
+_STAR_APPLY_ANSWERS_SYSTEM_PROMPT = """\
+당신은 사용자가 직접 답변한 내용을 경력기술서 STAR 항목에 자연스럽게 녹여 다시 쓰는
+전문 커리어 코치입니다.
+
+입력: STAR 항목 하나 + 사용자가 답한 질문-답변 쌍 목록
+
+출력: 반드시 아래 JSON 스키마로만 응답하세요. 다른 설명은 붙이지 마세요.
+
+{{
+  "field": "이유를 반영할 필드. \"action\" 또는 \"result\" 중 하나만",
+  "updated_text": "원래 문장 + 사용자 답변 내용을 자연스럽게 반영한 새 문장"
+}}
+
+규칙 (반드시 지킬 것):
+1. updated_text에는 원래 항목에 있던 정보와 사용자가 직접 답한 내용만 쓰세요. 사용자가
+   말하지 않은 새로운 사실이나 숫자를 지어내면 안 됩니다. 이것이 가장 중요한 규칙입니다.
+2. 자연스러운 한두 문장으로 만들되 과장하지 마세요.
+"""
+
+
+@dataclass
+class JdRequirement:
+    requirement: str
+    source_dates: list[str] = field(default_factory=list)
+    source_card_ids: list[int] = field(default_factory=list)
+
+
+@dataclass
+class JdRequirementsResult:
+    job_title: str
+    company: str
+    years_label: str
+    requirements: list[JdRequirement]
+
+
 @dataclass
 class StarItem:
     title: str
@@ -169,6 +257,15 @@ class EnhancedItem:
     gap_comment: str = ""
     source_dates: list[str] = field(default_factory=list)
     source_card_ids: list[int] = field(default_factory=list)
+
+
+@dataclass
+class StarAnswerResult:
+    """`apply_star_answers()`의 결과 — 어느 필드가 바뀌었는지도 같이 반환해서 프론트가
+    Before/After 대조 화면에서 그 필드만 강조할 수 있게 한다."""
+
+    updated_item: StarItem
+    changed_field: str  # "action" | "result"
 
 
 def build_resume(cards: list[Card], jd_text: str | None = None) -> list[StarItem]:
@@ -323,6 +420,130 @@ def _dicts_to_enhanced_items(
             source_card_ids=[c.id for c in matched_cards],
         ))
     return results
+
+
+def match_jd_requirements(jd_text: str, cards: list[Card]) -> JdRequirementsResult:
+    """채용 공고에서 요구사항을 뽑아, 프로젝트 카드 중 어떤 것이 각 요구사항에 근거가
+    되는지 매칭한다 (9/16 신규 — Figma "4.2-j2 공고 요구사항 매칭").
+
+    build_resume()보다 앞선 단계다: 유저가 JD를 붙여넣으면 이 함수로 먼저 "요구사항
+    N개 중 M개에 기록이 있어요"를 보여준 뒤, 유저가 "이 공고에 맞춰 초안 만들기"를
+    누르면 그때 build_resume(jd_text=...)을 호출한다.
+    """
+    if not jd_text.strip():
+        return JdRequirementsResult(job_title="", company="", years_label="", requirements=[])
+    if not cards:
+        # 카드가 없으면 매칭할 근거 자체가 없다 — LLM을 부를 필요 없이 빈 매칭으로 반환.
+        return JdRequirementsResult(job_title="", company="", years_label="", requirements=[])
+
+    user_prompt = _format_jd_requirements_prompt(jd_text, cards)
+
+    for attempt in range(2):
+        raw_response = _call_llm(user_prompt, _JD_REQUIREMENTS_SYSTEM_PROMPT)
+        try:
+            data = json.loads(_strip_code_fence(raw_response))
+            return _dict_to_jd_requirements_result(data, cards)
+        except (json.JSONDecodeError, KeyError, TypeError):
+            if attempt == 1:
+                raise
+    raise RuntimeError("unreachable")
+
+
+def _format_jd_requirements_prompt(jd_text: str, cards: list[Card]) -> str:
+    card_lines = []
+    for i, card in enumerate(cards, start=1):
+        tags = " ".join(f"#{tag}" for tag in card.skill_tags)
+        card_lines.append(f"[{i}] [{_short_date(card.created_at)}] {card.refined_sentence} {tags}".rstrip())
+    return f"채용 공고 본문:\n{jd_text}\n\n업무 기록:\n" + "\n".join(card_lines)
+
+
+def _dict_to_jd_requirements_result(data: dict, cards: list[Card]) -> JdRequirementsResult:
+    requirements: list[JdRequirement] = []
+    for entry in data.get("requirements", []):
+        requirement_text = entry.get("requirement")
+        if not requirement_text:
+            continue
+        # 환각 방지(CLAUDE.md 2.2): build_resume()과 동일하게 source_indices는
+        # 입력에 실재하는 번호(1..len(cards))만 남긴다.
+        seen: set[int] = set()
+        valid_indices: list[int] = []
+        for i in entry.get("source_indices", []):
+            if isinstance(i, int) and 1 <= i <= len(cards) and i not in seen:
+                seen.add(i)
+                valid_indices.append(i)
+        matched_cards = [cards[i - 1] for i in valid_indices]
+        requirements.append(JdRequirement(
+            requirement=requirement_text,
+            source_dates=[_short_date(c.created_at) for c in matched_cards],
+            source_card_ids=[c.id for c in matched_cards],
+        ))
+    return JdRequirementsResult(
+        job_title=data.get("job_title") or "",
+        company=data.get("company") or "",
+        years_label=data.get("years_label") or "",
+        requirements=requirements,
+    )
+
+
+def _format_star_item_prompt(item: StarItem) -> str:
+    return (
+        f"제목: {item.title} ({item.period})\n"
+        f"상황: {item.situation}\n"
+        f"과제: {item.task}\n"
+        f"행동: {item.action}\n"
+        f"결과: {item.result or '(없음)'}"
+    )
+
+
+def generate_star_questions(item: StarItem) -> list[str]:
+    """STAR 항목 하나를 검토해 면접에서 나올 법한 역질문을 만든다 (9/16 신규 — Figma
+    "4.2-3 AI 역질문"). 이미 근거가 충분하면 빈 배열을 반환한다 — 억지로 질문을 만들지
+    않는다.
+    """
+    user_prompt = _format_star_item_prompt(item)
+
+    for attempt in range(2):
+        raw_response = _call_llm(user_prompt, _STAR_QUESTIONS_SYSTEM_PROMPT)
+        try:
+            data = json.loads(_strip_code_fence(raw_response))
+            questions = data.get("questions", [])
+            return [q for q in questions if isinstance(q, str) and q.strip()][:3]
+        except (json.JSONDecodeError, KeyError, TypeError):
+            if attempt == 1:
+                raise
+    raise RuntimeError("unreachable")
+
+
+def apply_star_answers(item: StarItem, qa_pairs: list[tuple[str, str]]) -> StarAnswerResult:
+    """사용자가 역질문에 답한 내용을 STAR 항목에 반영한다 (9/16 신규 — Figma "4.2-2
+    Before·After 모드 B"). 건너뛴 질문(빈 답변)은 미리 걸러내고 부르는 쪽 책임이다.
+
+    카드 근거가 아니라 사용자가 그 자리에서 직접 쓴 답변이 근거이므로,
+    source_dates/source_card_ids는 원래 항목 값을 그대로 유지한다(새 카드가 생긴 게
+    아니다). 환각 방지는 소스 인덱스 검증이 아니라 프롬프트 제약("사용자가 답하지
+    않은 사실은 추가하지 마라")에 의존한다 — 자유 서술 병합이라 구조적 검증이
+    불가능한 지점이고, 기존 build_resume()의 인과 묶기 품질도 동일한 방식으로
+    프롬프트에만 의존하고 있어 이 코드베이스의 기존 신뢰 수준과 일치한다.
+    """
+    answered = [(q, a) for q, a in qa_pairs if a.strip()]
+    if not answered:
+        return StarAnswerResult(updated_item=item, changed_field="action")
+
+    qa_text = "\n".join(f"Q: {q}\nA: {a}" for q, a in answered)
+    user_prompt = f"{_format_star_item_prompt(item)}\n\n질문-답변:\n{qa_text}"
+
+    for attempt in range(2):
+        raw_response = _call_llm(user_prompt, _STAR_APPLY_ANSWERS_SYSTEM_PROMPT)
+        try:
+            data = json.loads(_strip_code_fence(raw_response))
+            field_name = data.get("field") if data.get("field") in ("action", "result") else "action"
+            updated_text = data.get("updated_text") or getattr(item, field_name)
+            updated_item = replace(item, **{field_name: updated_text})
+            return StarAnswerResult(updated_item=updated_item, changed_field=field_name)
+        except (json.JSONDecodeError, KeyError, TypeError):
+            if attempt == 1:
+                raise
+    raise RuntimeError("unreachable")
 
 
 @lru_cache(maxsize=1)

@@ -38,7 +38,14 @@ from datetime import date, datetime
 
 from src.agent.tag_canonicalizer import canonicalize_tags
 from src.parsing.parser import ParsedEntry, parse_note
-from src.parsing.resume import EnhancedItem, StarItem, build_resume, enhance_resume_items
+from src.parsing.resume import (
+    EnhancedItem,
+    JdRequirementsResult,
+    StarItem,
+    build_resume,
+    enhance_resume_items,
+    match_jd_requirements,
+)
 from src.storage.db import Card, get_card, get_current_project, list_cards, save_card, update_card
 
 logger = logging.getLogger(__name__)
@@ -122,3 +129,13 @@ def enhance_existing_resume(
     """
     cards = list_cards(user_id, project_id)
     return enhance_resume_items(existing_items, cards)
+
+
+def get_jd_requirements(user_id: int, project_id: int, jd_text: str) -> JdRequirementsResult:
+    """채용 공고 요구사항과 프로젝트 카드를 매칭한다 (9/16 신규 — Figma "4.2-j2").
+
+    build_career_doc()/enhance_existing_resume()과 동일하게 list_cards()가 소유권을
+    자동으로 걸러주므로 별도 검증이 필요 없다.
+    """
+    cards = list_cards(user_id, project_id)
+    return match_jd_requirements(jd_text, cards)
