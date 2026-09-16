@@ -346,14 +346,14 @@ export default function ResumePage() {
   };
 
   return (
-    <div className="flex flex-col gap-4 px-5 pb-8">
+    <div className="flex min-h-full flex-col gap-4 bg-[#121212] px-5 pb-8">
       <div className="flex items-center gap-[10px] pb-[6px] pt-[8px]">
-        <Link href="/stack" aria-label="뒤로" className="text-[17px] text-[#18181b]">
+        <Link href="/stack" aria-label="뒤로" className="text-[17px] text-[#f2f2f2]">
           ←
         </Link>
       </div>
 
-      <p className="text-sm text-zinc-500">
+      <p className="text-sm text-[#a0a0a0]">
         {projectsLoading
           ? "프로젝트를 불러오는 중…"
           : currentProject
@@ -364,10 +364,10 @@ export default function ResumePage() {
       {mode === "edit" ? (
         <div className="flex flex-col gap-3">
           <div className="flex items-center justify-between">
-            <p className="text-xs font-medium text-zinc-500">
+            <p className="text-xs font-medium text-[#a0a0a0]">
               직접 수정 중 — 저장하면 다음에 열 때도 그대로 보입니다.
               {draftUpdatedAt && (
-                <span className="block text-[11px] text-zinc-400">
+                <span className="block text-[11px] text-[#828282]">
                   마지막 저장: {formatSavedAt(draftUpdatedAt)}
                 </span>
               )}
@@ -375,7 +375,7 @@ export default function ResumePage() {
             <button
               type="button"
               onClick={() => setMode("ai")}
-              className="shrink-0 text-xs font-medium text-zinc-500 underline underline-offset-2"
+              className="shrink-0 text-xs font-medium text-[#a0a0a0] underline underline-offset-2"
             >
               AI 초안으로 돌아가기
             </button>
@@ -384,35 +384,37 @@ export default function ResumePage() {
             value={draftContent}
             onChange={(e) => setDraftContent(e.target.value)}
             rows={16}
-            className="w-full resize-y rounded-[14px] border border-[#e5e7eb] bg-white p-4 text-[13px] leading-relaxed shadow-sm focus:border-zinc-400 focus:outline-none"
+            className="w-full resize-y rounded-[14px] border border-[#2e2e2e] bg-[#1e1e1e] p-4 text-[13px] leading-relaxed text-[#f2f2f2] focus:border-[#5e5e5e] focus:outline-none"
           />
-          {draftError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{draftError}</p>}
-          <div className="flex flex-col gap-[10px] rounded-[14px] border border-[#e5e7eb] bg-white p-4">
+          {draftError && (
+            <p className="rounded-lg bg-[#2a1614] px-3 py-2 text-sm text-[#f0645c]">{draftError}</p>
+          )}
+          <div className="flex flex-col gap-[10px] rounded-[14px] border border-[#2e2e2e] bg-[#1e1e1e] p-4">
             <div className="flex gap-2">
               <button
                 type="button"
                 onClick={handleSaveDraft}
                 disabled={saving}
-                className="flex flex-1 items-center justify-center rounded-[11px] bg-zinc-900 py-[13px] text-[12px] font-semibold text-white transition-colors hover:bg-zinc-800 disabled:opacity-40"
+                className="flex flex-1 items-center justify-center rounded-[11px] bg-[#f2f2f2] py-[13px] text-[12px] font-semibold text-[#171717] transition-colors hover:bg-white disabled:opacity-40"
               >
                 {saving ? "저장 중…" : saveStatus === "saved" ? "저장됨" : "저장"}
               </button>
               <button
                 type="button"
                 onClick={() => handleCopy("markdown")}
-                className="flex flex-1 items-center justify-center rounded-[11px] border-[1.5px] border-[#e5e7eb] bg-white py-[13px] text-[12px] font-semibold text-[#18181b] transition-colors hover:bg-zinc-50"
+                className="flex flex-1 items-center justify-center rounded-[11px] border-[1.5px] border-[#2e2e2e] bg-[#1c1c1c] py-[13px] text-[12px] font-semibold text-[#f2f2f2] transition-colors hover:bg-[#242424]"
               >
                 {copyStatus === "markdown" ? "복사됨" : "마크다운"}
               </button>
               <button
                 type="button"
                 onClick={() => handleCopy("notion")}
-                className="flex flex-1 items-center justify-center rounded-[11px] border-[1.5px] border-[#e5e7eb] bg-white py-[13px] text-[12px] font-semibold text-[#18181b] transition-colors hover:bg-zinc-50"
+                className="flex flex-1 items-center justify-center rounded-[11px] border-[1.5px] border-[#2e2e2e] bg-[#1c1c1c] py-[13px] text-[12px] font-semibold text-[#f2f2f2] transition-colors hover:bg-[#242424]"
               >
                 {copyStatus === "notion" ? "복사됨" : "노션 복사"}
               </button>
             </div>
-            <Link href="/" className="text-center text-[11px] text-[#a1a1aa]">
+            <Link href="/" className="text-center text-[11px] text-[#828282]">
               다시 기록하러 가기 ↩
             </Link>
           </div>
@@ -427,12 +429,12 @@ export default function ResumePage() {
         <>
           {error && !items ? (
             <div className="flex flex-col items-center gap-4 px-4 py-16">
-              <div className="flex size-14 items-center justify-center rounded-full border-2 border-red-500">
-                <span className="text-xl font-bold text-red-500">!</span>
+              <div className="flex size-12 items-center justify-center rounded-full bg-[#181818]">
+                <span className="h-[18px] w-[3px] rounded-full bg-[#f0645c]" />
               </div>
               <div className="flex flex-col items-center gap-1">
-                <p className="text-[15px] font-semibold text-[#18181b]">초안 생성에 실패했어요</p>
-                <p className="text-center text-[13px] text-zinc-400">
+                <p className="text-[15px] font-semibold text-[#f2f2f2]">초안 생성에 실패했어요</p>
+                <p className="text-center text-[13px] text-[#a0a0a0]">
                   {errorCardCount != null && `저장된 카드 ${errorCardCount}장은 그대로 있습니다.`}
                   {errorCardCount != null && <br />}
                   잠시 후 다시 시도해 주세요.
@@ -442,13 +444,13 @@ export default function ResumePage() {
                 <button
                   type="button"
                   onClick={handleBuild}
-                  className="w-full rounded-[12px] bg-zinc-900 py-4 text-[14px] font-semibold text-white transition-colors hover:bg-zinc-800 active:scale-[0.98]"
+                  className="w-full rounded-[12px] bg-[#f2f2f2] py-4 text-[14px] font-semibold text-[#171717] transition-colors hover:bg-white active:scale-[0.98]"
                 >
                   다시 시도
                 </button>
                 <Link
                   href="/stack"
-                  className="flex w-full items-center justify-center rounded-[12px] border-[1.5px] border-[#e5e7eb] bg-white py-4 text-[14px] font-semibold text-[#18181b] transition-colors hover:bg-zinc-50"
+                  className="flex w-full items-center justify-center rounded-[12px] border-[1.5px] border-[#2e2e2e] bg-[#1c1c1c] py-4 text-[14px] font-semibold text-[#f2f2f2] transition-colors hover:bg-[#242424]"
                 >
                   스택으로 돌아가기
                 </Link>
@@ -457,40 +459,49 @@ export default function ResumePage() {
           ) : (
             <>
           {(!items || showBuildForm) && (
-            <div className="flex flex-col gap-3 rounded-[14px] border border-[#e5e7eb] bg-white p-4">
+            <div className="flex flex-col gap-3 rounded-[14px] border border-[#2e2e2e] bg-[#1e1e1e] p-4">
+              <p className="text-[15px] font-bold text-[#f2f2f2]">지원할 공고가 있나요?</p>
+              <p className="text-xs leading-relaxed text-[#a0a0a0]">
+                공고를 넣으면 그 공고가 요구하는 경험만 골라서 씁니다. 없으면 전체 기록으로 마스터
+                버전을 만들어요.
+              </p>
               <textarea
                 value={jdText}
                 onChange={(e) => setJdText(e.target.value)}
-                placeholder="채용공고 본문을 붙여넣으면 맞춰서 재구성해 드려요 (선택)"
+                placeholder="공고 내용을 붙여넣어 주세요 (선택)"
                 rows={4}
-                className="w-full resize-none rounded-xl border border-zinc-200 bg-white p-3 text-sm shadow-sm focus:border-zinc-400 focus:outline-none"
+                className="w-full resize-none rounded-[14px] border border-[#2e2e2e] bg-[#141414] p-3 text-sm text-[#f2f2f2] placeholder:text-[#5e5e5e] focus:border-[#5e5e5e] focus:outline-none"
               />
               <button
                 type="button"
                 onClick={handleBuild}
                 disabled={!currentProject || loading}
-                className="w-full rounded-xl bg-zinc-900 py-3 text-base font-semibold text-white transition-colors hover:bg-zinc-800 disabled:opacity-40 disabled:hover:bg-zinc-900"
+                className="w-full rounded-[999px] bg-[#f2f2f2] py-3 text-base font-semibold text-[#171717] transition-colors hover:bg-white disabled:opacity-40 disabled:hover:bg-[#f2f2f2]"
               >
-                {loading ? "경력기술서 만드는 중… (최대 10초)" : "경력기술서 만들기"}
+                {loading
+                  ? "경력기술서 만드는 중… (최대 10초)"
+                  : jdText.trim()
+                    ? "공고 분석하기"
+                    : "공고 없이 마스터 버전 만들기"}
               </button>
 
-              <div className="h-px w-full bg-[#e5e7eb]" />
+              <div className="h-px w-full bg-[#2e2e2e]" />
 
               {showPasteSection ? (
                 <div className="flex flex-col gap-2.5">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-[13px] font-semibold text-[#18181b]">
+                    <p className="text-[13px] font-semibold text-[#f2f2f2]">
                       이미 쓰신 경력기술서가 있나요?
                     </p>
                     <button
                       type="button"
                       onClick={() => setShowPasteSection(false)}
-                      className="shrink-0 text-xs font-medium text-zinc-400 underline underline-offset-2"
+                      className="shrink-0 text-xs font-medium text-[#828282] underline underline-offset-2"
                     >
                       건너뛰기
                     </button>
                   </div>
-                  <p className="text-xs text-zinc-500">
+                  <p className="text-xs text-[#a0a0a0]">
                     한 항목만 붙여넣으면 쌓인 기록으로 얼마나 보강되는지 바로 비교해서 보여드려요.
                   </p>
                   <textarea
@@ -498,25 +509,25 @@ export default function ResumePage() {
                     onChange={(e) => setPasteText(e.target.value)}
                     placeholder={"결제 API 성능 개선 담당"}
                     rows={3}
-                    className="w-full resize-none rounded-xl border border-zinc-200 bg-white p-3 text-sm shadow-sm focus:border-zinc-400 focus:outline-none"
+                    className="w-full resize-none rounded-[14px] border border-[#2e2e2e] bg-[#141414] p-3 text-sm text-[#f2f2f2] placeholder:text-[#5e5e5e] focus:border-[#5e5e5e] focus:outline-none"
                   />
-                  <div className="rounded-xl bg-zinc-50 p-3 text-xs text-zinc-500">
-                    <p className="font-medium text-zinc-600">이런 식으로 한 줄이면 충분해요</p>
+                  <div className="rounded-[14px] bg-[#181818] p-3 text-xs text-[#a0a0a0]">
+                    <p className="font-medium text-[#f2f2f2]">이런 식으로 한 줄이면 충분해요</p>
                     <p className="mt-1">결제 API 성능 개선 담당</p>
                     <p>신규 회원 온보딩 플로우 기획</p>
                   </div>
                   {enhanceError && (
-                    <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{enhanceError}</p>
+                    <p className="rounded-lg bg-[#2a1614] px-3 py-2 text-sm text-[#f0645c]">{enhanceError}</p>
                   )}
                   <button
                     type="button"
                     onClick={handleEnhance}
                     disabled={!pasteText.trim() || !currentProject || enhancing}
-                    className="w-full rounded-xl bg-zinc-900 py-3 text-sm font-semibold text-white transition-colors hover:bg-zinc-800 disabled:opacity-40"
+                    className="w-full rounded-[999px] bg-[#f2f2f2] py-3 text-sm font-semibold text-[#171717] transition-colors hover:bg-white disabled:opacity-40"
                   >
                     {enhancing ? "보강하는 중…" : "보강해서 비교하기"}
                   </button>
-                  <p className="text-center text-[11px] text-zinc-400">
+                  <p className="text-center text-[11px] text-[#828282]">
                     없으면 건너뛰세요. 새 경력기술서로 만들어 드려요.
                   </p>
                 </div>
@@ -524,7 +535,7 @@ export default function ResumePage() {
                 <button
                   type="button"
                   onClick={() => setShowPasteSection(true)}
-                  className="text-left text-xs font-medium text-zinc-500 underline underline-offset-2"
+                  className="text-left text-xs font-medium text-[#a0a0a0] underline underline-offset-2"
                 >
                   이미 쓰신 경력기술서가 있나요? (선택)
                 </button>
@@ -537,7 +548,7 @@ export default function ResumePage() {
               <button
                 type="button"
                 onClick={() => setShowBuildForm(true)}
-                className="text-xs font-medium text-zinc-500 underline underline-offset-2"
+                className="text-xs font-medium text-[#a0a0a0] underline underline-offset-2"
               >
                 JD를 바꿔 다시 만들기
               </button>
@@ -545,7 +556,7 @@ export default function ResumePage() {
                 <button
                   type="button"
                   onClick={startEditing}
-                  className="text-xs font-medium text-zinc-900 underline underline-offset-2"
+                  className="text-xs font-medium text-[#f2f2f2] underline underline-offset-2"
                 >
                   직접 수정하기 ✎
                 </button>
@@ -553,20 +564,22 @@ export default function ResumePage() {
             </div>
           )}
 
-          {error && items && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
+          {error && items && (
+            <p className="rounded-lg bg-[#2a1614] px-3 py-2 text-sm text-[#f0645c]">{error}</p>
+          )}
 
           {loading && (
-            <div className="flex flex-col items-center gap-2 rounded-[14px] border border-[#e5e7eb] bg-white px-4 py-8">
+            <div className="flex flex-col items-center gap-2 rounded-[14px] border border-[#2e2e2e] bg-[#1e1e1e] px-4 py-8">
               <span
                 aria-hidden
-                className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-600"
+                className="h-5 w-5 animate-spin rounded-full border-2 border-[#3a3a3a] border-t-[#f2f2f2]"
               />
-              <p className="text-[13px] font-medium text-zinc-600">
+              <p className="text-[13px] font-medium text-[#f2f2f2]">
                 {loadingCardCount != null
                   ? `카드 ${loadingCardCount}장을 조합하고 있어요`
                   : "카드를 조합하고 있어요"}
               </p>
-              <p className="text-[11px] text-zinc-400">보통 10~30초 걸립니다</p>
+              <p className="text-[11px] text-[#a0a0a0]">보통 10~30초 걸립니다</p>
               <div className="flex w-full flex-col gap-3 pt-3">
                 <StarItemSkeleton />
                 <StarItemSkeleton />
@@ -577,21 +590,21 @@ export default function ResumePage() {
           {items && !loading && (
             <>
               {items.length === 0 ? (
-                <p className="px-1 py-8 text-center text-sm text-zinc-400">
+                <p className="px-1 py-8 text-center text-sm text-[#828282]">
                   아직 STAR로 묶을 만한 기록이 없습니다.
                 </p>
               ) : (
-                <div className="flex flex-col rounded-[14px] border border-[#e5e7eb] bg-white p-5">
+                <div className="flex flex-col rounded-[14px] border border-[#2e2e2e] bg-[#1e1e1e] p-5">
                   {(heading || generatedAt) && (
                     <>
-                      {heading && <p className="text-[16px] font-bold text-[#18181b]">{heading}</p>}
+                      {heading && <p className="text-[16px] font-bold text-[#f2f2f2]">{heading}</p>}
                       {generatedAt && displayItems && (
-                        <p className="mt-1 text-[11px] text-zinc-400">
+                        <p className="mt-1 text-[11px] text-[#828282]">
                           {formatGeneratedAt(generatedAt)} ·{" "}
                           {buildResumeMarkdown(heading, displayItems).length.toLocaleString()}자
                         </p>
                       )}
-                      <div className="my-3 h-px w-full bg-[#e5e7eb]" />
+                      <div className="my-3 h-px w-full bg-[#2e2e2e]" />
                     </>
                   )}
                   {(displayItems ?? items).map((item, i) => (
@@ -602,20 +615,20 @@ export default function ResumePage() {
                         onEditField={(field, value) => handleEditField(i, field, value)}
                         onRevertField={(field) => handleRevertField(i, field)}
                       />
-                      {i < items.length - 1 && <div className="h-px w-full bg-[#e5e7eb]" />}
+                      {i < items.length - 1 && <div className="h-px w-full bg-[#2e2e2e]" />}
                     </div>
                   ))}
                 </div>
               )}
 
               {items.length > 0 && (
-                <div className="flex flex-col gap-[10px] rounded-[14px] border border-[#e5e7eb] bg-white p-4">
+                <div className="flex flex-col gap-[10px] rounded-[14px] border border-[#2e2e2e] bg-[#1e1e1e] p-4">
                   <div className="flex gap-2">
                     <button
                       type="button"
                       disabled
                       title="Word(.docx) 내보내기는 아직 준비 중이에요"
-                      className="flex flex-1 cursor-not-allowed flex-col items-center justify-center gap-0.5 rounded-[11px] bg-zinc-200 py-[13px] text-zinc-400"
+                      className="flex flex-1 cursor-not-allowed flex-col items-center justify-center gap-0.5 rounded-[11px] bg-[#181818] py-[13px] text-[#5e5e5e]"
                     >
                       <span className="text-[12px] font-semibold">Word</span>
                       <span className="text-[9px]">준비 중</span>
@@ -623,19 +636,19 @@ export default function ResumePage() {
                     <button
                       type="button"
                       onClick={() => handleCopy("markdown")}
-                      className="flex flex-1 items-center justify-center rounded-[11px] border-[1.5px] border-[#e5e7eb] bg-white py-[13px] text-[12px] font-semibold text-[#18181b] transition-colors hover:bg-zinc-50"
+                      className="flex flex-1 items-center justify-center rounded-[11px] border-[1.5px] border-[#2e2e2e] bg-[#1c1c1c] py-[13px] text-[12px] font-semibold text-[#f2f2f2] transition-colors hover:bg-[#242424]"
                     >
                       {copyStatus === "markdown" ? "복사됨" : "마크다운"}
                     </button>
                     <button
                       type="button"
                       onClick={() => handleCopy("notion")}
-                      className="flex flex-1 items-center justify-center rounded-[11px] border-[1.5px] border-[#e5e7eb] bg-white py-[13px] text-[12px] font-semibold text-[#18181b] transition-colors hover:bg-zinc-50"
+                      className="flex flex-1 items-center justify-center rounded-[11px] border-[1.5px] border-[#2e2e2e] bg-[#1c1c1c] py-[13px] text-[12px] font-semibold text-[#f2f2f2] transition-colors hover:bg-[#242424]"
                     >
                       {copyStatus === "notion" ? "복사됨" : "노션 복사"}
                     </button>
                   </div>
-                  <Link href="/" className="text-center text-[11px] text-[#a1a1aa]">
+                  <Link href="/" className="text-center text-[11px] text-[#828282]">
                     다시 기록하러 가기 ↩
                   </Link>
                 </div>

@@ -1,5 +1,5 @@
 export function SkeletonLine({ className = "" }: { className?: string }) {
-  return <div className={`animate-pulse rounded-md bg-zinc-200 ${className}`} />;
+  return <div className={`animate-pulse rounded-md bg-[#262626] ${className}`} />;
 }
 
 /**
@@ -14,13 +14,13 @@ export function SkeletonLine({ className = "" }: { className?: string }) {
  */
 export function CardResultSkeleton() {
   return (
-    <div className="space-y-3 rounded-xl border border-zinc-200 bg-white p-4">
+    <div className="space-y-3 rounded-xl border border-[#2e2e2e] bg-[#1e1e1e] p-4">
       <div className="flex items-center gap-2">
         <span
           aria-hidden
-          className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-600"
+          className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-[#3a3a3a] border-t-[#f2f2f2]"
         />
-        <p className="text-xs font-medium text-zinc-600">문장을 다듬고 있어요</p>
+        <p className="text-xs font-medium text-[#a0a0a0]">문장을 다듬고 있어요</p>
       </div>
       <SkeletonLine className="h-4 w-full" />
       <SkeletonLine className="h-4 w-5/6" />
@@ -29,7 +29,7 @@ export function CardResultSkeleton() {
         <SkeletonLine className="h-6 w-20 rounded-full" />
         <SkeletonLine className="h-6 w-14 rounded-full" />
       </div>
-      <p className="pt-1 text-center text-[11px] text-zinc-400">
+      <p className="pt-1 text-center text-[11px] text-[#828282]">
         보통 3~10초 걸려요. 이 화면을 벗어나도 저장됩니다.
       </p>
     </div>
@@ -39,7 +39,7 @@ export function CardResultSkeleton() {
 /** `/resume`의 STAR 항목 대기 스켈레톤. */
 export function StarItemSkeleton() {
   return (
-    <div className="space-y-2 rounded-xl border border-zinc-200 bg-white p-4">
+    <div className="space-y-2 rounded-xl border border-[#2e2e2e] bg-[#1e1e1e] p-4">
       <SkeletonLine className="h-4 w-1/2" />
       <SkeletonLine className="h-3 w-full" />
       <SkeletonLine className="h-3 w-5/6" />

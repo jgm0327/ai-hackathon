@@ -42,14 +42,14 @@ export function ResumeCompareCarousel({
   };
 
   return (
-    <div className="flex flex-col gap-4 rounded-[14px] border border-[#e5e7eb] bg-white p-4">
+    <div className="flex flex-col gap-4 rounded-[14px] border border-[#2e2e2e] bg-[#1e1e1e] p-4">
       <div className="flex items-center justify-between">
-        <button type="button" onClick={onCancel} aria-label="뒤로" className="text-[17px] text-[#18181b]">
+        <button type="button" onClick={onCancel} aria-label="뒤로" className="text-[17px] text-[#f2f2f2]">
           ←
         </button>
-        <p className="text-sm font-semibold text-[#18181b]">보강 결과</p>
+        <p className="text-sm font-semibold text-[#f2f2f2]">보강 결과</p>
         {items.length > 1 ? (
-          <p className="w-[40px] text-right text-xs text-zinc-400">
+          <p className="w-[40px] text-right text-xs text-[#828282]">
             {index + 1} / {items.length}
           </p>
         ) : (
@@ -57,22 +57,22 @@ export function ResumeCompareCarousel({
         )}
       </div>
 
-      <div className="flex flex-col gap-1.5 rounded-xl bg-zinc-100 p-3">
-        <p className="text-[11px] font-medium text-zinc-500">기존</p>
-        <p className="text-[13px] leading-relaxed text-zinc-600">{item.original}</p>
+      <div className="flex flex-col gap-1.5 rounded-xl bg-[#181818] p-3">
+        <p className="text-[11px] font-medium text-[#a0a0a0]">기존</p>
+        <p className="text-[13px] leading-relaxed text-[#a0a0a0]">{item.original}</p>
       </div>
 
       {hasEvidence ? (
         <>
-          <p className="text-center text-xs text-zinc-400">
+          <p className="text-center text-xs text-[#828282]">
             ↓ 기록 {item.source_card_ids.length}건으로 보강
           </p>
 
-          <div className="flex flex-col gap-1.5 rounded-xl border border-zinc-900 bg-white p-3">
-            <p className="text-[11px] font-medium text-zinc-500">보강</p>
-            <p className="text-[13px] leading-relaxed text-[#18181b]">{item.enhanced}</p>
+          <div className="flex flex-col gap-1.5 rounded-xl border border-[#f2f2f2] bg-[#141414] p-3">
+            <p className="text-[11px] font-medium text-[#a0a0a0]">보강</p>
+            <p className="text-[13px] leading-relaxed text-[#f2f2f2]">{item.enhanced}</p>
             <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-              <span className="text-[11px] font-medium text-zinc-400">근거</span>
+              <span className="text-[11px] font-medium text-[#828282]">근거</span>
               {item.source_dates.map((date, i) => {
                 // source_dates/source_card_ids는 백엔드가 같은 검증된 카드에서 같이
                 // 계산해서 인덱스가 항상 맞물린다(StarItemCard.tsx와 동일한 패턴).
@@ -83,7 +83,7 @@ export function ResumeCompareCarousel({
                     type="button"
                     disabled={cardId == null}
                     onClick={() => cardId != null && router.push(`/stack?cardId=${cardId}`)}
-                    className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-500 transition-colors hover:bg-zinc-200 disabled:cursor-default"
+                    className="rounded-full bg-[#242424] px-2 py-0.5 text-xs text-[#a0a0a0] transition-colors hover:bg-[#2e2e2e] disabled:cursor-default"
                   >
                     {date}
                   </button>
@@ -93,14 +93,14 @@ export function ResumeCompareCarousel({
           </div>
 
           {item.gap_comment && (
-            <div className="flex gap-2 rounded-xl bg-zinc-50 p-3">
-              <span aria-hidden className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-900" />
-              <p className="flex-1 text-[12px] leading-relaxed text-zinc-600">{item.gap_comment}</p>
+            <div className="flex gap-2 rounded-xl bg-[#181818] p-3">
+              <span aria-hidden className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[#f2f2f2]" />
+              <p className="flex-1 text-[12px] leading-relaxed text-[#a0a0a0]">{item.gap_comment}</p>
             </div>
           )}
         </>
       ) : (
-        <p className="px-1 py-2 text-center text-xs text-zinc-400">
+        <p className="px-1 py-2 text-center text-xs text-[#828282]">
           아직 관련된 기록을 찾지 못했어요. 원문 그대로 둘게요.
         </p>
       )}
@@ -109,7 +109,7 @@ export function ResumeCompareCarousel({
         <button
           type="button"
           onClick={() => advance(item.original)}
-          className="flex-1 rounded-[11px] border-[1.5px] border-[#e5e7eb] bg-white py-[13px] text-[12px] font-semibold text-[#18181b] transition-colors hover:bg-zinc-50"
+          className="flex-1 rounded-[11px] border-[1.5px] border-[#2e2e2e] bg-[#1c1c1c] py-[13px] text-[12px] font-semibold text-[#f2f2f2] transition-colors hover:bg-[#242424]"
         >
           그대로 두기
         </button>
@@ -117,7 +117,7 @@ export function ResumeCompareCarousel({
           type="button"
           onClick={() => advance(item.enhanced)}
           disabled={!hasEvidence}
-          className="flex-1 rounded-[11px] bg-zinc-900 py-[13px] text-[12px] font-semibold text-white transition-colors hover:bg-zinc-800 disabled:opacity-40"
+          className="flex-1 rounded-[11px] bg-[#f2f2f2] py-[13px] text-[12px] font-semibold text-[#171717] transition-colors hover:bg-white disabled:opacity-40"
         >
           적용
         </button>
@@ -128,7 +128,7 @@ export function ResumeCompareCarousel({
           {items.map((_, i) => (
             <span
               key={i}
-              className={`h-1.5 w-1.5 rounded-full ${i === index ? "bg-zinc-900" : "bg-zinc-200"}`}
+              className={`h-1.5 w-1.5 rounded-full ${i === index ? "bg-[#f2f2f2]" : "bg-[#3a3a3a]"}`}
             />
           ))}
         </div>

@@ -92,23 +92,23 @@ export function StarItemSection({
   return (
     <div className="flex flex-col gap-2.5 py-4">
       <div className="flex items-center gap-2">
-        <p className="text-[14px] font-bold text-[#18181b]">{item.title}</p>
+        <p className="text-[14px] font-bold text-[#f2f2f2]">{item.title}</p>
         <div className="flex-1" />
-        <p className="text-right text-[10px] text-[#a1a1aa]">{item.period}</p>
+        <p className="text-right text-[10px] text-[#828282]">{item.period}</p>
       </div>
 
       <div className="flex flex-col gap-2">
         {rows.map((row) => (
           <div key={row.label} className="flex gap-[10px]">
             <div className="flex w-[30px] shrink-0 items-start gap-1">
-              <p className="text-[11px] font-semibold text-black">{row.label}</p>
+              <p className="text-[11px] font-semibold text-[#f2f2f2]">{row.label}</p>
             </div>
-            <p className="flex-1 text-[12px] leading-relaxed text-[#18181b]">{row.value}</p>
+            <p className="flex-1 text-[12px] leading-relaxed text-[#d4d4d4]">{row.value}</p>
             <button
               type="button"
               onClick={() => openEditSheet(row.field, row.value)}
               aria-label={`${row.label} 문장 수정`}
-              className="shrink-0 text-[11px] text-[#a1a1aa] hover:text-zinc-600"
+              className="shrink-0 text-[11px] text-[#828282] hover:text-[#a0a0a0]"
             >
               ✎
             </button>
@@ -117,17 +117,17 @@ export function StarItemSection({
 
         <div className="flex gap-[10px]">
           <div className="w-[30px] shrink-0">
-            <p className="text-[11px] font-semibold text-black">결과</p>
+            <p className="text-[11px] font-semibold text-[#f2f2f2]">결과</p>
           </div>
           <div className="flex flex-1 flex-col gap-1.5">
             {item.result ? (
               <div className="flex gap-[10px]">
-                <p className="flex-1 text-[12px] leading-relaxed text-[#18181b]">{item.result}</p>
+                <p className="flex-1 text-[12px] leading-relaxed text-[#d4d4d4]">{item.result}</p>
                 <button
                   type="button"
                   onClick={() => openEditSheet("result", item.result)}
                   aria-label="결과 문장 수정"
-                  className="shrink-0 text-[11px] text-[#a1a1aa] hover:text-zinc-600"
+                  className="shrink-0 text-[11px] text-[#828282] hover:text-[#a0a0a0]"
                 >
                   ✎
                 </button>
@@ -146,14 +146,14 @@ export function StarItemSection({
                   }}
                   placeholder="예: 오류율 0.8%→0.3%, 처리 속도 10배"
                   autoFocus
-                  className="w-full rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-[#18181b] placeholder:text-amber-400 focus:border-amber-400 focus:outline-none"
+                  className="w-full rounded-md border border-amber-800 bg-[#241a08] px-2.5 py-1.5 text-xs text-[#f2f2f2] placeholder:text-amber-700 focus:border-amber-600 focus:outline-none"
                 />
                 <div className="flex gap-2">
                   <button
                     type="button"
                     onClick={handleApplyResult}
                     disabled={!resultInput.trim()}
-                    className="rounded-full bg-black px-2.5 py-1 text-xs font-medium text-white disabled:opacity-40"
+                    className="rounded-full bg-[#f2f2f2] px-2.5 py-1 text-xs font-medium text-[#171717] disabled:opacity-40"
                   >
                     적용
                   </button>
@@ -163,7 +163,7 @@ export function StarItemSection({
                       setShowResultInput(false);
                       setResultInput("");
                     }}
-                    className="rounded-full border border-zinc-200 px-2.5 py-1 text-xs text-zinc-500"
+                    className="rounded-full border border-[#2e2e2e] px-2.5 py-1 text-xs text-[#a0a0a0]"
                   >
                     취소
                   </button>
@@ -175,14 +175,14 @@ export function StarItemSection({
                   type="button"
                   title="기록에 숫자가 없어 비워두었습니다. 기억나신다면 여기 바로 적어보세요."
                   onClick={() => setShowResultInput(true)}
-                  className="w-fit rounded-full bg-amber-50 px-2.5 py-1 text-xs text-amber-700 transition-colors hover:bg-amber-100"
+                  className="w-fit rounded-full bg-[#2a2109] px-2.5 py-1 text-xs text-amber-400 transition-colors hover:bg-[#332810]"
                 >
                   숫자를 기억하시나요? (건너뛰기)
                 </button>
                 <button
                   type="button"
                   onClick={() => router.push("/")}
-                  className="text-[11px] text-[#a1a1aa] underline underline-offset-2"
+                  className="text-[11px] text-[#828282] underline underline-offset-2"
                 >
                   또는 입력 화면에서 새 기록으로 남기기
                 </button>
@@ -194,7 +194,7 @@ export function StarItemSection({
                 <button
                   type="button"
                   onClick={() => setShowSources((v) => !v)}
-                  className="text-[11px] font-medium text-[#a1a1aa] underline underline-offset-2"
+                  className="text-[11px] font-medium text-[#828282] underline underline-offset-2"
                 >
                   이 문장의 근거 {showSources ? "숨기기" : "보기"}
                 </button>
@@ -212,7 +212,7 @@ export function StarItemSection({
                           type="button"
                           disabled={cardId == null}
                           onClick={() => cardId != null && router.push(`/stack?cardId=${cardId}`)}
-                          className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-500 transition-colors hover:bg-zinc-200 disabled:cursor-default disabled:hover:bg-zinc-100"
+                          className="rounded-full bg-[#242424] px-2 py-0.5 text-xs text-[#a0a0a0] transition-colors hover:bg-[#2e2e2e] disabled:cursor-default disabled:hover:bg-[#242424]"
                         >
                           {date}
                         </button>
@@ -232,23 +232,23 @@ export function StarItemSection({
         open={editingField !== null}
         onClose={() => setEditingField(null)}
         hideHandle
-        panelClassName="relative w-full max-w-md rounded-tl-[24px] rounded-tr-[24px] bg-white px-5 pt-4 pb-[30px] shadow-xl"
+        panelClassName="relative w-full max-w-md rounded-tl-[24px] rounded-tr-[24px] bg-[#1e1e1e] px-5 pt-4 pb-[30px] shadow-xl"
       >
         <div className="flex flex-col gap-3">
           <div className="flex items-center justify-between">
             <button
               type="button"
               onClick={() => setEditingField(null)}
-              className="text-[13px] text-[#a1a1aa]"
+              className="text-[13px] text-[#828282]"
             >
               취소
             </button>
-            <p className="text-[14px] font-semibold text-[#18181b]">문장 수정</p>
+            <p className="text-[14px] font-semibold text-[#f2f2f2]">문장 수정</p>
             <button
               type="button"
               onClick={handleSaveEdit}
               disabled={!editValue.trim()}
-              className="text-[13px] font-semibold text-[#18181b] disabled:opacity-40"
+              className="text-[13px] font-semibold text-[#f2f2f2] disabled:opacity-40"
             >
               저장
             </button>
@@ -258,16 +258,16 @@ export function StarItemSection({
             onChange={(e) => setEditValue(e.target.value)}
             autoFocus
             rows={4}
-            className="w-full resize-none rounded-[12px] border border-[#e5e7eb] bg-white p-3 text-[13px] leading-relaxed text-[#18181b] focus:border-zinc-400 focus:outline-none"
+            className="w-full resize-none rounded-[12px] border border-[#2e2e2e] bg-[#141414] p-3 text-[13px] leading-relaxed text-[#f2f2f2] focus:border-[#5e5e5e] focus:outline-none"
           />
           <div className="flex items-center justify-between">
-            <p className="text-[11px] text-[#a1a1aa]">직접 고친 문장은 다시 변환해도 유지돼요</p>
-            <p className="shrink-0 text-[11px] text-[#a1a1aa]">{editValue.length}자</p>
+            <p className="text-[11px] text-[#828282]">직접 고친 문장은 다시 변환해도 유지돼요</p>
+            <p className="shrink-0 text-[11px] text-[#828282]">{editValue.length}자</p>
           </div>
           <button
             type="button"
             onClick={handleRevertEdit}
-            className="w-fit rounded-full bg-zinc-100 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-200"
+            className="w-fit rounded-full bg-[#242424] px-3 py-1.5 text-xs font-medium text-[#a0a0a0] transition-colors hover:bg-[#2e2e2e]"
           >
             AI 문장으로 되돌리기
           </button>
