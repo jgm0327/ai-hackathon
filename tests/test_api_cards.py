@@ -4,6 +4,7 @@ DB 격리와 로그인 유저 오버라이드는 tests/conftest.py의 `_isolated
 `current_user_id` 픽스처가 담당한다(9/14 카카오 로그인 Phase B).
 """
 import json
+import re
 from unittest.mock import patch
 
 import pytest
@@ -61,6 +62,8 @@ def test_create_card_returns_201_with_parsed_fields(client, current_user_id):
     assert "created_at" in body
     # 9/16 신규 — 결과 출력 모달(Figma 41:139) 문구.
     assert body["case_summary"] == "오늘 기록은 결제 API 성능 개선 케이스입니다."
+    # 9/16 신규 — 홈 화면(Figma 100:692) "오늘 남긴 것" 목록용 "HH:MM" 시각.
+    assert re.fullmatch(r"\d{2}:\d{2}", body["created_time"])
 
 
 def test_create_card_auto_assigns_current_project(client, current_user_id):
@@ -346,3 +349,50 @@ def test_bundle_cards_into_project_ignores_another_users_card_ids(client, curren
     project_id = response.json()["id"]
     assert db.get_card(current_user_id, my_card_id).project_id == project_id
     assert db.get_card(other_user_id, other_card_id).project_id is None
+
+
+# --- GET /api/cards/skill-summary (9/16 신규, Figma 100:692 홈 화면 버블 차트) ---
+
+
+def test_skill_summary_requires_login(client):
+    response = client.get("/api/cards/skill-summary", params={"project_id": 1})
+    assert response.status_code == 401
+
+
+def test_skill_summary_aggregates_by_representative_tag(client, current_user_id):
+    project_id = db.create_project(current_user_id, "A은행 차세대", "2023-02-01")
+    db.save_card(
+        current_user_id,
+        project_id,
+        ParsedEntry(raw_text="a", refined_sentence="a", skill_tags=["Redis", "성능최적화"], confidence=0.9),
+        "2023-02-14",
+    )
+    db.save_card(
+        current_user_id,
+        project_id,
+        ParsedEntry(raw_text="b", refined_sentence="b", skill_tags=["Redis"], confidence=0.9),
+        "2023-02-15",
+    )
+
+    response = client.get("/api/cards/skill-summary", params={"project_id": project_id})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total_cards"] == 2
+    assert body["categories"] == [{"tag": "Redis", "count": 2}]
+
+
+def test_skill_summary_ignores_another_users_project(client, current_user_id):
+    other_user_id = db.upsert_user("other-kakao-id", "다른유저", None, "2026-01-01T00:00:00")
+    other_project_id = db.create_project(other_user_id, "다른 유저 프로젝트", "2023-02-01")
+    db.save_card(
+        other_user_id,
+        other_project_id,
+        ParsedEntry(raw_text="x", refined_sentence="x", skill_tags=["Redis"], confidence=0.9),
+        "2023-02-14",
+    )
+
+    response = client.get("/api/cards/skill-summary", params={"project_id": other_project_id})
+
+    assert response.status_code == 200
+    assert response.json() == {"total_cards": 0, "categories": []}

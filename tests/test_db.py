@@ -53,6 +53,16 @@ def test_save_and_list_cards_roundtrip(user_id):
     assert card.skill_tags == parsed.skill_tags
     assert card.confidence == parsed.confidence
     assert card.created_at == "2023-02-14"
+    assert card.created_time is None  # created_time을 안 넘기면 null (하위 호환)
+
+
+def test_save_card_stores_created_time(user_id):
+    """9/16 신규 — 홈 화면 "오늘 남긴 것" 목록용 시각."""
+    card_id = db.save_card(user_id, None, _make_parsed(), "2023-02-14", "09:40")
+
+    card = db.get_card(user_id, card_id)
+    assert card.created_time == "09:40"
+    assert card.created_at == "2023-02-14"  # 날짜 필드는 그대로 영향 없음
 
 
 def test_get_card_returns_matching_card(user_id):
@@ -486,3 +496,66 @@ def test_bulk_assign_cards_to_project_ignores_another_users_cards(user_id):
 def test_bulk_assign_cards_to_project_empty_list_is_noop(user_id):
     project_id = db.create_project(user_id, "새 프로젝트", "2023-02-01")
     assert db.bulk_assign_cards_to_project(user_id, [], project_id) == 0
+
+
+# --- get_skill_category_counts() — 홈 화면 "무엇이 쌓였나요" 버블 (9/16 신규) ---
+
+
+def test_skill_category_counts_uses_first_tag_as_representative(user_id):
+    """카드 한 장은 태그가 여러 개여도 대표 태그(skill_tags[0]) 하나로만 집계된다."""
+    project_id = db.create_project(user_id, "프로젝트", "2023-02-01")
+    db.save_card(user_id, project_id, _make_parsed("a", skill_tags=["Redis", "성능최적화"]), "2023-02-14")
+    db.save_card(user_id, project_id, _make_parsed("b", skill_tags=["Redis"]), "2023-02-15")
+    db.save_card(user_id, project_id, _make_parsed("c", skill_tags=["결제시스템"]), "2023-02-16")
+
+    result = db.get_skill_category_counts(user_id, project_id)
+
+    assert dict(result) == {"Redis": 2, "결제시스템": 1}
+    assert sum(count for _, count in result) == 3  # 전체 카드 수와 항상 일치
+
+
+def test_skill_category_counts_buckets_tagless_cards_as_uncategorized(user_id):
+    project_id = db.create_project(user_id, "프로젝트", "2023-02-01")
+    # _make_parsed(skill_tags=[])는 헬퍼 내부의 `skill_tags or [...]` 기본값 처리 때문에
+    # 빈 리스트가 그대로 안 넘어간다 — 진짜 빈 태그를 재현하려면 직접 구성해야 한다.
+    tagless = ParsedEntry(raw_text="무모호", refined_sentence="[정제됨] 무모호", skill_tags=[], confidence=0.1)
+    db.save_card(user_id, project_id, tagless, "2023-02-14")
+
+    result = db.get_skill_category_counts(user_id, project_id)
+
+    assert result == [("미분류", 1)]
+
+
+def test_skill_category_counts_overflow_beyond_top_n_merges_into_uncategorized(user_id):
+    """top_n을 넘는 카테고리는 상위 N개만 이름이 남고 나머지는 전부 "미분류"로 합쳐진다."""
+    project_id = db.create_project(user_id, "프로젝트", "2023-02-01")
+    # 5개 서로 다른 태그, 각각 카드 수를 다르게 줘서 순위가 명확하게 갈리게 한다.
+    for tag, count in [("A", 5), ("B", 4), ("C", 3), ("D", 2), ("E", 1)]:
+        for i in range(count):
+            db.save_card(user_id, project_id, _make_parsed(f"{tag}-{i}", skill_tags=[tag]), "2023-02-14")
+
+    result = db.get_skill_category_counts(user_id, project_id, top_n=4)
+
+    assert result == [("A", 5), ("B", 4), ("C", 3), ("D", 2), ("미분류", 1)]
+    assert sum(count for _, count in result) == 15
+
+
+def test_skill_category_counts_no_uncategorized_bucket_when_nothing_overflows(user_id):
+    """상위 top_n 안에 전부 들어가고 태그 없는 카드도 없으면 "미분류" 자체가 안 나온다."""
+    project_id = db.create_project(user_id, "프로젝트", "2023-02-01")
+    db.save_card(user_id, project_id, _make_parsed(skill_tags=["Redis"]), "2023-02-14")
+
+    result = db.get_skill_category_counts(user_id, project_id, top_n=4)
+
+    assert result == [("Redis", 1)]
+
+
+def test_skill_category_counts_scoped_to_project(user_id):
+    project_a = db.create_project(user_id, "A", "2023-02-01")
+    project_b = db.create_project(user_id, "B", "2023-02-01")
+    db.save_card(user_id, project_a, _make_parsed(skill_tags=["Redis"]), "2023-02-14")
+    db.save_card(user_id, project_b, _make_parsed(skill_tags=["결제시스템"]), "2023-02-14")
+
+    result = db.get_skill_category_counts(user_id, project_a)
+
+    assert result == [("Redis", 1)]

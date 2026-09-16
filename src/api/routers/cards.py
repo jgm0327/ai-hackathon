@@ -30,6 +30,8 @@ from src.api.schemas import (
     CardResponse,
     CardTagsUpdateRequest,
     ProjectResponse,
+    SkillCategoryCount,
+    SkillSummaryResponse,
     UnclassifiedSuggestionsResponse,
 )
 from src.auth.deps import get_current_user
@@ -73,6 +75,23 @@ def list_cards_endpoint(
     # API 계약(최신순)에 맞추기 위해 여기서만 뒤집는다.
     cards = list(reversed(db.list_cards(current_user.id, project_id)))
     return CardListResponse(cards=[CardResponse.model_validate(c) for c in cards])
+
+
+@router.get("/cards/skill-summary", response_model=SkillSummaryResponse)
+def get_skill_summary(
+    project_id: int, current_user: db.User = Depends(get_current_user)
+) -> SkillSummaryResponse:
+    """홈 화면(Figma 100:692) "무엇이 쌓였나요" 버블 차트 (9/16 신규).
+
+    `db.get_skill_category_counts()`가 이미 카드를 대표 태그 기준으로 집계해서
+    반환하므로 여기서는 그대로 스키마에 얹기만 한다.
+    """
+    cards = db.list_cards(current_user.id, project_id)
+    categories = db.get_skill_category_counts(current_user.id, project_id)
+    return SkillSummaryResponse(
+        total_cards=len(cards),
+        categories=[SkillCategoryCount(tag=tag, count=count) for tag, count in categories],
+    )
 
 
 @router.delete("/cards/{card_id}", status_code=204)
