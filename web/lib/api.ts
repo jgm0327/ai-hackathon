@@ -197,8 +197,11 @@ export interface SkillSummary {
   categories: SkillCategoryCount[];
 }
 
-export function getSkillSummary(projectId: number): Promise<SkillSummary> {
-  return request<SkillSummary>(`/cards/skill-summary?project_id=${projectId}`);
+/** `topN` 생략 시 서버 기본값(4, 홈 화면 버블용). `/stack` "역량 리스트"(Figma
+ * 100:692 "4.1-h")처럼 개수 제한 없이 사실상 전부 받고 싶으면 큰 값을 넘긴다. */
+export function getSkillSummary(projectId: number, topN?: number): Promise<SkillSummary> {
+  const topNQuery = typeof topN === "number" ? `&top_n=${topN}` : "";
+  return request<SkillSummary>(`/cards/skill-summary?project_id=${projectId}${topNQuery}`);
 }
 
 /**
