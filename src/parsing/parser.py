@@ -21,6 +21,11 @@ class ParsedEntry:
     refined_sentence: str
     skill_tags: list[str] = field(default_factory=list)
     confidence: float = 0.0
+    # 9/16 신규 — 결과 출력 모달(Figma 41:139) "오늘 기록은 ~~ 케이스입니다" 문구.
+    # refined_sentence를 압축 요약한 것일 뿐 새 사실을 담지 않는다(CLAUDE.md 2.2).
+    # DB 컬럼이 아니다 — POST /api/cards 응답에만 실리고 저장되지 않는다
+    # (refinement_failed와 동일한 패턴, src/api/routers/cards.py 참고).
+    case_summary: str = ""
 
 
 @lru_cache(maxsize=1)
@@ -115,6 +120,7 @@ def parse_note(raw_text: str) -> ParsedEntry:
                 refined_sentence=data["refined_sentence"],
                 skill_tags=data.get("skill_tags", []),
                 confidence=float(data.get("confidence", 0.0)),
+                case_summary=data.get("case_summary", ""),
             )
         except (json.JSONDecodeError, KeyError):
             if attempt == 1:

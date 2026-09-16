@@ -18,6 +18,7 @@ MOCK_LLM_RESPONSE = json.dumps(
         "refined_sentence": "결제 API 응답 지연을 해소하기 위해 Redis 캐싱 레이어를 도입했습니다.",
         "skill_tags": ["Redis", "성능최적화", "결제시스템"],
         "confidence": 0.91,
+        "case_summary": "오늘 기록은 결제 API 성능 개선 케이스입니다.",
     },
     ensure_ascii=False,
 )
@@ -58,6 +59,8 @@ def test_create_card_returns_201_with_parsed_fields(client, current_user_id):
     assert body["project_id"] is None
     assert "id" in body
     assert "created_at" in body
+    # 9/16 신규 — 결과 출력 모달(Figma 41:139) 문구.
+    assert body["case_summary"] == "오늘 기록은 결제 API 성능 개선 케이스입니다."
 
 
 def test_create_card_auto_assigns_current_project(client, current_user_id):

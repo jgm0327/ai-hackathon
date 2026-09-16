@@ -46,6 +46,7 @@ def create_card(
     card = db.get_card(current_user.id, result["card_id"])
     response = CardResponse.model_validate(card)
     response.refinement_failed = result["refinement_failed"]
+    response.case_summary = result["parsed"].case_summary
     return response
 
 

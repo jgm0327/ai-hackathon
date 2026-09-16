@@ -44,6 +44,11 @@ class CardResponse(_FromAttributes):
     # true. DB 컬럼이 아니라 생성 시점에 라우터가 채워 넣는 값이라, GET/PATCH 응답은
     # 항상 기본값 False다 (docs/05-api-contract.md 참고).
     refinement_failed: bool = False
+    # 9/16 신규 — 결과 출력 모달(Figma 41:139) "오늘 기록은 ~~ 케이스입니다" 문구.
+    # refinement_failed와 동일한 패턴: DB 컬럼이 아니라 POST /api/cards 생성 시점에만
+    # 라우터가 채워 넣는다. GET/PATCH 응답에서는 항상 빈 문자열(카드 저장 후에는
+    # 다시 보여줄 이유가 없는, 생성 순간 전용 문구라서).
+    case_summary: str = ""
 
 
 class CardListResponse(BaseModel):
