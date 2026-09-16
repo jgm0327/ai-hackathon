@@ -16,7 +16,12 @@ import {
   listCards,
   saveResumeDraft,
 } from "@/lib/api";
-import { buildResumeCached, peekCachedResume, updateCachedResumeItems } from "@/lib/resumeCache";
+import {
+  buildResumeCached,
+  peekCachedResume,
+  peekCachedResumeGeneratedAt,
+  updateCachedResumeItems,
+} from "@/lib/resumeCache";
 import { useProjects } from "@/lib/useProjects";
 
 /** 프로필/프로젝트에서 실제로 있는 값만으로 문서 제목을 만든다 — 없는 정보를
@@ -45,6 +50,13 @@ function buildResumeMarkdown(heading: string | null, items: StarItem[]): string 
   if (heading) parts.push(`# ${heading}`);
   parts.push(...items.map(toMarkdownSection));
   return parts.join("\n\n");
+}
+
+/** 생성 시각(ISO)을 "생성 9/14" 형태로 (Figma 41:236 "생성 2/18 · 3,420자"). */
+function formatGeneratedAt(iso: string): string | null {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return `생성 ${d.getMonth() + 1}/${d.getDate()}`;
 }
 
 /** 저장 시각(ISO)을 "9월 14일 21:05" 형태로. 유효하지 않으면 원본 문자열 그대로. */
@@ -96,6 +108,8 @@ export default function ResumePage() {
   // "숫자 되묻기" 인라인 입력(9/15 신규)이 캐시를 정확한 키로 갱신하려면, 지금
   // 보고 있는 items가 어떤 jdText로 생성됐는지 알아야 한다(캐시 키 = projectId+jdText).
   const [builtJdText, setBuiltJdText] = useState<string | undefined>(undefined);
+  // Figma 41:236 "생성 2/18 · 3,420자" 메타 표시용 (9/16 신규).
+  const [generatedAt, setGeneratedAt] = useState<string | null>(null);
 
   const [mode, setMode] = useState<"ai" | "edit">("ai");
   const [draftContent, setDraftContent] = useState("");
@@ -139,6 +153,7 @@ export default function ResumePage() {
     setPasteText("");
     setEnhanceError(null);
     setCompareItems(null);
+    setGeneratedAt(null);
   }, [currentProject?.id]);
 
   // 새로고침해도 방금 만든 경력기술서가 사라진 것처럼 보이지 않게, 마운트 시점에
@@ -154,6 +169,7 @@ export default function ResumePage() {
       setItems(cached);
       setShowBuildForm(false);
       setBuiltJdText(undefined); // 이 캐시 조회 자체가 jdText 없이 한 것과 같은 키
+      setGeneratedAt(peekCachedResumeGeneratedAt(currentProject.id));
     }
   }, [currentProject]);
 
@@ -188,6 +204,7 @@ export default function ResumePage() {
       const result = await buildResumeCached(currentProject.id, { jdText: usedJdText });
       setItems(result);
       setBuiltJdText(usedJdText);
+      setGeneratedAt(peekCachedResumeGeneratedAt(currentProject.id, usedJdText));
       setShowBuildForm(false);
       setMode("ai");
     } catch (err) {
@@ -520,9 +537,15 @@ export default function ResumePage() {
                 </p>
               ) : (
                 <div className="flex flex-col rounded-[14px] border border-[#e5e7eb] bg-white p-5">
-                  {heading && (
+                  {(heading || generatedAt) && (
                     <>
-                      <p className="text-[16px] font-bold text-[#18181b]">{heading}</p>
+                      {heading && <p className="text-[16px] font-bold text-[#18181b]">{heading}</p>}
+                      {generatedAt && (
+                        <p className="mt-1 text-[11px] text-zinc-400">
+                          {formatGeneratedAt(generatedAt)} ·{" "}
+                          {buildResumeMarkdown(heading, items).length.toLocaleString()}자
+                        </p>
+                      )}
                       <div className="my-3 h-px w-full bg-[#e5e7eb]" />
                     </>
                   )}
