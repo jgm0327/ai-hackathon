@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { BottomSheet } from "@/components/BottomSheet";
-import { ApiError, Profile, getProfile, getResumeDraft, syncNotion } from "@/lib/api";
+import { ApiError, Profile, getProfile, getResumeDraft, logout, syncNotion } from "@/lib/api";
 import { useProjects } from "@/lib/useProjects";
 
 const LEAVE_TIME_STORAGE_KEY = "careerlog:leaveTime";
@@ -26,6 +27,7 @@ function jobLabel(profile: Profile | null): string | null {
  * 보여준다 — CLAUDE.md 2.2, 없는 사실을 지어내지 않는다)와 알림 시각 표시뿐이다.
  */
 export default function SettingsPage() {
+  const router = useRouter();
   const { currentProject } = useProjects();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [leaveTime, setLeaveTime] = useState<string | null>(null);
@@ -38,6 +40,7 @@ export default function SettingsPage() {
   const [notionError, setNotionError] = useState<string | null>(null);
   const [notionSuccess, setNotionSuccess] = useState<string | null>(null);
   const [appInfoOpen, setAppInfoOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   useEffect(() => {
     getProfile()
@@ -95,6 +98,20 @@ export default function SettingsPage() {
     setNotionToken("");
     setNotionError(null);
     setNotionSuccess(null);
+  };
+
+  const handleLogout = async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      await logout();
+    } catch {
+      // 세션이 이미 만료됐어도 서버가 204(멱등)를 주지만, 네트워크 실패 등으로
+      // 여기서 예외가 나도 로컬에서는 로그아웃된 것처럼 로그인 화면으로 보낸다 —
+      // 어차피 쿠키가 유효하지 않으면 다음 요청에서 401로 다시 걸러진다.
+    } finally {
+      router.replace("/login");
+    }
   };
 
   return (
@@ -162,6 +179,17 @@ export default function SettingsPage() {
           <span className="text-[14px] text-[#f2f2f2]">앱 정보</span>
           <div className="flex-1" />
           <span className="text-[#5e5e5e]">›</span>
+        </button>
+      </div>
+
+      <div className="flex flex-col overflow-hidden rounded-[14px] border border-[#2e2e2e] bg-[#1e1e1e]">
+        <button
+          type="button"
+          onClick={handleLogout}
+          disabled={loggingOut}
+          className="flex items-center px-4 py-[13px] text-left transition-colors hover:bg-[#242424] disabled:opacity-50"
+        >
+          <span className="text-[14px] text-[#f0645c]">{loggingOut ? "로그아웃 중…" : "로그아웃"}</span>
         </button>
       </div>
 
