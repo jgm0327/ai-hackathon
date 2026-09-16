@@ -25,7 +25,7 @@ export function TabBar() {
   if (pathname === "/login") return null;
 
   return (
-    <nav className="sticky bottom-0 z-40 border-t border-zinc-200 bg-white/95 backdrop-blur">
+    <nav className="sticky bottom-0 z-40 border-t border-[#2a2a2a] bg-[#141210]/95 backdrop-blur">
       <ul className="flex pb-[env(safe-area-inset-bottom)]">
         {TABS.map((tab) => {
           const active = pathname === tab.href;
@@ -34,7 +34,7 @@ export function TabBar() {
               <Link
                 href={tab.href}
                 className={`flex flex-col items-center gap-0.5 py-2.5 text-xs ${
-                  active ? "font-semibold text-zinc-900" : "text-zinc-400"
+                  active ? "font-medium text-[#ffa259]" : "text-[#5e5e5e]"
                 }`}
               >
                 {tab.label}

@@ -23,6 +23,9 @@ export interface Card {
   skill_tags: string[];
   confidence: number;
   created_at: string;
+  /** 9/16 신규 — 홈 화면(Figma 100:692) "오늘 남긴 것" 목록의 "09:40" 표시용
+   * "HH:MM". 마이그레이션 이전 카드는 null. */
+  created_time?: string | null;
   /** 9/15 신규 — POST 응답에서 LLM 파싱이 실패해 원문 그대로 폴백 저장됐을 때만
    * true. GET/PATCH 응답에서는 항상 false(또는 생략)이다 — DB 컬럼이 아니라
    * 생성 시점에만 서버가 채워 넣는 값이라서. */
@@ -179,6 +182,23 @@ export function listCards(projectId?: number): Promise<Card[]> {
 
 export function deleteCard(id: number): Promise<void> {
   return request<void>(`/cards/${id}`, { method: "DELETE" });
+}
+
+/** 홈 화면(Figma 100:692) "무엇이 쌓였나요" 버블 차트용 (9/16 신규). 카드를 대표
+ * 태그(skill_tags[0], 없으면 "미분류") 기준으로 집계한 값 — 태그를 지어내지 않는다
+ * (CLAUDE.md 2.2). `count` 합계는 항상 `total_cards`와 같다. */
+export interface SkillCategoryCount {
+  tag: string;
+  count: number;
+}
+
+export interface SkillSummary {
+  total_cards: number;
+  categories: SkillCategoryCount[];
+}
+
+export function getSkillSummary(projectId: number): Promise<SkillSummary> {
+  return request<SkillSummary>(`/cards/skill-summary?project_id=${projectId}`);
 }
 
 /**
