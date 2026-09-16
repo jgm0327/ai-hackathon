@@ -14,7 +14,6 @@ import {
   getSkillSummary,
   listCards,
   refineCard,
-  syncNotion,
 } from "@/lib/api";
 import { useProjects } from "@/lib/useProjects";
 
@@ -208,7 +207,7 @@ export default function HomePage() {
         <div className="flex-1" />
         <ProjectSwitcher projectsState={projectsState} />
         <Link
-          href="/onboarding"
+          href="/settings"
           aria-label="설정"
           className="flex size-[26px] items-center justify-center rounded-full bg-[#1e1e1e] text-xs text-[#a0a0a0] transition-colors hover:bg-[#2a2a2a] active:scale-[0.95]"
         >
@@ -319,7 +318,6 @@ export default function HomePage() {
             )}
           </div>
         </div>
-        <NotionImportButton />
       </form>
 
       {submitting && <CardResultSkeleton />}
@@ -431,79 +429,3 @@ export default function HomePage() {
   );
 }
 
-/**
- * "노션에서 가져오기" — 백엔드는 이미 지원하지만(`POST /api/notion/sync`) 프론트가
- * 없었던 기능 갭. 토큰 입력 + 동기화만 있는 최소 버전 (CLAUDE.md 2.4 — OAuth/페이지
- * 선택 UI는 만들지 않는다).
- */
-function NotionImportButton() {
-  const [open, setOpen] = useState(false);
-  const [token, setToken] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
-
-  const closeSheet = () => {
-    setOpen(false);
-    setToken("");
-    setError(null);
-    setSuccessMessage(null);
-  };
-
-  const handleSync = async () => {
-    const trimmed = token.trim();
-    if (!trimmed || submitting) return;
-    setSubmitting(true);
-    setError(null);
-    setSuccessMessage(null);
-    try {
-      // 임포트되는 페이지 전부를 그때그때 파싱해서 느릴 수 있다 (docs/05-api-contract.md §5).
-      const res = await syncNotion(trimmed);
-      setSuccessMessage(`${res.imported}개 페이지를 가져왔어요.`);
-      setToken("");
-    } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "노션 동기화에 실패했습니다.");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="self-start text-[11px] font-medium text-[#828282] underline underline-offset-2"
-      >
-        노션에서 가져오기
-      </button>
-
-      <BottomSheet open={open} onClose={closeSheet} title="노션에서 가져오기">
-        <div className="flex flex-col gap-3">
-          <p className="text-xs text-zinc-500">
-            노션 통합(integration) 토큰을 입력하면 접근 가능한 페이지를 가져와 카드로
-            저장해요. 페이지가 많으면 다소 걸릴 수 있어요.
-          </p>
-          <input
-            type="password"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            placeholder="secret_..."
-            autoComplete="off"
-            className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
-          />
-          {error && <p className="text-xs text-red-600">{error}</p>}
-          {successMessage && <p className="text-xs text-emerald-600">{successMessage}</p>}
-          <button
-            type="button"
-            onClick={handleSync}
-            disabled={submitting || !token.trim()}
-            className="w-full rounded-xl bg-zinc-900 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-zinc-800 active:scale-[0.98] disabled:opacity-40 disabled:hover:bg-zinc-900"
-          >
-            {submitting ? "가져오는 중…" : "동기화"}
-          </button>
-        </div>
-      </BottomSheet>
-    </>
-  );
-}

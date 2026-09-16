@@ -606,7 +606,7 @@ function StackPageContent() {
         {!loading && <p className="text-[14px] font-medium text-[#828282]">{cards.length}</p>}
         <div className="flex-1" />
         <Link
-          href="/onboarding"
+          href="/settings"
           aria-label="설정"
           className="flex size-[26px] items-center justify-center rounded-full bg-[#262626] text-xs text-[#a0a0a0] transition-colors hover:bg-[#333] active:scale-[0.95]"
         >
