@@ -356,7 +356,9 @@ export default function HomePage() {
               </>
             ) : (
               <>
-                <p className="text-[12px] text-[#6b7280]">오늘 기록을 이렇게 정리했어요.</p>
+                <p className="text-[12px] text-[#6b7280]">
+                  {result.case_summary || "오늘 기록을 이렇게 정리했어요."}
+                </p>
 
                 <div className="flex gap-3 rounded-[14px] bg-[#f4f4f5] px-4 py-[18px]">
                   <div className="w-[3px] shrink-0 self-stretch rounded-full bg-black" />

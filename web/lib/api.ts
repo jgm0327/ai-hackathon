@@ -27,6 +27,10 @@ export interface Card {
    * true. GET/PATCH 응답에서는 항상 false(또는 생략)이다 — DB 컬럼이 아니라
    * 생성 시점에만 서버가 채워 넣는 값이라서. */
   refinement_failed?: boolean;
+  /** 9/16 신규 — 결과 출력 모달(Figma 41:139) "오늘 기록은 ~~ 케이스입니다" 문구.
+   * refinement_failed와 동일한 패턴: POST 생성 시점에만 채워지고, GET/PATCH
+   * 응답에서는 항상 빈 문자열(또는 생략)이다. */
+  case_summary?: string;
 }
 
 export interface Project {
