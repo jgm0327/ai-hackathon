@@ -241,16 +241,24 @@ export default function HomePage() {
             const size = Math.round(66 + (cat.count / maxCount) * 74);
             const isUncategorized = cat.tag === "미분류";
             const color = isUncategorized ? UNCATEGORIZED_COLOR : BUBBLE_COLORS[i % BUBBLE_COLORS.length];
+            // "미분류" 버블은 배경이 어두워서(UNCATEGORIZED_COLOR) 다른 버블과 같은
+            // 어두운 글자색(#2a2018)을 쓰면 대비가 너무 낮다 — 밝은 글자로 바꾼다.
+            const textColor = isUncategorized ? "#d8d3c8" : "#2a2018";
             return (
               <div
                 key={cat.tag}
                 style={{ width: size, height: size, backgroundColor: color }}
                 className="flex flex-col items-center justify-center gap-0.5 rounded-full px-2 text-center"
               >
-                <p className="line-clamp-2 text-[11px] font-medium leading-[14px] text-[#2a2018]">
+                <p
+                  className="line-clamp-2 text-[11px] font-medium leading-[14px]"
+                  style={{ color: textColor }}
+                >
                   {cat.tag}
                 </p>
-                <p className="text-[16px] font-bold leading-[20px] text-[#2a2018]">{cat.count}</p>
+                <p className="text-[16px] font-bold leading-[20px]" style={{ color: textColor }}>
+                  {cat.count}
+                </p>
               </div>
             );
           })}

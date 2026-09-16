@@ -32,7 +32,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="ko"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col bg-[#141210] text-[#f2f2f2]">
+      {/* 배경/글자색은 globals.css의 body{} 규칙(레이어 밖 — Tailwind 유틸리티보다
+          우선)이 실제로 적용하는 색이다. 여기 className에 배경/글자색 클래스를 다시
+          줘도 무시되므로(9/16 실측) 레이아웃 관련 클래스만 둔다. */}
+      <body className="min-h-full flex flex-col">
         <AuthGate />
         <ServiceWorkerRegistration />
         <div className="mx-auto flex w-full max-w-md flex-1 flex-col">
