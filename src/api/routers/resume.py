@@ -15,7 +15,7 @@ POST /resume(AI 생성)과 별개다 — AI가 만든 STAR 구조 자체는 여�
 """
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 
 from src.agent.pipeline import build_career_doc, enhance_existing_resume, get_jd_requirements
 from src.api.schemas import (
@@ -27,6 +27,7 @@ from src.api.schemas import (
     ResumeDraftSaveRequest,
     ResumeEnhanceRequest,
     ResumeEnhanceResponse,
+    ResumeExportRequest,
     ResumeRequest,
     ResumeResponse,
     StarApplyAnswersRequest,
@@ -36,6 +37,7 @@ from src.api.schemas import (
     StarQuestionsResponse,
 )
 from src.auth.deps import get_current_user
+from src.export.docx_export import markdown_to_docx_bytes
 from src.parsing.resume import StarItem, apply_star_answers, generate_star_questions
 from src.storage import db
 
@@ -93,6 +95,21 @@ def star_apply_answers_endpoint(
     return StarApplyAnswersResponse(
         updated_item=StarItemResponse.model_validate(result.updated_item),
         changed_field=result.changed_field,
+    )
+
+
+@router.post("/resume/export/docx")
+def export_resume_docx(
+    payload: ResumeExportRequest, current_user: db.User = Depends(get_current_user)
+) -> Response:
+    """경력기술서를 Word(.docx)로 내보낸다 (9/16 신규 — 그동안 프론트에서 "준비 중"으로
+    막혀 있던 스텁을 구현). `content`는 프론트가 이미 "마크다운 복사"에 쓰는 텍스트와
+    동일하다 — 여기서 STAR 구조를 다시 조합하지 않는다."""
+    docx_bytes = markdown_to_docx_bytes(payload.content)
+    return Response(
+        content=docx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": 'attachment; filename="resume.docx"'},
     )
 
 

@@ -230,6 +230,12 @@ class StarApplyAnswersResponse(BaseModel):
     changed_field: str
 
 
+# Word(.docx) 내보내기 (9/16 신규). 프론트가 이미 "마크다운 복사"에 쓰는 텍스트를
+# 그대로 보낸다 — 백엔드는 STAR 구조를 다시 조합하지 않는다.
+class ResumeExportRequest(BaseModel):
+    content: str
+
+
 class HealthResponse(BaseModel):
     status: str
     db: bool
