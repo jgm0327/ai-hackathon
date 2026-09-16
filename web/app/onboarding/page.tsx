@@ -125,7 +125,9 @@ export default function OnboardingPage() {
       </div>
 
       <section className="space-y-2">
-        <h2 className="text-sm font-medium text-zinc-700">직군</h2>
+        <h2 className="text-sm font-medium text-zinc-700">
+          {hasExistingProfile ? "직군" : "어떤 일을 하세요?"}
+        </h2>
         <div className="flex flex-wrap gap-2">
           {JOB_FIELDS.map((field) => (
             <ChipButton

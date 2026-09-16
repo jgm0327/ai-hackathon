@@ -218,7 +218,7 @@ export default function HomePage() {
             ref={textareaRef}
             value={rawText}
             onChange={(e) => setRawText(e.target.value)}
-            placeholder="오늘 한 일을 한 줄로 남겨보세요"
+            placeholder={"오늘 해결한 업무를 아무렇게나 던져주세요.\n형식과 맞춤법은 신경 쓰지 않으셔도 됩니다."}
             rows={4}
             className="w-full resize-none border-0 p-0 text-[13px] text-[#18181b] focus:outline-none"
           />

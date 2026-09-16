@@ -13,9 +13,15 @@ import {
   enhanceResume,
   getResumeDraft,
   getProfile,
+  listCards,
   saveResumeDraft,
 } from "@/lib/api";
-import { buildResumeCached, peekCachedResume, updateCachedResumeItems } from "@/lib/resumeCache";
+import {
+  buildResumeCached,
+  peekCachedResume,
+  peekCachedResumeGeneratedAt,
+  updateCachedResumeItems,
+} from "@/lib/resumeCache";
 import { useProjects } from "@/lib/useProjects";
 
 /** 프로필/프로젝트에서 실제로 있는 값만으로 문서 제목을 만든다 — 없는 정보를
@@ -44,6 +50,13 @@ function buildResumeMarkdown(heading: string | null, items: StarItem[]): string 
   if (heading) parts.push(`# ${heading}`);
   parts.push(...items.map(toMarkdownSection));
   return parts.join("\n\n");
+}
+
+/** 생성 시각(ISO)을 "생성 9/14" 형태로 (Figma 41:236 "생성 2/18 · 3,420자"). */
+function formatGeneratedAt(iso: string): string | null {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return `생성 ${d.getMonth() + 1}/${d.getDate()}`;
 }
 
 /** 저장 시각(ISO)을 "9월 14일 21:05" 형태로. 유효하지 않으면 원본 문자열 그대로. */
@@ -86,12 +99,17 @@ export default function ResumePage() {
   const [items, setItems] = useState<StarItem[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Figma 41:737 "초안 생성 실패" 전용 화면 — "저장된 카드 N장은 그대로 있습니다"
+  // 문구에 쓸 개수. 실패했을 때만 조회하면 되므로 평소 렌더링 경로엔 영향 없다.
+  const [errorCardCount, setErrorCardCount] = useState<number | null>(null);
   const [showBuildForm, setShowBuildForm] = useState(true);
   const [copyStatus, setCopyStatus] = useState<"markdown" | "notion" | null>(null);
 
   // "숫자 되묻기" 인라인 입력(9/15 신규)이 캐시를 정확한 키로 갱신하려면, 지금
   // 보고 있는 items가 어떤 jdText로 생성됐는지 알아야 한다(캐시 키 = projectId+jdText).
   const [builtJdText, setBuiltJdText] = useState<string | undefined>(undefined);
+  // Figma 41:236 "생성 2/18 · 3,420자" 메타 표시용 (9/16 신규).
+  const [generatedAt, setGeneratedAt] = useState<string | null>(null);
 
   const [mode, setMode] = useState<"ai" | "edit">("ai");
   const [draftContent, setDraftContent] = useState("");
@@ -135,6 +153,7 @@ export default function ResumePage() {
     setPasteText("");
     setEnhanceError(null);
     setCompareItems(null);
+    setGeneratedAt(null);
   }, [currentProject?.id]);
 
   // 새로고침해도 방금 만든 경력기술서가 사라진 것처럼 보이지 않게, 마운트 시점에
@@ -150,6 +169,7 @@ export default function ResumePage() {
       setItems(cached);
       setShowBuildForm(false);
       setBuiltJdText(undefined); // 이 캐시 조회 자체가 jdText 없이 한 것과 같은 키
+      setGeneratedAt(peekCachedResumeGeneratedAt(currentProject.id));
     }
   }, [currentProject]);
 
@@ -176,6 +196,7 @@ export default function ResumePage() {
     if (!currentProject) return;
     setLoading(true);
     setError(null);
+    setErrorCardCount(null);
     try {
       // 카드 구성이 지난 생성 때와 같으면 재호출 없이 캐시에서 반환한다 (9/14, LLM
       // 호출 비용 절감 — web/lib/resumeCache.ts 참고).
@@ -183,10 +204,19 @@ export default function ResumePage() {
       const result = await buildResumeCached(currentProject.id, { jdText: usedJdText });
       setItems(result);
       setBuiltJdText(usedJdText);
+      setGeneratedAt(peekCachedResumeGeneratedAt(currentProject.id, usedJdText));
       setShowBuildForm(false);
       setMode("ai");
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : "경력기술서 생성에 실패했습니다.");
+      // 카드는 이미 안전하게 저장돼 있다 — 실패해도 몇 장이 남아있는지 보여줘서
+      // 안심시킨다(Figma 41:737). 이 조회 자체가 실패해도 실패 화면은 그대로 보여준다.
+      try {
+        const cards = await listCards(currentProject.id);
+        setErrorCardCount(cards.length);
+      } catch {
+        // 무시 — 개수 없이도 실패 화면은 뜬다.
+      }
     } finally {
       setLoading(false);
     }
@@ -362,6 +392,37 @@ export default function ResumePage() {
         />
       ) : (
         <>
+          {error && !items ? (
+            <div className="flex flex-col items-center gap-4 px-4 py-16">
+              <div className="flex size-14 items-center justify-center rounded-full border-2 border-red-500">
+                <span className="text-xl font-bold text-red-500">!</span>
+              </div>
+              <div className="flex flex-col items-center gap-1">
+                <p className="text-[15px] font-semibold text-[#18181b]">초안 생성에 실패했어요</p>
+                <p className="text-center text-[13px] text-zinc-400">
+                  {errorCardCount != null && `저장된 카드 ${errorCardCount}장은 그대로 있습니다.`}
+                  {errorCardCount != null && <br />}
+                  잠시 후 다시 시도해 주세요.
+                </p>
+              </div>
+              <div className="flex w-full flex-col gap-2.5">
+                <button
+                  type="button"
+                  onClick={handleBuild}
+                  className="w-full rounded-[12px] bg-zinc-900 py-4 text-[14px] font-semibold text-white transition-colors hover:bg-zinc-800 active:scale-[0.98]"
+                >
+                  다시 시도
+                </button>
+                <Link
+                  href="/stack"
+                  className="flex w-full items-center justify-center rounded-[12px] border-[1.5px] border-[#e5e7eb] bg-white py-4 text-[14px] font-semibold text-[#18181b] transition-colors hover:bg-zinc-50"
+                >
+                  스택으로 돌아가기
+                </Link>
+              </div>
+            </div>
+          ) : (
+            <>
           {(!items || showBuildForm) && (
             <div className="flex flex-col gap-3 rounded-[14px] border border-[#e5e7eb] bg-white p-4">
               <textarea
@@ -459,7 +520,7 @@ export default function ResumePage() {
             </div>
           )}
 
-          {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
+          {error && items && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
 
           {loading && (
             <div className="flex flex-col gap-3">
@@ -476,9 +537,15 @@ export default function ResumePage() {
                 </p>
               ) : (
                 <div className="flex flex-col rounded-[14px] border border-[#e5e7eb] bg-white p-5">
-                  {heading && (
+                  {(heading || generatedAt) && (
                     <>
-                      <p className="text-[16px] font-bold text-[#18181b]">{heading}</p>
+                      {heading && <p className="text-[16px] font-bold text-[#18181b]">{heading}</p>}
+                      {generatedAt && (
+                        <p className="mt-1 text-[11px] text-zinc-400">
+                          {formatGeneratedAt(generatedAt)} ·{" "}
+                          {buildResumeMarkdown(heading, items).length.toLocaleString()}자
+                        </p>
+                      )}
                       <div className="my-3 h-px w-full bg-[#e5e7eb]" />
                     </>
                   )}
@@ -523,6 +590,8 @@ export default function ResumePage() {
                   </Link>
                 </div>
               )}
+            </>
+          )}
             </>
           )}
         </>

@@ -27,6 +27,11 @@ const CACHE_PREFIX = "career-log:resume-cache:";
 interface CachedResume {
   cardIds: number[]; // 정렬된 카드 id — 캐시 유효성 판단 기준
   items: StarItem[];
+  // Figma 41:236 "생성 2/18 · 3,420자" 메타 표시용 (9/16 신규). 실제로 build_resume()을
+  // 호출해서 새 결과를 받은 시각만 갱신한다 — 숫자 되묻기로 항목만 고친
+  // updateCachedResumeItems()는 이 값을 건드리지 않는다("생성"은 AI가 만든 시점이지
+  // 사람이 손본 시점이 아니므로).
+  generatedAt?: string;
 }
 
 function cacheKey(projectId: number, jdText?: string): string {
@@ -80,7 +85,7 @@ export async function buildResumeCached(
   }
 
   const items = await buildResume(projectId, opts?.jdText);
-  writeCache(key, { cardIds, items });
+  writeCache(key, { cardIds, items, generatedAt: new Date().toISOString() });
   return items;
 }
 
@@ -102,6 +107,13 @@ export function peekCachedResume(projectId: number, jdText?: string): StarItem[]
   return cached?.items ?? null;
 }
 
+/** 캐시된 결과가 실제로 AI 호출로 "생성"된 시각 (Figma 41:236 메타 표시용, 9/16 신규).
+ * 없으면(예전 캐시, 또는 캐시 자체가 없음) null — 호출부는 메타 줄을 그냥 숨기면 된다. */
+export function peekCachedResumeGeneratedAt(projectId: number, jdText?: string): string | null {
+  const cached = readCache(cacheKey(projectId, jdText));
+  return cached?.generatedAt ?? null;
+}
+
 /**
  * "숫자 되묻기" 인라인 입력(9/15 신규)으로 사용자가 항목 하나를 직접 고쳤을 때,
  * 새로고침해도 그 값이 남아있도록 캐시만 갱신한다 — `cardIds`(유효성 판단 기준)는
@@ -112,5 +124,5 @@ export function updateCachedResumeItems(projectId: number, items: StarItem[], jd
   const key = cacheKey(projectId, jdText);
   const cached = readCache(key);
   if (!cached) return;
-  writeCache(key, { cardIds: cached.cardIds, items });
+  writeCache(key, { cardIds: cached.cardIds, items, generatedAt: cached.generatedAt });
 }
