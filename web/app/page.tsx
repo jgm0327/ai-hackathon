@@ -18,6 +18,8 @@ import {
 } from "@/lib/api";
 import { useProjects } from "@/lib/useProjects";
 
+const DRAFT_KEY = "career-log:draft-raw-text";
+
 /** `job_field`/`job_detail`/`years_segment` 중 있는 값만으로 합성한다 — 없는 값을
  * 지어내 "시니어" 같은 라벨을 붙이지 않는다 (CLAUDE.md 2.2 정신 — 프로필도 사실만). */
 function formatTrackLabel(profile: Profile | null): string | null {
@@ -72,6 +74,48 @@ export default function HomePage() {
   const [recentCard, setRecentCard] = useState<Card | null>(null);
   const [bannerDismissed, setBannerDismissed] = useState(false);
 
+  // 오프라인 배너 (Figma 41:762) — 자차 이동 중 신호가 끊긴 상태(CLAUDE.md 1장
+  // 사용 맥락 2)에서도 방금 입력한 원문이 사라진 게 아니라는 걸 알려준다. 실제로
+  // 텍스트박스 내용은 submitting에 실패해도 지우지 않으므로(아래 submitText),
+  // 오프라인이면 애초에 제출 자체를 막아 원문이 화면에 그대로 남게 한다.
+  const [isOffline, setIsOffline] = useState(false);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsOffline(!navigator.onLine);
+    const goOffline = () => setIsOffline(true);
+    const goOnline = () => setIsOffline(false);
+    window.addEventListener("offline", goOffline);
+    window.addEventListener("online", goOnline);
+    return () => {
+      window.removeEventListener("offline", goOffline);
+      window.removeEventListener("online", goOnline);
+    };
+  }, []);
+
+  // 위 오프라인 배너의 "원문은 저장됐어요"가 실제로 참이 되게 한다 — 텍스트박스
+  // 내용을 매번 로컬에 남겨서, 오프라인 상태로 화면을 벗어나거나 새로고침해도
+  // 방금 쓰던 원문을 잃지 않는다. 제출에 성공하면(rawText가 빈 문자열이 됨)
+  // 자동으로 지워진다.
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(DRAFT_KEY);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (saved) setRawText(saved);
+    } catch {
+      // 접근 불가(프라이빗 모드 등) — 평소처럼 빈 입력으로 시작할 뿐 치명적이지 않다.
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      if (rawText) localStorage.setItem(DRAFT_KEY, rawText);
+      else localStorage.removeItem(DRAFT_KEY);
+    } catch {
+      // 저장 실패해도 화면상 입력 자체는 지장 없다.
+    }
+  }, [rawText]);
+
   useEffect(() => {
     if (!currentProject) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -104,7 +148,7 @@ export default function HomePage() {
   // 텍스트 입력과 음성 입력이 공유하는 단일 제출 경로 — 어느 쪽에서 오든 동일한
   // 스켈레톤/결과 모달 UX를 탄다 (docs/06-migration.md §2.1: 별도 흐름을 만들지 않는다).
   const submitText = async (text: string) => {
-    if (!text || submitting) return;
+    if (!text || submitting || isOffline) return;
 
     setSubmitting(true);
     setError(null);
@@ -192,6 +236,15 @@ export default function HomePage() {
 
       <ProjectSwitcher projectsState={projectsState} />
 
+      {isOffline && (
+        <div className="flex items-center gap-2 rounded-[12px] bg-zinc-100 px-3 py-2.5">
+          <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-500" />
+          <p className="text-[12px] text-zinc-600">
+            오프라인 · 원문은 저장됐어요. 연결되면 자동으로 변환할게요
+          </p>
+        </div>
+      )}
+
       {!bannerDismissed && recentCard && daysSince(recentCard.created_at) <= 1 && (
         <div className="flex items-center gap-2 rounded-[12px] bg-amber-50 px-3 py-2.5">
           <button
@@ -223,7 +276,7 @@ export default function HomePage() {
             className="w-full resize-none border-0 p-0 text-[13px] text-[#18181b] focus:outline-none"
           />
           <div className="flex items-end justify-end pt-2">
-            <VoiceInput variant="icon" onTranscript={submitText} disabled={submitting} />
+            <VoiceInput variant="icon" onTranscript={submitText} disabled={submitting || isOffline} />
           </div>
         </div>
 
@@ -231,10 +284,10 @@ export default function HomePage() {
 
         <button
           type="submit"
-          disabled={submitting || !rawText.trim()}
+          disabled={submitting || isOffline || !rawText.trim()}
           className="w-full rounded-[14px] bg-black py-[18px] text-[16px] font-semibold text-white transition-colors hover:bg-zinc-800 active:scale-[0.98] disabled:opacity-40 disabled:hover:bg-black"
         >
-          {submitting ? "정리하는 중…" : "경력 변환하기"}
+          {isOffline ? "연결을 기다리는 중" : submitting ? "정리하는 중…" : "경력 변환하기"}
         </button>
       </form>
 
