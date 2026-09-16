@@ -32,7 +32,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="ko"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col bg-[#f1f1f3] text-[#18181b]">
+      <body className="min-h-full flex flex-col bg-[#141210] text-[#f2f2f2]">
         <AuthGate />
         <ServiceWorkerRegistration />
         <div className="mx-auto flex w-full max-w-md flex-1 flex-col">
