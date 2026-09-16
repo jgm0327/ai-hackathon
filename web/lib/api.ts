@@ -394,6 +394,37 @@ export function applyStarAnswers(
   });
 }
 
+/**
+ * "Word" 내보내기 (9/16 신규 — 그동안 프론트에서 "준비 중"으로 막아뒀던 버튼을
+ * 실제로 구현). 응답이 JSON이 아니라 파일 바이너리라 공용 `request()` 대신
+ * fetch를 직접 써서 blob으로 받고, 브라우저 다운로드를 그 자리에서 트리거한다.
+ */
+export async function exportResumeDocx(content: string): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/resume/export/docx`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content }),
+    });
+  } catch {
+    throw new ApiError(0, "서버에 연결할 수 없습니다.");
+  }
+  if (!res.ok) {
+    throw new ApiError(res.status, res.statusText || "내보내기에 실패했습니다.");
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "resume.docx";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 // ---------------------------------------------------------------------------
 // 5. 노션 (읽기 전용) — docs/05-api-contract.md §5
 // ---------------------------------------------------------------------------
