@@ -530,7 +530,7 @@ function StackPageContent() {
             onChange={(e) => setEditSentence(e.target.value)}
             rows={3}
             placeholder="문장을 입력하세요"
-            className="w-full resize-none rounded-md border border-[#333] p-2 text-[12px] leading-relaxed focus:border-[#5e5e5e] focus:outline-none"
+            className="w-full resize-none rounded-md border border-[#333] bg-[#141414] p-2 text-[12px] leading-relaxed text-[#f2f2f2] placeholder:text-[#5e5e5e] focus:border-[#5e5e5e] focus:outline-none"
           />
           <div className="flex flex-wrap gap-1.5">
             {editTags.length === 0 && (
@@ -565,7 +565,7 @@ function StackPageContent() {
                 }
               }}
               placeholder="새 태그"
-              className="min-w-0 flex-1 rounded-md border border-[#333] px-2 py-1 text-[11px] focus:border-[#5e5e5e] focus:outline-none"
+              className="min-w-0 flex-1 rounded-md border border-[#333] bg-[#141414] px-2 py-1 text-[11px] text-[#f2f2f2] placeholder:text-[#5e5e5e] focus:border-[#5e5e5e] focus:outline-none"
             />
             <button
               type="button"
@@ -575,7 +575,7 @@ function StackPageContent() {
               추가
             </button>
           </div>
-          {tagError && <p className="text-[11px] text-red-600">{tagError}</p>}
+          {tagError && <p className="text-[11px] text-[#f0645c]">{tagError}</p>}
           <div className="flex justify-end gap-3 pt-0.5">
             <button
               type="button"
@@ -588,7 +588,7 @@ function StackPageContent() {
               type="button"
               onClick={saveEditingTags}
               disabled={savingTags}
-              className="text-[11px] font-semibold text-black disabled:opacity-50"
+              className="text-[11px] font-semibold text-[#f2f2f2] disabled:opacity-50"
             >
               {savingTags ? "저장 중…" : "저장"}
             </button>
@@ -786,7 +786,7 @@ function StackPageContent() {
         )}
       </div>
 
-      {groupsError && <p className="text-[12px] text-red-600">{groupsError}</p>}
+      {groupsError && <p className="text-[12px] text-[#f0645c]">{groupsError}</p>}
 
       {/* "4.1.1 AI 프로젝트 자동 제안" 배너 (9/14 신규) — 미분류 카드가 서로 비슷해
           보일 때만 뜬다. 평소엔 안 보이는 화면이라 2.1 원칙(매일 경로 마찰 금지)에
@@ -1014,7 +1014,7 @@ function StackPageContent() {
                       onChange={() => toggleSelectedCard(card.id)}
                       className="mt-0.5"
                     />
-                    <span className="text-zinc-800">{card.refined_sentence}</span>
+                    <span className="text-[#f2f2f2]">{card.refined_sentence}</span>
                   </label>
                 </li>
               ))}
@@ -1024,15 +1024,15 @@ function StackPageContent() {
               value={newProjectName}
               onChange={(e) => setNewProjectName(e.target.value)}
               placeholder="프로젝트 이름 (예: A은행 차세대)"
-              className="w-full rounded-md border border-[#3a3a3a] px-3 py-2 text-sm"
+              className="w-full rounded-md border border-[#3a3a3a] bg-[#141414] px-3 py-2 text-sm text-[#f2f2f2] placeholder:text-[#5e5e5e] focus:border-[#5e5e5e] focus:outline-none"
             />
             <input
               type="date"
               value={newProjectStartedAt}
               onChange={(e) => setNewProjectStartedAt(e.target.value)}
-              className="w-full rounded-md border border-[#3a3a3a] px-3 py-2 text-sm"
+              className="w-full rounded-md border border-[#3a3a3a] bg-[#141414] px-3 py-2 text-sm text-[#f2f2f2] [color-scheme:dark] focus:border-[#5e5e5e] focus:outline-none"
             />
-            {bundleError && <p className="text-xs text-red-600">{bundleError}</p>}
+            {bundleError && <p className="text-xs text-[#f0645c]">{bundleError}</p>}
             <button
               type="button"
               onClick={handleBundle}

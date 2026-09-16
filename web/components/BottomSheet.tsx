@@ -44,11 +44,11 @@ export function BottomSheet({
       <div
         className={
           panelClassName ??
-          "relative w-full max-w-md rounded-t-2xl bg-white p-4 shadow-xl"
+          "relative w-full max-w-md rounded-t-2xl bg-[#1e1e1e] p-4 shadow-xl"
         }
       >
-        {!hideHandle && <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-zinc-200" />}
-        {title && <h2 className="mb-3 text-base font-semibold text-zinc-900">{title}</h2>}
+        {!hideHandle && <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-[#3a3a3a]" />}
+        {title && <h2 className="mb-3 text-base font-semibold text-[#f2f2f2]">{title}</h2>}
         <div className="pb-[env(safe-area-inset-bottom)]">{children}</div>
       </div>
     </div>

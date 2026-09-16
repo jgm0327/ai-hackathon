@@ -82,18 +82,18 @@ export function ProjectSwitcher({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="inline-flex max-w-[220px] items-center gap-1 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-sm font-medium text-zinc-800 shadow-sm transition-colors hover:bg-zinc-50 active:scale-[0.98]"
+        className="inline-flex max-w-[220px] items-center gap-1 rounded-full border border-[#2e2e2e] bg-[#1e1e1e] px-3 py-1.5 text-sm font-medium text-[#f2f2f2] transition-colors hover:bg-[#262626] active:scale-[0.98]"
       >
         <span className="truncate">
           {loading ? "불러오는 중…" : currentProject ? currentProject.name : "프로젝트 없음"}
         </span>
-        <span aria-hidden className="text-zinc-400">
+        <span aria-hidden className="text-[#5e5e5e]">
           ›
         </span>
       </button>
 
       <BottomSheet open={open} onClose={closeAll} title="프로젝트">
-        {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
+        {error && <p className="mb-2 text-sm text-[#f0645c]">{error}</p>}
 
         {projects.length > PROJECT_SEARCH_THRESHOLD && (
           <input
@@ -101,7 +101,7 @@ export function ProjectSwitcher({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="프로젝트 이름 검색"
-            className="mb-2 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
+            className="mb-2 w-full rounded-md border border-[#333] bg-[#141414] px-3 py-2 text-sm text-[#f2f2f2] placeholder:text-[#5e5e5e] focus:border-[#5e5e5e] focus:outline-none"
           />
         )}
 
@@ -113,20 +113,20 @@ export function ProjectSwitcher({
                 onClick={() => handleSwitch(p.id)}
                 className={`flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm transition-colors ${
                   p.is_current
-                    ? "bg-zinc-100 font-semibold text-zinc-900"
-                    : "text-zinc-700 hover:bg-zinc-50"
+                    ? "bg-[#262626] font-semibold text-[#f2f2f2]"
+                    : "text-[#d4d4d4] hover:bg-[#242424]"
                 }`}
               >
                 <span className="truncate">{p.name}</span>
-                {p.is_current && <span className="text-xs text-zinc-500">현재</span>}
+                {p.is_current && <span className="text-xs text-[#a0a0a0]">현재</span>}
               </button>
             </li>
           ))}
           {projects.length === 0 && !loading && (
-            <li className="px-3 py-2 text-sm text-zinc-500">아직 프로젝트가 없습니다.</li>
+            <li className="px-3 py-2 text-sm text-[#828282]">아직 프로젝트가 없습니다.</li>
           )}
           {projects.length > 0 && filteredProjects.length === 0 && (
-            <li className="px-3 py-2 text-sm text-zinc-500">일치하는 프로젝트가 없습니다.</li>
+            <li className="px-3 py-2 text-sm text-[#828282]">일치하는 프로젝트가 없습니다.</li>
           )}
         </ul>
 
@@ -134,39 +134,39 @@ export function ProjectSwitcher({
           <button
             type="button"
             onClick={() => setShowNewForm(true)}
-            className="w-full rounded-lg border border-dashed border-zinc-300 py-2.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50"
+            className="w-full rounded-lg border border-dashed border-[#3a3a3a] py-2.5 text-sm font-medium text-[#a0a0a0] transition-colors hover:bg-[#242424]"
           >
             + 새 프로젝트
           </button>
         ) : (
-          <div className="space-y-2 rounded-lg border border-zinc-200 p-3">
+          <div className="space-y-2 rounded-lg border border-[#2e2e2e] p-3">
             <input
               type="text"
               placeholder="프로젝트 이름 (예: A은행 차세대)"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
+              className="w-full rounded-md border border-[#333] bg-[#141414] px-3 py-2 text-sm text-[#f2f2f2] placeholder:text-[#5e5e5e] focus:border-[#5e5e5e] focus:outline-none"
             />
             <input
               type="date"
               value={startedAt}
               onChange={(e) => setStartedAt(e.target.value)}
-              className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
+              className="w-full rounded-md border border-[#333] bg-[#141414] px-3 py-2 text-sm text-[#f2f2f2] [color-scheme:dark] focus:border-[#5e5e5e] focus:outline-none"
             />
-            {formError && <p className="text-xs text-red-600">{formError}</p>}
+            {formError && <p className="text-xs text-[#f0645c]">{formError}</p>}
             <div className="flex gap-2">
               <button
                 type="button"
                 onClick={handleCreate}
                 disabled={submitting}
-                className="flex-1 rounded-md bg-zinc-900 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:opacity-50 disabled:hover:bg-zinc-900"
+                className="flex-1 rounded-md bg-[#f2f2f2] py-2 text-sm font-medium text-[#171717] transition-colors hover:bg-white disabled:opacity-50 disabled:hover:bg-[#f2f2f2]"
               >
                 {submitting ? "생성 중…" : "만들기"}
               </button>
               <button
                 type="button"
                 onClick={() => setShowNewForm(false)}
-                className="rounded-md border border-zinc-300 px-3 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-50"
+                className="rounded-md border border-[#333] px-3 py-2 text-sm text-[#a0a0a0] transition-colors hover:bg-[#242424]"
               >
                 취소
               </button>
