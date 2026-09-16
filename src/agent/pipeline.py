@@ -34,7 +34,7 @@ API 오류, JSON 파싱 재시도까지 실패 등)로 예외를 던지면 예�
 항상 일어난다.** `retry_refinement()`로 나중에 다시 정리를 시도할 수 있다.
 """
 import logging
-from datetime import date
+from datetime import date, datetime
 
 from src.agent.tag_canonicalizer import canonicalize_tags
 from src.parsing.parser import ParsedEntry, parse_note
@@ -68,7 +68,11 @@ def run_pipeline(user_id: int, raw_text: str) -> dict:
         refinement_failed = True
     current_project = get_current_project(user_id)
     project_id = current_project.id if current_project else None
-    card_id = save_card(user_id, project_id, parsed, date.today().isoformat())
+    # created_time(9/16 신규, "HH:MM")은 홈 화면 "오늘 남긴 것" 목록 전용 — created_at
+    # (날짜만)은 /stack 주간 스트릭이 문자열 동등 비교로 의존하고 있어 그대로 둔다.
+    card_id = save_card(
+        user_id, project_id, parsed, date.today().isoformat(), datetime.now().strftime("%H:%M")
+    )
     return {"parsed": parsed, "card_id": card_id, "refinement_failed": refinement_failed}
 
 

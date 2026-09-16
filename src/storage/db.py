@@ -54,6 +54,12 @@ class Card:
     skill_tags: list[str]
     confidence: float
     created_at: str
+    # 9/16 신규 — 새 홈 화면(Figma 100:692 "01·기록·Tab A", "오늘 남긴 것" 목록)이
+    # "09:40" 같은 분 단위 시각을 요구해서 추가했다. `created_at`(날짜만, "YYYY-MM-DD")은
+    # `/stack` 주간 스트릭이 정확한 문자열 동등 비교로 의존하고 있어(같은 날짜 카드를
+    # 묶는 로직) 절대 건드리지 않고, 시각만 별도 컬럼으로 추가했다 — 기존 동작 무변경,
+    # 순수 추가. 예전 카드는 마이그레이션 시점에 없던 컬럼이라 None(빈 문자열).
+    created_time: str | None = None
 
 
 @dataclass
@@ -154,6 +160,11 @@ def init_db() -> None:
             )
             """
         )
+        # 9/16 신규 — 기존에 이미 만들어진 DB 파일엔 `CREATE TABLE IF NOT EXISTS`가
+        # 새 컬럼을 추가해주지 않으므로 직접 마이그레이션한다. 멱등(이미 있으면 스킵).
+        existing_columns = {row["name"] for row in conn.execute("PRAGMA table_info(cards)")}
+        if "created_time" not in existing_columns:
+            conn.execute("ALTER TABLE cards ADD COLUMN created_time TEXT")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS profile (
@@ -242,15 +253,26 @@ def delete_session(session_id: str) -> None:
         conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
 
 
-def save_card(user_id: int, project_id: int | None, parsed: ParsedEntry, created_at: str) -> int:
-    """파싱된 카드 한 장을 저장한다. project_id가 None이면 프로젝트 미배정 상태로 저장된다."""
+def save_card(
+    user_id: int,
+    project_id: int | None,
+    parsed: ParsedEntry,
+    created_at: str,
+    created_time: str | None = None,
+) -> int:
+    """파싱된 카드 한 장을 저장한다. project_id가 None이면 프로젝트 미배정 상태로 저장된다.
+
+    `created_time`(9/16 신규, "HH:MM")은 선택 — 홈 화면 "오늘 남긴 것" 목록 전용이라
+    안 넘기면 그냥 NULL로 저장된다(기존 호출부 하위 호환).
+    """
     init_db()
     with _connect() as conn:
         cur = conn.execute(
             """
             INSERT INTO cards
-                (user_id, project_id, raw_text, refined_sentence, skill_tags, confidence, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                (user_id, project_id, raw_text, refined_sentence, skill_tags, confidence,
+                 created_at, created_time)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -260,6 +282,7 @@ def save_card(user_id: int, project_id: int | None, parsed: ParsedEntry, created
                 json.dumps(parsed.skill_tags, ensure_ascii=False),
                 parsed.confidence,
                 created_at,
+                created_time,
             ),
         )
         return cur.lastrowid
@@ -279,6 +302,30 @@ def list_cards(user_id: int, project_id: int | None = None) -> list[Card]:
                 "SELECT * FROM cards WHERE user_id = ? ORDER BY created_at", (user_id,)
             ).fetchall()
     return [_row_to_card(row) for row in rows]
+
+
+def get_skill_category_counts(user_id: int, project_id: int, top_n: int = 4) -> list[tuple[str, int]]:
+    """카드를 대표 태그(skill_tags[0]) 기준으로 묶어 몇 장씩 있는지 센다 (9/16 신규,
+    Figma 100:692 홈 화면 "무엇이 쌓였나요" 버블 차트).
+
+    태그를 지어내지 않는다(CLAUDE.md 2.2) — 각 카드의 대표 태그는 parse_note()가
+    실제로 뽑은 skill_tags의 첫 번째 값을 그대로 쓴다. 상위 top_n개 다음은 전부
+    "미분류" 하나로 합친다(태그가 아예 없는 카드도 여기 포함). 반환값의 count 합계는
+    항상 해당 프로젝트의 전체 카드 수와 같다 — 카드 한 장은 정확히 한 카테고리에만
+    속한다(태그를 여러 개 가진 카드도 대표 태그 하나로만 집계 — 중복 집계 방지).
+    """
+    cards = list_cards(user_id, project_id)
+    counts: dict[str, int] = {}
+    for card in cards:
+        category = card.skill_tags[0] if card.skill_tags else "미분류"
+        counts[category] = counts.get(category, 0) + 1
+
+    ranked = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
+    top = [kv for kv in ranked if kv[0] != "미분류"][:top_n]
+    top_names = {name for name, _ in top}
+    rest_count = sum(count for name, count in ranked if name not in top_names)
+
+    return top + [("미분류", rest_count)] if rest_count > 0 else top
 
 
 def list_unassigned_cards(user_id: int) -> list[Card]:
@@ -609,6 +656,7 @@ def _row_to_session(row: sqlite3.Row) -> Session:
 
 
 def _row_to_card(row: sqlite3.Row) -> Card:
+    row_keys = row.keys()
     return Card(
         id=row["id"],
         project_id=row["project_id"],
@@ -617,6 +665,9 @@ def _row_to_card(row: sqlite3.Row) -> Card:
         skill_tags=json.loads(row["skill_tags"]),
         confidence=row["confidence"],
         created_at=row["created_at"],
+        # "created_time" in row_keys 체크: 마이그레이션 전 스키마로 열린 아주 오래된
+        # 연결이 남아있을 극단적 경우를 대비한 방어(평소엔 init_db()가 항상 먼저 돈다).
+        created_time=row["created_time"] if "created_time" in row_keys else None,
     )
 
 

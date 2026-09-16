@@ -28,6 +28,7 @@ Track C는 이 문서만 보고 작업하고, 백엔드는 이 문서를 먼저 
   "skill_tags": ["Redis", "성능최적화", "결제시스템"],
   "confidence": 0.91,
   "created_at": "2026-02-14T18:45:00+09:00",
+  "created_time": "18:45",       // 9/16 신규 — 아래 설명 참고
   "refinement_failed": false,    // 9/15 신규 — 아래 설명 참고
   "case_summary": "오늘 기록은 결제 API 성능 개선 케이스입니다."  // 9/16 신규 — 아래 설명 참고
 }
@@ -48,12 +49,40 @@ Track C는 이 문서만 보고 작업하고, 백엔드는 이 문서를 먼저 
 > `refinement_failed`와 동일하게 DB에 저장되지 않고 **생성 시점에만** 채워지며,
 > `GET`/`PATCH` 응답에서는 항상 빈 문자열이다.
 
+> **`created_time` (9/16 신규, Figma 100:692 홈 화면 "오늘 남긴 것")**: "HH:MM" 형식,
+> 카드가 실제로 만들어진 시각. `created_at`(날짜만)과 달리 이 필드는 **DB에 저장된다**
+> (표시 전용이라 `/stack` 주간 스트릭 등 어떤 로직도 이 필드로 판단하지 않는다 —
+> 날짜 판단은 여전히 `created_at` 문자열 그대로 비교). 마이그레이션 이전에 저장된
+> 카드는 `null`.
+
 ### `GET /api/cards?project_id=3`
 `project_id` 생략 시 전체. 최신순 정렬.
 
 ```jsonc
 { "cards": [ /* 위 카드 객체 배열 */ ] }
 ```
+
+### `GET /api/cards/skill-summary?project_id=3` (9/16 신규)
+홈 화면(Figma 100:692) "무엇이 쌓였나요" 버블 차트용 — 카드를 대표 태그
+(`skill_tags[0]`, 없으면 "미분류") 기준으로 묶어 몇 장씩인지 센다. 상위 4개 태그
+다음은 전부 "미분류" 하나로 합친다. **태그를 지어내지 않는다(2.2)** — 실제
+`skill_tags`에서만 계산.
+
+```jsonc
+// 응답 200
+{
+  "total_cards": 24,
+  "categories": [
+    { "tag": "캠페인 운영", "count": 8 },
+    { "tag": "콘텐츠 기획", "count": 6 },
+    { "tag": "ROI/ROAS", "count": 5 },
+    { "tag": "그로스 해킹", "count": 3 },
+    { "tag": "미분류", "count": 2 }
+  ]
+}
+```
+`categories`의 `count` 합계는 항상 `total_cards`와 같다 — 카드 한 장은 정확히
+하나의 카테고리에만 속한다(태그가 여러 개 있어도 대표 태그 하나로만 집계).
 
 ### `DELETE /api/cards/{id}`
 응답 204.

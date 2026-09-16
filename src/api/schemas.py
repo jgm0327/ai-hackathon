@@ -40,6 +40,10 @@ class CardResponse(_FromAttributes):
     # `date.today().isoformat()`로 날짜만("2026-02-14") 기록한다. 저장소 계약을 조율 없이
     # 바꾸지 않기 위해 실제 저장된 값을 그대로 반환한다 — 불일치는 최종 보고에 기록.
     created_at: str
+    # 9/16 신규 — 홈 화면(Figma 100:692) "오늘 남긴 것" 목록의 "09:40" 표시용.
+    # created_at(날짜만)과 달리 /stack 어떤 로직도 이 필드에 의존하지 않는다 —
+    # 순수 표시용 추가 필드. 마이그레이션 이전 카드는 null.
+    created_time: str | None = None
     # 9/15 신규 — POST /api/cards가 LLM 파싱에 실패해 원문을 그대로 폴백 저장했을 때만
     # true. DB 컬럼이 아니라 생성 시점에 라우터가 채워 넣는 값이라, GET/PATCH 응답은
     # 항상 기본값 False다 (docs/05-api-contract.md 참고).
@@ -53,6 +57,18 @@ class CardResponse(_FromAttributes):
 
 class CardListResponse(BaseModel):
     cards: list[CardResponse]
+
+
+# 홈 화면(Figma 100:692) "무엇이 쌓였나요" 버블 차트 (9/16 신규). 카드 대표 태그
+# (skill_tags[0]) 기준 집계 — src/storage/db.py의 get_skill_category_counts() 참고.
+class SkillCategoryCount(BaseModel):
+    tag: str
+    count: int
+
+
+class SkillSummaryResponse(BaseModel):
+    total_cards: int
+    categories: list[SkillCategoryCount]
 
 
 # 4.1.1 "AI 프로젝트 자동 제안" (9/14 신규). project_id가 없는 카드끼리만 비교해서
