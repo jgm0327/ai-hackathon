@@ -28,7 +28,8 @@ Track C는 이 문서만 보고 작업하고, 백엔드는 이 문서를 먼저 
   "skill_tags": ["Redis", "성능최적화", "결제시스템"],
   "confidence": 0.91,
   "created_at": "2026-02-14T18:45:00+09:00",
-  "refinement_failed": false     // 9/15 신규 — 아래 설명 참고
+  "refinement_failed": false,    // 9/15 신규 — 아래 설명 참고
+  "case_summary": "오늘 기록은 결제 API 성능 개선 케이스입니다."  // 9/16 신규 — 아래 설명 참고
 }
 ```
 
@@ -40,6 +41,12 @@ Track C는 이 문서만 보고 작업하고, 백엔드는 이 문서를 먼저 
 > 동일하고 `skill_tags`는 빈 배열, `confidence`는 0.0, `refinement_failed`는 true로
 > 온다. 이 필드는 DB에 저장되는 값이 아니라 **생성 시점에만** 라우터가 채워 넣는다
 > — 이후 `GET`/`PATCH` 응답에서는 항상 `false`.
+
+> **`case_summary` (9/16 신규, Figma 41:139 결과 출력 모달)**: `refined_sentence`를
+> 한 문장으로 압축 요약한 문구("오늘 기록은 ~~ 케이스입니다" 형식) — 새로운 사실을
+> 지어내지 않는다(2.2). 입력이 모호해 `refined_sentence`가 못 채워지면 빈 문자열.
+> `refinement_failed`와 동일하게 DB에 저장되지 않고 **생성 시점에만** 채워지며,
+> `GET`/`PATCH` 응답에서는 항상 빈 문자열이다.
 
 ### `GET /api/cards?project_id=3`
 `project_id` 생략 시 전체. 최신순 정렬.

@@ -10,8 +10,8 @@ from unittest.mock import patch
 from src.parsing.parser import ParsedEntry, parse_note
 
 MOCK_RESPONSES = {
-    "결제 터진 거 막음": '{"refined_sentence": "결제 시스템 장애를 신속히 감지하고 대응함", "skill_tags": ["장애대응", "결제시스템"], "confidence": 0.85}',
-    "오늘 좀 바빴음": '{"refined_sentence": "특정 업무 내용을 확인할 수 없음", "skill_tags": [], "confidence": 0.1}',
+    "결제 터진 거 막음": '{"refined_sentence": "결제 시스템 장애를 신속히 감지하고 대응함", "skill_tags": ["장애대응", "결제시스템"], "confidence": 0.85, "case_summary": "오늘 기록은 결제 시스템 장애 대응 케이스입니다."}',
+    "오늘 좀 바빴음": '{"refined_sentence": "특정 업무 내용을 확인할 수 없음", "skill_tags": [], "confidence": 0.1, "case_summary": ""}',
     "결제 버그 고치고 나서 API 문서도 정리하고 회의도 들어감": '{"refined_sentence": "결제 모듈의 소프트웨어 결함을 식별하고 수정함", "skill_tags": ["버그수정", "결제시스템"], "confidence": 0.7}',
 }
 
@@ -22,6 +22,8 @@ def test_parse_note_basic():
         assert isinstance(result, ParsedEntry)
         assert "장애대응" in result.skill_tags
         assert result.confidence > 0.5
+        # 9/16 신규 — 결과 출력 모달(Figma 41:139) 문구.
+        assert result.case_summary == "오늘 기록은 결제 시스템 장애 대응 케이스입니다."
 
 
 def test_parse_note_ambiguous_low_confidence():
@@ -29,6 +31,15 @@ def test_parse_note_ambiguous_low_confidence():
         result = parse_note("오늘 좀 바빴음")
         assert result.confidence <= 0.5
         assert result.skill_tags == []
+        assert result.case_summary == ""
+
+
+def test_parse_note_missing_case_summary_defaults_to_empty_string():
+    """구버전 프롬프트/모델이 case_summary를 아예 안 준 응답도 안전하게 처리해야 한다."""
+    raw_text = "결제 버그 고치고 나서 API 문서도 정리하고 회의도 들어감"
+    with patch("src.parsing.parser._call_llm", return_value=MOCK_RESPONSES[raw_text]):
+        result = parse_note(raw_text)
+        assert result.case_summary == ""
 
 
 def test_parse_note_multi_event_picks_core_event():

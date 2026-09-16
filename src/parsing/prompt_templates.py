@@ -13,7 +13,8 @@ SYSTEM_PROMPT = """\
 {{
   "refined_sentence": "정제된 경력기술서 문장 (한 문장, 성과/행동 중심, 구체적 기술/도구 포함)",
   "skill_tags": ["역량 태그1", "역량 태그2", ...],
-  "confidence": 0.0에서 1.0 사이 숫자
+  "confidence": 0.0에서 1.0 사이 숫자,
+  "case_summary": "이 기록이 어떤 종류의 업무인지 한 문장으로 요약 (예: '오늘 기록은 장애 대응과 성능 개선이 함께 있는 케이스입니다.')"
 }}
 
 규칙:
@@ -23,22 +24,25 @@ SYSTEM_PROMPT = """\
 - 입력이 너무 짧거나 모호해서 구체적인 내용을 특정하기 어려우면 confidence를 0.5 이하로
   낮추고, refined_sentence는 무리하게 꾸며내지 말고 사실에 기반해서만 작성하세요.
 - 여러 사건이 섞여 있으면 가장 핵심적인 하나만 정제하세요.
+- case_summary는 반드시 "오늘 기록은 ~~ 케이스입니다." 형식으로, refined_sentence의
+  내용을 그대로 압축 요약하세요 — 새로운 사실이나 숫자를 지어내면 안 됩니다. 입력이
+  너무 모호해서 refined_sentence가 비어 있으면 case_summary도 빈 문자열로 두세요.
 
 예시:
 입력: "결제 터진 거 막음"
-출력: {{"refined_sentence": "결제 시스템 장애를 신속히 감지하고 원인을 파악하여 서비스 중단을 방지함", "skill_tags": ["장애대응", "결제시스템", "트러블슈팅"], "confidence": 0.85}}
+출력: {{"refined_sentence": "결제 시스템 장애를 신속히 감지하고 원인을 파악하여 서비스 중단을 방지함", "skill_tags": ["장애대응", "결제시스템", "트러블슈팅"], "confidence": 0.85, "case_summary": "오늘 기록은 결제 시스템 장애 대응 케이스입니다."}}
 
 입력: "오늘 좀 바빴음"
-출력: {{"refined_sentence": "특정 업무 내용을 확인할 수 없음", "skill_tags": [], "confidence": 0.1}}
+출력: {{"refined_sentence": "특정 업무 내용을 확인할 수 없음", "skill_tags": [], "confidence": 0.1, "case_summary": ""}}
 
 입력: "버그 고침"
-출력: {{"refined_sentence": "발견된 소프트웨어 결함을 수정함", "skill_tags": ["버그수정"], "confidence": 0.4}}
+출력: {{"refined_sentence": "발견된 소프트웨어 결함을 수정함", "skill_tags": ["버그수정"], "confidence": 0.4, "case_summary": "오늘 기록은 버그 수정 케이스입니다."}}
 
 입력: "결제 버그 고치고 나서 API 문서도 정리하고 회의도 들어감"
-출력: {{"refined_sentence": "결제 모듈의 소프트웨어 결함을 식별하고 수정함", "skill_tags": ["버그수정", "결제시스템"], "confidence": 0.7}}
+출력: {{"refined_sentence": "결제 모듈의 소프트웨어 결함을 식별하고 수정함", "skill_tags": ["버그수정", "결제시스템"], "confidence": 0.7, "case_summary": "오늘 기록은 결제 모듈 버그 수정 케이스입니다."}}
 
 입력: "점심 뭐 먹을지 고민함"
-출력: {{"refined_sentence": "특정 업무 내용을 확인할 수 없음", "skill_tags": [], "confidence": 0.05}}
+출력: {{"refined_sentence": "특정 업무 내용을 확인할 수 없음", "skill_tags": [], "confidence": 0.05, "case_summary": ""}}
 """
 
 USER_PROMPT_TEMPLATE = "낙서 문장: {raw_text}"
