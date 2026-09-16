@@ -4,13 +4,20 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const TABS = [
-  { href: "/", label: "입력" },
-  { href: "/stack", label: "스택" },
-  { href: "/resume", label: "경력기술서" },
-  { href: "/projects", label: "프로젝트" },
+  { href: "/", label: "일지 기록" },
+  { href: "/stack", label: "커리어 스택" },
 ] as const;
 
-/** 화면 4개(`/`, `/stack`, `/resume`, `/projects`) 간 하단 탭 내비게이션. */
+/**
+ * 하단 탭 내비게이션 (Figma 하단 탭바 기준, 9/16 재정렬).
+ *
+ * 원래는 `/resume`·`/projects`도 별도 탭이었지만, Figma는 탭을 "일지 기록"/
+ * "커리어 스택" 2개만 둔다 — 프로젝트 전환/생성은 `<ProjectSwitcher />`가
+ * `/`와 `/stack` 양쪽에 이미 인라인으로 들어있어(89:525 "프로젝트 헤더" 대응)
+ * 별도 탭이 불필요했고, 경력기술서(`/resume`)는 `/stack`의 진입 버튼으로
+ * 들어가는 하위 화면으로 재배치했다. `app/projects/page.tsx`는 이 정리로
+ * 완전히 중복이 돼서 삭제했다.
+ */
 export function TabBar() {
   const pathname = usePathname();
 

@@ -14,6 +14,7 @@ import {
   getProfile,
   updateProfile,
 } from "@/lib/api";
+import { markOnboardingSkipped } from "@/lib/onboardingSkip";
 
 /**
  * 온보딩 화면 (`/onboarding`, P2 — CLAUDE.md 6장 "온보딩(현재 직무/목표 직무/연차)",
@@ -193,6 +194,19 @@ export default function OnboardingPage() {
       >
         {saving ? "저장하는 중…" : hasExistingProfile ? "저장" : "내 커리어 스택 시작하기"}
       </button>
+
+      {!hasExistingProfile && (
+        <button
+          type="button"
+          onClick={() => {
+            markOnboardingSkipped();
+            router.push("/");
+          }}
+          className="text-center text-sm text-zinc-400 underline underline-offset-2"
+        >
+          나중에 설정하기
+        </button>
+      )}
     </div>
   );
 }
