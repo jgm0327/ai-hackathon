@@ -433,6 +433,28 @@ def test_star_apply_answers_updates_item(client, current_user_id):
     assert body["updated_item"]["situation"] == _STAR_ITEM_PAYLOAD["situation"]
 
 
+# --- POST /api/resume/export/docx (9/16 신규) ---
+
+
+def test_export_docx_requires_login(client):
+    response = client.post("/api/resume/export/docx", json={"content": "# 제목"})
+    assert response.status_code == 401
+
+
+def test_export_docx_returns_word_file(client, current_user_id):
+    response = client.post(
+        "/api/resume/export/docx",
+        json={"content": "# 백엔드 · 1-3년차\n\n## 결제 API 성능 개선\n- 상황: s\n"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    assert "resume.docx" in response.headers["content-disposition"]
+    assert len(response.content) > 0
+
+
 def test_star_apply_answers_rejects_more_than_three_answers(client, current_user_id):
     response = client.post(
         "/api/resume/star-apply-answers",

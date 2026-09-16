@@ -12,6 +12,9 @@ fastapi==0.141.1
 uvicorn[standard]==0.52.4
 httpx==0.28.1  # FastAPI TestClient(내부적으로 httpx 사용)와 테스트용
 
+# 경력기술서 Word(.docx) 내보내기 (9/16 신규, Figma "4.2 경력기술서 빌더" 하단 버튼)
+python-docx==1.2.0
+
 # 9/14 제거: streamlit, plotly, langchain.
 # - streamlit/plotly: Next.js(Track C) + Recharts 전환이 실제로 완료·검증됨(P0 게이트
 #   통과 + 음성/PWA/웹푸시 이식까지 끝남, CLAUDE.md 11장의 제거 조건 충족).

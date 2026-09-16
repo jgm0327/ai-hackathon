@@ -364,6 +364,26 @@ B`). 건너뛴(빈 답변) 질문은 프론트가 보내지 않아도 되고, �
 - 답변을 전부 건너뛰면(빈 답변만 옴) LLM을 호출하지 않고 원본 `item`을 그대로
   돌려준다.
 
+### `POST /api/resume/export/docx` (9/16 신규)
+
+경력기술서를 Word(.docx)로 내보낸다. 그동안 프론트에서 `disabled` + "준비 중"으로
+막아뒀던 버튼을 실제로 구현한 것 — LLM을 호출하지 않는 순수 변환 엔드포인트다.
+
+```jsonc
+// 요청
+{ "content": "# 백엔드 · 1-3년차\n\n## 결제 API 성능 개선\n- 상황: ...\n- 결과: ...\n" }
+
+// 응답 200 (JSON 아님) — Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document
+// Content-Disposition: attachment; filename="resume.docx"
+<바이너리 .docx 파일>
+```
+
+- `content`는 프론트가 이미 "마크다운 복사" 버튼에 쓰는 텍스트와 동일하다
+  (`buildResumeMarkdown()`) — 백엔드는 STAR 구조를 다시 조합하지 않고, 화면에서
+  보는 것과 다운로드한 문서가 항상 일치하게 한다.
+- 지원하는 마크다운은 이 앱이 실제로 생성하는 형태로 한정한다(`# 제목`,
+  `## 항목 제목`, `- 불릿`) — 범용 마크다운 파서가 아니다.
+
 ---
 
 ## 4. JD 매칭 (P1)
