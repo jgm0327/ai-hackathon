@@ -103,6 +103,9 @@ export default function ResumePage() {
   // Figma 41:737 "초안 생성 실패" 전용 화면 — "저장된 카드 N장은 그대로 있습니다"
   // 문구에 쓸 개수. 실패했을 때만 조회하면 되므로 평소 렌더링 경로엔 영향 없다.
   const [errorCardCount, setErrorCardCount] = useState<number | null>(null);
+  // Figma 41:714 "초안 생성 중" — "카드 N장을 조합하고 있어요" 문구용. handleBuild가
+  // 카드 목록을 조회하는 김에 같이 채운다(별도 네트워크 호출 추가 없음).
+  const [loadingCardCount, setLoadingCardCount] = useState<number | null>(null);
   const [showBuildForm, setShowBuildForm] = useState(true);
   const [copyStatus, setCopyStatus] = useState<"markdown" | "notion" | null>(null);
 
@@ -201,11 +204,16 @@ export default function ResumePage() {
     setLoading(true);
     setError(null);
     setErrorCardCount(null);
+    setLoadingCardCount(null);
     try {
       // 카드 구성이 지난 생성 때와 같으면 재호출 없이 캐시에서 반환한다 (9/14, LLM
-      // 호출 비용 절감 — web/lib/resumeCache.ts 참고).
+      // 호출 비용 절감 — web/lib/resumeCache.ts 참고). 카드는 여기서 한 번만
+      // 조회해서 개수는 "초안 생성 중" 문구(41:714)에 바로 쓰고, buildResumeCached에도
+      // 그대로 넘겨 내부에서 다시 조회하지 않게 한다.
       const usedJdText = jdText.trim() || undefined;
-      const result = await buildResumeCached(currentProject.id, { jdText: usedJdText });
+      const cards = await listCards(currentProject.id);
+      setLoadingCardCount(cards.length);
+      const result = await buildResumeCached(currentProject.id, { jdText: usedJdText, cards });
       setItems(result);
       setBuiltJdText(usedJdText);
       setGeneratedAt(peekCachedResumeGeneratedAt(currentProject.id, usedJdText));
@@ -548,9 +556,21 @@ export default function ResumePage() {
           {error && items && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
 
           {loading && (
-            <div className="flex flex-col gap-3">
-              <StarItemSkeleton />
-              <StarItemSkeleton />
+            <div className="flex flex-col items-center gap-2 rounded-[14px] border border-[#e5e7eb] bg-white px-4 py-8">
+              <span
+                aria-hidden
+                className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-600"
+              />
+              <p className="text-[13px] font-medium text-zinc-600">
+                {loadingCardCount != null
+                  ? `카드 ${loadingCardCount}장을 조합하고 있어요`
+                  : "카드를 조합하고 있어요"}
+              </p>
+              <p className="text-[11px] text-zinc-400">보통 10~30초 걸립니다</p>
+              <div className="flex w-full flex-col gap-3 pt-3">
+                <StarItemSkeleton />
+                <StarItemSkeleton />
+              </div>
             </div>
           )}
 
