@@ -79,15 +79,18 @@ def list_cards_endpoint(
 
 @router.get("/cards/skill-summary", response_model=SkillSummaryResponse)
 def get_skill_summary(
-    project_id: int, current_user: db.User = Depends(get_current_user)
+    project_id: int, top_n: int = 4, current_user: db.User = Depends(get_current_user)
 ) -> SkillSummaryResponse:
     """홈 화면(Figma 100:692) "무엇이 쌓였나요" 버블 차트 (9/16 신규).
 
-    `db.get_skill_category_counts()`가 이미 카드를 대표 태그 기준으로 집계해서
-    반환하므로 여기서는 그대로 스키마에 얹기만 한다.
+    `top_n` 기본값은 홈 화면 버블(최대 5개)용이다. `/stack`의 "역량 리스트"
+    (Figma 100:692 "4.1-h")는 버블처럼 개수 제한이 없는 막대 리스트라 큰 값(예:
+    50)을 넘겨서 사실상 전부 펼쳐 받는다 — `db.get_skill_category_counts()`가
+    이미 카드를 대표 태그 기준으로 집계해서 반환하므로 여기서는 그대로 스키마에
+    얹기만 한다.
     """
     cards = db.list_cards(current_user.id, project_id)
-    categories = db.get_skill_category_counts(current_user.id, project_id)
+    categories = db.get_skill_category_counts(current_user.id, project_id, top_n=top_n)
     return SkillSummaryResponse(
         total_cards=len(cards),
         categories=[SkillCategoryCount(tag=tag, count=count) for tag, count in categories],

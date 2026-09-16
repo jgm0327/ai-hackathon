@@ -382,6 +382,24 @@ def test_skill_summary_aggregates_by_representative_tag(client, current_user_id)
     assert body["categories"] == [{"tag": "Redis", "count": 2}]
 
 
+def test_skill_summary_top_n_param_controls_bucketing(client, current_user_id):
+    """`/stack` 역량 리스트(9/16)는 top_n을 크게 줘서 사실상 전부 펼쳐 받는다."""
+    project_id = db.create_project(current_user_id, "A은행 차세대", "2023-02-01")
+    for tag in ["A", "B", "C"]:
+        db.save_card(
+            current_user_id,
+            project_id,
+            ParsedEntry(raw_text=tag, refined_sentence=tag, skill_tags=[tag], confidence=0.9),
+            "2023-02-14",
+        )
+
+    default_response = client.get("/api/cards/skill-summary", params={"project_id": project_id, "top_n": 1})
+    assert len(default_response.json()["categories"]) == 2  # 1위 + "미분류"로 합쳐진 나머지
+
+    full_response = client.get("/api/cards/skill-summary", params={"project_id": project_id, "top_n": 50})
+    assert len(full_response.json()["categories"]) == 3  # 전부 개별 카테고리로
+
+
 def test_skill_summary_ignores_another_users_project(client, current_user_id):
     other_user_id = db.upsert_user("other-kakao-id", "다른유저", None, "2026-01-01T00:00:00")
     other_project_id = db.create_project(other_user_id, "다른 유저 프로젝트", "2023-02-01")
