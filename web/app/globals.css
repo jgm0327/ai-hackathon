@@ -1,8 +1,16 @@
 @import "tailwindcss";
 
+/*
+ * 9/16 신규 — Figma 100:692 전면 다크 리스킨(CLAUDE.md 3.5장). 이 파일의 `body {}`
+ * 규칙은 `@layer` 밖에 있어서 CSS Cascade Layers 규칙상 Tailwind 유틸리티(레이어
+ * 안에 있음)보다 항상 우선한다 — `app/layout.tsx`의 body에 `bg-[#141210]` 같은
+ * Tailwind 클래스를 아무리 줘도 이 변수값이 이긴다. 그래서 색은 클래스가 아니라
+ * 여기 변수를 바꿔서 맞춘다(실제로 겪은 버그: 다크로 바꿨다고 생각했는데 배경이
+ * 계속 흰색으로 렌더링됨 — 브라우저로 직접 확인하다가 발견).
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #141210;
+  --foreground: #f2f2f2;
 }
 
 @theme inline {
@@ -10,13 +18,6 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
