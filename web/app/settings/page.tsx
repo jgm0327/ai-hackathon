@@ -78,7 +78,11 @@ export default function SettingsPage() {
     setNotionSuccess(null);
     try {
       const res = await syncNotion(trimmed);
-      setNotionSuccess(`${res.imported}개 페이지를 가져왔어요.`);
+      setNotionSuccess(
+        res.skipped > 0
+          ? `${res.imported}개를 가져왔어요. ${res.skipped}개가 남았으니 다시 눌러 주세요.`
+          : `${res.imported}개 페이지를 가져왔어요.`,
+      );
       setNotionToken("");
       setNotionConnected(true);
       try {

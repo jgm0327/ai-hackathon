@@ -682,6 +682,7 @@ export default function ResumePage() {
                 onChange={(e) => setJdText(e.target.value)}
                 placeholder="공고 내용을 붙여넣어 주세요 (선택)"
                 rows={4}
+                maxLength={20000}
                 className="w-full resize-none rounded-[14px] border border-[#2e2e2e] bg-[#141414] p-3 text-sm text-[#f2f2f2] placeholder:text-[#5e5e5e] focus:border-[#5e5e5e] focus:outline-none"
               />
               {requirementsError && (
@@ -728,6 +729,7 @@ export default function ResumePage() {
                     onChange={(e) => setPasteText(e.target.value)}
                     placeholder={"결제 API 성능 개선 담당"}
                     rows={3}
+                    maxLength={10000}
                     className="w-full resize-none rounded-[14px] border border-[#2e2e2e] bg-[#141414] p-3 text-sm text-[#f2f2f2] placeholder:text-[#5e5e5e] focus:border-[#5e5e5e] focus:outline-none"
                   />
                   <div className="rounded-[14px] bg-[#181818] p-3 text-xs text-[#a0a0a0]">
