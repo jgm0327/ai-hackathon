@@ -45,6 +45,10 @@ router = APIRouter(tags=["cards"])
 def create_card(
     payload: CardCreateRequest, current_user: db.User = Depends(get_current_user)
 ) -> CardResponse:
+    # 공백만 있는 입력도 LLM을 부를 이유가 없다 — Pydantic의 min_length는 공백도
+    # 글자로 세므로 여기서 한 번 더 거른다(notion.py의 user_token 검증과 같은 패턴).
+    if not payload.raw_text.strip():
+        raise HTTPException(status_code=422, detail="내용을 입력해 주세요.")
     result = run_pipeline(current_user.id, payload.raw_text)
     card = db.get_card(current_user.id, result["card_id"])
     response = CardResponse.model_validate(card)

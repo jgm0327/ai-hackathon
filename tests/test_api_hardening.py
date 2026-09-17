@@ -45,6 +45,20 @@ def test_raw_text_at_limit_is_accepted(client, current_user_id):
     assert response.status_code == 201
 
 
+@pytest.mark.parametrize("empty", ["", "   ", "\n\t "])
+def test_blank_raw_text_rejected_before_llm(client, current_user_id, empty):
+    """빈/공백뿐인 메모는 정리할 내용이 없으니 LLM을 부르지 않는다.
+
+    9/17 실측: 이전엔 `{"raw_text": ""}`가 201로 통과해 LLM을 한 번 부르고 내용
+    없는 카드까지 만들었다.
+    """
+    with patch("src.parsing.parser._call_llm") as mock_llm:
+        response = client.post("/api/cards", json={"raw_text": empty})
+
+    assert response.status_code == 422
+    mock_llm.assert_not_called()
+
+
 def test_jd_text_over_limit_rejected_before_llm(client, current_user_id):
     project_id = db.create_project(current_user_id, "A은행", "2023-02-01")
 
