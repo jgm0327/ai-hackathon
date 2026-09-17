@@ -75,7 +75,7 @@ def test_sync_notion_skips_empty_pages(client, current_user_id):
             response = client.post("/api/notion/sync", json={"user_token": "secret_abc123"})
 
     assert response.status_code == 200
-    assert response.json() == {"imported": 0, "cards": []}
+    assert response.json() == {"imported": 0, "skipped": 0, "cards": []}
     mock_batch.assert_called_once_with(current_user_id, [])
 
 

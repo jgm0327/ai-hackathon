@@ -548,7 +548,10 @@ def apply_star_answers(item: StarItem, qa_pairs: list[tuple[str, str]]) -> StarA
 
 @lru_cache(maxsize=1)
 def _get_client() -> anthropic.Anthropic:
-    return anthropic.Anthropic(api_key=settings.llm_api_key)
+    """timeout을 명시한다 (9/17) — SDK 기본값 10분은 너무 길다. 여긴 카드 수십 장을
+    한 번에 보내는 Sonnet 호출이라 parser.py(30초)보다는 넉넉하게 잡되, 프론트가
+    안내하는 "최대 10초"를 크게 넘기면 어차피 유저가 떠나므로 120초로 끊는다."""
+    return anthropic.Anthropic(api_key=settings.llm_api_key, timeout=120.0, max_retries=1)
 
 
 def _call_llm_anthropic(user_prompt: str, system_prompt: str = _SYSTEM_PROMPT) -> str:

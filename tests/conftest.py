@@ -7,6 +7,7 @@ API 레벨 테스트(test_api_*.py) 6개 전부가 이제 "격리된 SQLite + �
 """
 import pytest
 
+from src.api import rate_limit
 from src.api.main import app
 from src.auth.deps import get_current_user
 from src.storage import db
@@ -20,6 +21,20 @@ def _isolated_db(monkeypatch, tmp_path):
         db_path = str(tmp_path / "test.db")
 
     monkeypatch.setattr(db, "settings", _FakeSettings())
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limit():
+    """레이트 리밋 카운터를 테스트마다 비운다 (9/17).
+
+    카운터는 프로세스 메모리에 유저 id별로 쌓이는데, 테스트는 전부 같은 가짜 유저를
+    쓰므로 초기화하지 않으면 한 파일 안에서 앞 테스트가 쓴 횟수 때문에 뒤 테스트가
+    429를 받는다(실제로 8개가 그렇게 깨졌다). 레이트 리밋 자체를 끄지 않고 비우기만
+    하는 이유는, 리밋 동작 자체를 검증하는 테스트도 같은 픽스처 위에서 돌아야 하기
+    때문이다.
+    """
+    rate_limit.reset_for_tests()
     yield
 
 
