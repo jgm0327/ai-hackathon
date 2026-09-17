@@ -1,13 +1,27 @@
 name: send-reminder
 
-# 구독 데이터는 Upstash Redis(REST API)에 저장한다 (9/10) — 배포된 Streamlit 앱(쓰기)과
-# 이 워크플로(읽기)가 서로 다른 프로세스라 파일시스템을 공유 못 하기 때문.
-# src/push/subscription_store.py 참고. Repo Secrets에 UPSTASH_REDIS_REST_URL/TOKEN 필요.
+# ⚠️ 2026-09-17: 스케줄 트리거를 **비활성화**했다. 발송은 이제 FastAPI 앱 내부
+# 스케줄러(src/api/scheduler.py)가 1분마다 담당한다.
+#
+# 왜 껐는가:
+#  1) 무료 러너의 스케줄 지연이 심해 사실상 안 돌았다 — cron은 `*/5`인데 실측 실행
+#     간격이 평균 205분(최소 119분)이라 5분짜리 발송 윈도와 거의 겹치지 않았다.
+#  2) 러너가 UTC라 유저가 KST로 입력한 퇴근 시각이 9시간 어긋나 계산됐다.
+#     (이 버그 자체는 src/timeutil.py로 고쳤다 — 이제 어디서 돌든 KST 기준이다.)
+#  3) 앱 내부 스케줄러와 이 워크플로가 **둘 다 켜져 있으면 알림이 두 번 간다.**
+#     중복 발송 방지(last_sent_date)가 들어가서 실제로는 한 번만 나가지만,
+#     두 경로가 같은 저장소를 동시에 쓰는 구성은 피하는 게 낫다.
+#
+# 수동 실행(workflow_dispatch)은 남겨둔다 — 앱이 떠 있지 않을 때 긴급 발송이나
+# 동작 확인용. 로컬 확인은 이 한 줄이 더 빠르다:
+#   python -c "from src.push.push_sender import send_due_reminders; print(send_due_reminders())"
+#
+# 구독 데이터는 Upstash Redis(REST API)에 저장한다 (9/10). Repo Secrets에
+# UPSTASH_REDIS_REST_URL/TOKEN 필요. src/push/subscription_store.py 참고.
 
 on:
-  schedule:
-    - cron: "*/5 * * * *"  # 5분마다 실행, send_due_reminders()의 window_minutes와 맞출 것
-  workflow_dispatch: {}  # 수동 테스트용
+  # schedule 트리거 제거됨(위 주석 참고). 되살리려면 앱 내부 스케줄러를 먼저 끌 것.
+  workflow_dispatch: {}  # 수동 실행 전용
 
 jobs:
   send-reminder:
