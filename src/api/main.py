@@ -29,6 +29,16 @@ from src.config import settings
 
 logger = logging.getLogger(__name__)
 
+# uvicorn은 자기 로거("uvicorn.*")만 설정하고 루트 로거는 건드리지 않는다 — 그래서
+# 우리 모듈의 logger.info()가 아무 데도 안 찍힌다(9/17 실측: 스케줄러 시작 로그가
+# 안 보여서 동작 여부를 확인할 수 없었다). 앱 로그가 uvicorn 출력에 같이 나오도록
+# 루트 로거에 핸들러를 붙인다. 이미 설정돼 있으면(테스트 러너 등) basicConfig가
+# 아무것도 하지 않으므로 안전하다.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)s:     [%(name)s] %(message)s",
+)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
