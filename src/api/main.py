@@ -14,19 +14,42 @@ CORS도 `allow_credentials=True`로 바뀌었다 — 이 상태에서 origin을 
 (docs/06-migration.md 2장, iOS Safari가 14.5부터 지원한다는 사전 조사 근거) 서버측
 STT 엔드포인트 자체가 당장은 불필요하다. 실기기에서 실패가 확인되면 그때 추가한다.
 """
+import asyncio
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from src.api import scheduler
 from src.api.routers import auth, cards, health, jds, notion, profile, projects, push, resume
 from src.config import settings
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="커리어 로그 API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """퇴근 알림 스케줄러를 앱 수명에 맞춰 띄우고 내린다 (9/17 신규).
+
+    앱 안에서 도니까 로컬(Windows)과 배포(OCI)가 같은 경로로 동작한다 — cron이나
+    작업 스케줄러를 따로 등록할 필요가 없다. 자세한 배경은 src/api/scheduler.py 참고.
+    """
+    task = scheduler.start()
+    try:
+        yield
+    finally:
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+
+app = FastAPI(title="커리어 로그 API", lifespan=lifespan)
 
 # CORS 허용 origin은 하드코딩하지 않고 환경변수로 관리한다(CLAUDE.md 9장).
 # 카카오 로그인 도입(9/14)으로 쿠키 기반 세션을 쓰므로 allow_credentials=True가 필요하고,
