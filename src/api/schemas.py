@@ -39,7 +39,10 @@ _ExistingItem = Annotated[str, Field(max_length=MAX_EXISTING_ITEM)]
 
 
 class CardCreateRequest(BaseModel):
-    raw_text: str = Field(max_length=MAX_RAW_TEXT)
+    # min_length=1 (9/17): 빈 메모도 그대로 parse_note()까지 가서 LLM을 한 번 부르고
+    # 내용 없는 카드를 만든다(실측 확인). 정리할 내용이 없으면 부를 이유도 없다.
+    # 공백만 있는 경우는 라우터가 따로 거른다 — Pydantic은 공백도 글자로 세기 때문.
+    raw_text: str = Field(min_length=1, max_length=MAX_RAW_TEXT)
 
 
 class CardTagsUpdateRequest(BaseModel):
