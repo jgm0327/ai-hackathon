@@ -96,5 +96,12 @@ class Settings:
     cookie_secure: bool = os.getenv("COOKIE_SECURE", "true").strip().lower() not in ("false", "0", "")
     session_ttl_days: int = int(os.getenv("SESSION_TTL_DAYS", "30"))
 
+    # --- 앱 기준 시간대 (9/17 신규) ---
+    # 유저가 입력하는 퇴근 시각("18:00")과 카드의 "오늘"은 전부 이 시간대 기준이다.
+    # 서버 로컬 시간(datetime.now())에 의존하면 배포 환경에 따라 결과가 달라진다 —
+    # 실제로 GitHub Actions 러너(UTC)에서 푸시가 9시간 어긋나 발송되고 있었다(9/17 발견).
+    # 코드가 어디서 돌든 같은 결과를 내도록 시간대를 명시적으로 고정한다.
+    app_timezone: str = os.getenv("APP_TIMEZONE", "Asia/Seoul")
+
 
 settings = Settings()

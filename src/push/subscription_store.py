@@ -40,11 +40,36 @@ def save_subscription(user_id: str, subscription: dict, leave_time: str) -> None
 
 
 def list_subscriptions() -> dict:
-    """모든 유저의 구독 정보를 반환한다. GitHub Actions 트리거가 이걸 순회하며 발송."""
+    """모든 유저의 구독 정보를 반환한다. 스케줄러가 이걸 순회하며 발송한다."""
     if _upstash_configured():
         flat = _upstash_command("HGETALL", _REDIS_KEY) or []
         return {flat[i]: json.loads(flat[i + 1]) for i in range(0, len(flat), 2)}
     return _load_local()
+
+
+def mark_reminder_sent(user_id: str, date_str: str) -> None:
+    """오늘 이 유저에게 퇴근 알림을 보냈다고 기록한다 (9/17 신규).
+
+    스케줄러가 1분마다 도는데 발송 윈도는 그보다 넓어서, 기록이 없으면 같은 날
+    같은 알림이 여러 번 간다(기존 코드의 `중복 발송 방지는 TODO`가 이 문제였다).
+
+    구독 엔트리 안에 `last_sent_date`로 같이 저장한다 — 별도 키를 만들면 구독을
+    지울 때 같이 안 지워져서 찌꺼기가 남는다. 엔트리가 없으면 조용히 무시한다
+    (그 사이 구독이 해지된 경우).
+    """
+    if _upstash_configured():
+        raw = _upstash_command("HGET", _REDIS_KEY, user_id)
+        if not raw:
+            return
+        entry = json.loads(raw)
+        entry["last_sent_date"] = date_str
+        _upstash_command("HSET", _REDIS_KEY, user_id, json.dumps(entry, ensure_ascii=False))
+    else:
+        data = _load_local()
+        if user_id not in data:
+            return
+        data[user_id]["last_sent_date"] = date_str
+        _save_local(data)
 
 
 def delete_subscription(user_id: str) -> None:
