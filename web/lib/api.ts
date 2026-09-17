@@ -412,7 +412,16 @@ export async function exportResumeDocx(content: string): Promise<void> {
     throw new ApiError(0, "서버에 연결할 수 없습니다.");
   }
   if (!res.ok) {
-    throw new ApiError(res.status, res.statusText || "내보내기에 실패했습니다.");
+    // 실패 응답은 파일이 아니라 JSON({detail})이다 — 413(본문 초과)/429(요청 잦음)처럼
+    // 서버가 이유를 알려주는 경우가 있어 statusText 대신 detail을 우선 쓴다.
+    let detail = res.statusText || "내보내기에 실패했습니다.";
+    try {
+      const body = (await res.json()) as { detail?: string };
+      if (typeof body?.detail === "string") detail = body.detail;
+    } catch {
+      // JSON이 아니면 statusText 그대로
+    }
+    throw new ApiError(res.status, detail);
   }
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
@@ -431,6 +440,9 @@ export async function exportResumeDocx(content: string): Promise<void> {
 
 export interface NotionSyncResult {
   imported: number;
+  /** 9/17 신규 — 한 번에 처리할 페이지 수 상한을 넘겨 이번에 못 가져온 개수.
+   * 0이면 전부 가져온 것이고, 0보다 크면 다시 눌러 이어서 가져갈 수 있다. */
+  skipped: number;
   cards: Card[];
 }
 

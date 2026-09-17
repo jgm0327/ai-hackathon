@@ -295,12 +295,15 @@ export default function HomePage() {
           <p className="text-[11px] font-medium text-[#828282]">기록 {todayCards.length}</p>
         </div>
         <div className="flex flex-col gap-2 rounded-[14px] bg-[#1e1e1e] px-[15px] py-[11px]">
+          {/* maxLength는 서버(schemas.py MAX_RAW_TEXT)와 같은 값으로 맞춘다 — 여기서
+              먼저 끊어야 유저가 길게 쓴 뒤에야 422를 보는 일이 없다. */}
           <textarea
             ref={textareaRef}
             value={rawText}
             onChange={(e) => setRawText(e.target.value)}
             placeholder={"오늘 뭐 하셨어요?"}
             rows={2}
+            maxLength={2000}
             className="w-full resize-none border-0 bg-transparent p-0 text-[14px] text-[#f2f2f2] placeholder:text-[#828282] focus:outline-none"
           />
           <div className="flex items-center justify-end gap-2">
