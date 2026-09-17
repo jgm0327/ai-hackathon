@@ -51,6 +51,66 @@ app.add_middleware(
 )
 
 
+def _attach_cors_headers(response: JSONResponse, scope: Scope) -> None:
+    """미들웨어가 CORSMiddleware를 거치지 않고 직접 내보내는 응답에 CORS 헤더를 붙인다.
+
+    아래 두 미들웨어(본문 크기 제한, 예외 처리)는 둘 다 CORSMiddleware **바깥**에
+    있어서 이 작업을 직접 해야 한다 — 안 하면 브라우저에는 실제 상태 코드 대신
+    정체불명의 CORS 에러로 보인다(9/14 실측, `_CORSSafeErrorMiddleware` docstring 참고).
+    """
+    origin = next(
+        (v.decode("latin-1") for k, v in scope.get("headers", []) if k == b"origin"),
+        None,
+    )
+    if origin and (_origins == ["*"] or origin in _origins):
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Vary"] = "Origin"
+
+
+# 요청 본문 크기 상한 (9/17 신규). 개별 필드 길이는 schemas.py의 Field(max_length=...)가
+# 막지만, 그건 **본문을 다 읽어 JSON으로 파싱한 뒤**에 동작한다 — 수백 MB짜리 본문이
+# 오면 거절되기 전에 이미 메모리에 다 올라온다. 여기서 Content-Length만 보고 미리
+# 끊어서 그 상황 자체를 막는다. 가장 큰 정상 요청이 초안 저장/Word 내보내기
+# (MAX_DRAFT_CONTENT=100,000자)라 2MB면 충분히 여유 있다.
+MAX_REQUEST_BYTES = 2 * 1024 * 1024
+
+
+class _BodySizeLimitMiddleware:
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        raw_length = next(
+            (v for k, v in scope.get("headers", []) if k == b"content-length"),
+            None,
+        )
+        if raw_length is not None:
+            try:
+                declared = int(raw_length)
+            except ValueError:
+                declared = 0
+            if declared > MAX_REQUEST_BYTES:
+                logger.warning(
+                    "본문 크기 초과로 거절: %s %s (%d bytes)",
+                    scope.get("method", "?"),
+                    scope.get("path", "?"),
+                    declared,
+                )
+                response = JSONResponse(
+                    status_code=413, content={"detail": "요청 본문이 너무 큽니다."}
+                )
+                _attach_cors_headers(response, scope)
+                await response(scope, receive, send)
+                return
+
+        await self.app(scope, receive, send)
+
+
 class _CORSSafeErrorMiddleware:
     """처리 안 된 예외를 잡아 계약대로 `{"detail": "..."}`로 바꾸면서, CORS 헤더도
     직접 붙여서 내려보낸다 (9/14 신규).
@@ -86,18 +146,14 @@ class _CORSSafeErrorMiddleware:
             logger.exception("처리되지 않은 예외: %s %s", method, path)
 
             response = JSONResponse(status_code=500, content={"detail": "서버 오류가 발생했습니다."})
-            origin = next(
-                (v.decode("latin-1") for k, v in scope.get("headers", []) if k == b"origin"),
-                None,
-            )
-            if origin and (_origins == ["*"] or origin in _origins):
-                response.headers["Access-Control-Allow-Origin"] = origin
-                response.headers["Access-Control-Allow-Credentials"] = "true"
-                response.headers["Vary"] = "Origin"
+            _attach_cors_headers(response, scope)
             await response(scope, receive, send)
 
 
 app.add_middleware(_CORSSafeErrorMiddleware)
+# 본문 크기 제한은 가장 바깥에 둔다 — 나중에 추가할수록 바깥이므로, 큰 본문을 다른
+# 미들웨어가 건드리기 전에 여기서 먼저 끊는다.
+app.add_middleware(_BodySizeLimitMiddleware)
 
 app.include_router(auth.router, prefix="/api")
 app.include_router(cards.router, prefix="/api")

@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from src.agent.card_clustering import suggest_clusters
 from src.agent.pipeline import retry_refinement, run_pipeline
+from src.api.rate_limit import limit_light
 from src.api.schemas import (
     BundleIntoProjectRequest,
     CardClusterSuggestion,
@@ -40,7 +41,7 @@ from src.storage import db
 router = APIRouter(tags=["cards"])
 
 
-@router.post("/cards", response_model=CardResponse, status_code=201)
+@router.post("/cards", response_model=CardResponse, status_code=201, dependencies=[Depends(limit_light)])
 def create_card(
     payload: CardCreateRequest, current_user: db.User = Depends(get_current_user)
 ) -> CardResponse:
@@ -52,7 +53,7 @@ def create_card(
     return response
 
 
-@router.post("/cards/{card_id}/refine", response_model=CardResponse)
+@router.post("/cards/{card_id}/refine", response_model=CardResponse, dependencies=[Depends(limit_light)])
 def refine_card_endpoint(
     card_id: int, current_user: db.User = Depends(get_current_user)
 ) -> CardResponse:

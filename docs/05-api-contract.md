@@ -519,3 +519,52 @@ VAPID_PUBLIC_KEY가 서버에 설정 안 돼 있으면 503.
 실제로 발견됐다. `source_card_ids`(카드 id 정수 배열)를 추가해서 그 문제를 해결함 —
 필드 추가라 "변경 규칙"상 자유롭게 허용되는 범위. `source_dates`는 그대로 유지(화면
 표시용).
+
+---
+
+## 10. 공통 보호장치 (9/17 신규)
+
+전 엔드포인트에 공통으로 걸리는 제한이다. 정상 사용에서는 닿지 않지만, 넘으면
+**LLM 호출 전에** 거절되므로 API 비용이 발생하지 않는다.
+
+### 입력 길이 상한
+
+초과 시 `422`. 값은 `src/api/schemas.py` 상단 상수에 모여 있다.
+
+| 필드 | 상한 | 대상 |
+|---|---|---|
+| `raw_text` | 2,000자 | `POST /cards` |
+| `jd_text` | 20,000자 | `POST /resume`, `POST /resume/jd-requirements` |
+| `existing_items[]` 각 항목 | 1,000자 (최대 10개) | `POST /resume/enhance` |
+| `content` | 100,000자 | `PUT /resume/draft`, `POST /resume/export/docx` |
+| `StarItemPayload` 각 문장 | 2,000자 | 역질문 경로 |
+| `answers[]` 답변 | 1,000자 (최대 3개) | `POST /resume/star-apply-answers` |
+
+프론트도 같은 값으로 `maxLength`를 걸어 둔다 — 서버 422를 보기 전에 브라우저가 먼저
+막는 편이 UX가 낫기 때문이고, 서버 쪽이 진짜 방어선이다(API 직접 호출은 프론트를
+거치지 않는다).
+
+### 레이트 리밋
+
+유저별 슬라이딩 윈도(60초). 초과 시 `429` + `Retry-After` 헤더.
+
+| 묶음 | 분당 | 대상 |
+|---|---|---|
+| heavy | 10회 | `/resume`, `/resume/enhance`, `/resume/jd-requirements`, `/resume/star-*` (Sonnet) |
+| light | 30회 | `POST /cards`, `POST /cards/{id}/refine` (Haiku) |
+| batch | 3회 | `POST /notion/sync` |
+
+카운터는 **프로세스 메모리**에 있다 — 재시작하면 비고, 워커를 여러 개 띄우면 워커마다
+따로 센다. 현재 배포 구성(단일 VM + uvicorn 단일 프로세스)에서는 문제가 없지만, 워커를
+늘리는 시점에 `src/api/rate_limit.py`를 공유 저장소 기반으로 교체해야 한다.
+
+### 노션 동기화 페이지 상한
+
+`POST /notion/sync`는 한 번에 최대 **50페이지**만 처리한다(페이지당 LLM 1회). 넘치면
+거절하지 않고 앞에서부터 잘라 처리한 뒤 응답의 `skipped`에 남은 개수를 담는다 —
+다시 호출하면 이어서 가져간다.
+
+### 요청 본문 크기
+
+`Content-Length`가 **2MB**를 넘으면 본문을 읽기 전에 `413`. 개별 필드 상한은 JSON을
+파싱한 뒤에야 동작하므로, 거대한 본문이 메모리에 올라오는 것 자체를 막는 앞단 방어선이다.

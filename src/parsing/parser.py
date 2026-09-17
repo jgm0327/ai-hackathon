@@ -30,8 +30,14 @@ class ParsedEntry:
 
 @lru_cache(maxsize=1)
 def _get_client() -> anthropic.Anthropic:
-    """Anthropic 클라이언트를 지연 초기화하고 재사용한다 (import 시점에 키 검증 안 함)."""
-    return anthropic.Anthropic(api_key=settings.llm_api_key)
+    """Anthropic 클라이언트를 지연 초기화하고 재사용한다 (import 시점에 키 검증 안 함).
+
+    timeout을 명시한다 (9/17) — SDK 기본값이 10분이라, 응답이 늦어지면 매일 쓰는 입력
+    경로에서 유저가 하염없이 로딩만 보고 그동안 서버 커넥션도 붙잡힌다. 여긴 Haiku로
+    보통 1~2초면 끝나는 호출이라 30초면 충분히 넉넉하다. 실패해도 `run_pipeline()`이
+    원문을 폴백 저장하므로(pipeline.py 9/15 노트) 메모가 유실되지는 않는다.
+    """
+    return anthropic.Anthropic(api_key=settings.llm_api_key, timeout=30.0, max_retries=1)
 
 
 def _call_llm_anthropic(raw_text: str) -> str:

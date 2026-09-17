@@ -4,7 +4,7 @@ docs/05-api-contract.md 1~3, 8절의 필드명/모양을 그대로 따른다. �
 내부 dataclass(Card, Project, StarItem)와 1:1로 맞춰뒀으므로 `model_validate()`로
 (from_attributes=True) dataclass 인스턴스를 바로 변환할 수 있다.
 """
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -13,8 +13,33 @@ class _FromAttributes(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+# ---------------------------------------------------------------------------
+# 입력 길이 상한 (9/17 신규)
+#
+# LLM에 그대로 실려 가는 필드는 길이를 안 막으면 그대로 API 청구서가 된다 —
+# 예를 들어 raw_text에 소설 한 권을 붙여넣으면 그게 전부 프롬프트로 간다.
+# 여기 값들은 "정상 사용이면 절대 안 닿는데 악용/실수는 막는" 선으로 잡았다.
+# 상한을 넘으면 Pydantic이 422로 자동 거절하므로 LLM 호출 자체가 일어나지 않는다.
+# ---------------------------------------------------------------------------
+MAX_RAW_TEXT = 2_000  # 퇴근 전 한 줄 메모 (CLAUDE.md 1장 "3초 만에 끝내기")
+MAX_SENTENCE = 2_000  # 정제 문장 / STAR 각 필드
+MAX_TITLE = 200
+MAX_JD_TEXT = 20_000  # 채용공고 본문 — 긴 공고도 통과하되 문서 통째 붙여넣기는 차단
+MAX_EXISTING_ITEM = 1_000  # 기존 경력기술서 문장 1건
+MAX_DRAFT_CONTENT = 100_000  # 초안 저장/Word 내보내기 — LLM을 안 타므로 넉넉히
+MAX_TAGS = 20
+MAX_TAG = 50
+MAX_TOKEN = 500  # 노션 통합 토큰 등 외부 자격증명 문자열
+MAX_QUESTION = 500
+MAX_ANSWER = 1_000
+
+# 리스트 안의 문자열 하나하나에도 상한을 건다 — 개수만 막으면 "10개 × 각 1MB"가 뚫린다.
+_Tag = Annotated[str, Field(max_length=MAX_TAG)]
+_ExistingItem = Annotated[str, Field(max_length=MAX_EXISTING_ITEM)]
+
+
 class CardCreateRequest(BaseModel):
-    raw_text: str
+    raw_text: str = Field(max_length=MAX_RAW_TEXT)
 
 
 class CardTagsUpdateRequest(BaseModel):
@@ -24,8 +49,8 @@ class CardTagsUpdateRequest(BaseModel):
     와야 하고(라우터가 체크, 둘 다 없으면 400), 넘어온 것만 바뀐다.
     """
 
-    skill_tags: list[str] | None = None
-    refined_sentence: str | None = None
+    skill_tags: list[_Tag] | None = Field(default=None, max_length=MAX_TAGS)
+    refined_sentence: str | None = Field(default=None, max_length=MAX_SENTENCE)
 
 
 class CardResponse(_FromAttributes):
@@ -85,21 +110,21 @@ class UnclassifiedSuggestionsResponse(BaseModel):
 
 
 class BundleIntoProjectRequest(BaseModel):
-    card_ids: list[int]
-    name: str
-    started_at: str
+    card_ids: list[int] = Field(max_length=500)
+    name: str = Field(max_length=MAX_TITLE)
+    started_at: str = Field(max_length=32)
 
 
 class ProjectCreateRequest(BaseModel):
-    name: str
-    started_at: str
+    name: str = Field(max_length=MAX_TITLE)
+    started_at: str = Field(max_length=32)
 
 
 class ProjectPatchRequest(BaseModel):
     """부분 업데이트. 계약 문서(2장)가 보여주는 3개 필드만 노출한다."""
 
-    name: str | None = None
-    ended_at: str | None = None
+    name: str | None = Field(default=None, max_length=MAX_TITLE)
+    ended_at: str | None = Field(default=None, max_length=32)
     is_current: bool | None = None
 
 
@@ -117,7 +142,7 @@ class ProjectListResponse(BaseModel):
 
 class ResumeRequest(BaseModel):
     project_id: int
-    jd_text: str | None = None
+    jd_text: str | None = Field(default=None, max_length=MAX_JD_TEXT)
 
 
 class StarItemResponse(_FromAttributes):
@@ -150,14 +175,14 @@ class ResumeDraftResponse(BaseModel):
 
 class ResumeDraftSaveRequest(BaseModel):
     project_id: int
-    content: str
+    content: str = Field(max_length=MAX_DRAFT_CONTENT)
 
 
 # "기존 경력기술서 붙여넣기 → Before/After 대조" (9/15 신규, docs/05-api-contract.md
 # 3장). 완전히 선택 사항 — 위 STAR 생성/초안 저장 경로와 독립적으로 동작한다.
 class ResumeEnhanceRequest(BaseModel):
     project_id: int
-    existing_items: list[str] = Field(max_length=10)
+    existing_items: list[_ExistingItem] = Field(max_length=10)
 
 
 class EnhancedItemResponse(_FromAttributes):
@@ -177,7 +202,7 @@ class ResumeEnhanceResponse(BaseModel):
 # 있어요"를 보여준다.
 class JdRequirementsRequest(BaseModel):
     project_id: int
-    jd_text: str
+    jd_text: str = Field(max_length=MAX_JD_TEXT)
 
 
 class JdRequirementResponse(_FromAttributes):
@@ -197,14 +222,14 @@ class JdRequirementsResponse(BaseModel):
 # 저장하지 않으므로(CLAUDE.md 3장) 프론트가 들고 있는 값을 그대로 왕복시킨다 —
 # StarItemResponse와 필드는 같지만 이건 입력(body)용이라 별도 모델로 둔다.
 class StarItemPayload(BaseModel):
-    title: str
-    period: str
-    situation: str
-    task: str
-    action: str
-    result: str
-    source_dates: list[str] = []
-    source_card_ids: list[int] = []
+    title: str = Field(max_length=MAX_TITLE)
+    period: str = Field(max_length=64)
+    situation: str = Field(max_length=MAX_SENTENCE)
+    task: str = Field(max_length=MAX_SENTENCE)
+    action: str = Field(max_length=MAX_SENTENCE)
+    result: str = Field(max_length=MAX_SENTENCE)
+    source_dates: list[Annotated[str, Field(max_length=32)]] = Field(default=[], max_length=200)
+    source_card_ids: list[int] = Field(default=[], max_length=200)
 
 
 class StarQuestionsRequest(BaseModel):
@@ -216,8 +241,8 @@ class StarQuestionsResponse(BaseModel):
 
 
 class QaPair(BaseModel):
-    question: str
-    answer: str
+    question: str = Field(max_length=MAX_QUESTION)
+    answer: str = Field(max_length=MAX_ANSWER)
 
 
 class StarApplyAnswersRequest(BaseModel):
@@ -233,7 +258,7 @@ class StarApplyAnswersResponse(BaseModel):
 # Word(.docx) 내보내기 (9/16 신규). 프론트가 이미 "마크다운 복사"에 쓰는 텍스트를
 # 그대로 보낸다 — 백엔드는 STAR 구조를 다시 조합하지 않는다.
 class ResumeExportRequest(BaseModel):
-    content: str
+    content: str = Field(max_length=MAX_DRAFT_CONTENT)
 
 
 class HealthResponse(BaseModel):
@@ -265,18 +290,21 @@ class NotionSyncRequest(BaseModel):
     않는다 — 특정 페이지만 고르는 기능이 필요해지면 notion_client 쪽부터 확장해야 한다.
     """
 
-    user_token: str
-    page_id: str | None = None
+    user_token: str = Field(max_length=MAX_TOKEN)
+    page_id: str | None = Field(default=None, max_length=MAX_TOKEN)
 
 
 class NotionSyncResponse(BaseModel):
     imported: int
+    # 9/17 신규 — 한 번에 처리할 페이지 수 상한(MAX_NOTION_PAGES_PER_SYNC)을 넘겨
+    # 이번에 못 가져온 개수. 0이면 전부 가져온 것. 다시 누르면 이어서 가져간다.
+    skipped: int = 0
     cards: list[CardResponse]
 
 
 class PushKeys(BaseModel):
-    p256dh: str
-    auth: str
+    p256dh: str = Field(max_length=MAX_TOKEN)
+    auth: str = Field(max_length=MAX_TOKEN)
 
 
 class PushSubscribeRequest(BaseModel):
@@ -288,13 +316,13 @@ class PushSubscribeRequest(BaseModel):
     Track C에 공유 필요.
     """
 
-    endpoint: str
+    endpoint: str = Field(max_length=2_000)
     keys: PushKeys
-    leave_time: str  # "HH:MM"
+    leave_time: str = Field(max_length=16)  # "HH:MM"
 
 
 class PushUnsubscribeRequest(BaseModel):
-    endpoint: str
+    endpoint: str = Field(max_length=2_000)
 
 
 class VapidPublicKeyResponse(BaseModel):
@@ -319,7 +347,7 @@ class ProfileUpdateRequest(BaseModel):
     job_field: JobField
     # 세부 직무는 직군에 따라 선택지가 달라지고(Figma엔 "개발" 하위만 구체적으로
     # 나열돼 있음), 아직 모든 직군의 하위 칩 세트가 확정되지 않아 자유 문자열로 둔다.
-    job_detail: str | None = None
+    job_detail: str | None = Field(default=None, max_length=100)
     years_segment: YearsSegment
 
 

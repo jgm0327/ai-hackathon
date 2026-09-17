@@ -36,6 +36,7 @@ from src.api.schemas import (
     StarQuestionsRequest,
     StarQuestionsResponse,
 )
+from src.api.rate_limit import limit_heavy
 from src.auth.deps import get_current_user
 from src.export.docx_export import markdown_to_docx_bytes
 from src.parsing.resume import StarItem, apply_star_answers, generate_star_questions
@@ -48,7 +49,7 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-@router.post("/resume", response_model=ResumeResponse)
+@router.post("/resume", response_model=ResumeResponse, dependencies=[Depends(limit_heavy)])
 def create_resume(
     payload: ResumeRequest, current_user: db.User = Depends(get_current_user)
 ) -> ResumeResponse:
@@ -56,7 +57,7 @@ def create_resume(
     return ResumeResponse(items=[StarItemResponse.model_validate(item) for item in items])
 
 
-@router.post("/resume/enhance", response_model=ResumeEnhanceResponse)
+@router.post("/resume/enhance", response_model=ResumeEnhanceResponse, dependencies=[Depends(limit_heavy)])
 def enhance_resume_endpoint(
     payload: ResumeEnhanceRequest, current_user: db.User = Depends(get_current_user)
 ) -> ResumeEnhanceResponse:
@@ -64,7 +65,7 @@ def enhance_resume_endpoint(
     return ResumeEnhanceResponse(items=[EnhancedItemResponse.model_validate(item) for item in items])
 
 
-@router.post("/resume/jd-requirements", response_model=JdRequirementsResponse)
+@router.post("/resume/jd-requirements", response_model=JdRequirementsResponse, dependencies=[Depends(limit_heavy)])
 def jd_requirements_endpoint(
     payload: JdRequirementsRequest, current_user: db.User = Depends(get_current_user)
 ) -> JdRequirementsResponse:
@@ -77,7 +78,7 @@ def jd_requirements_endpoint(
     )
 
 
-@router.post("/resume/star-questions", response_model=StarQuestionsResponse)
+@router.post("/resume/star-questions", response_model=StarQuestionsResponse, dependencies=[Depends(limit_heavy)])
 def star_questions_endpoint(
     payload: StarQuestionsRequest, current_user: db.User = Depends(get_current_user)
 ) -> StarQuestionsResponse:
@@ -85,7 +86,7 @@ def star_questions_endpoint(
     return StarQuestionsResponse(questions=generate_star_questions(item))
 
 
-@router.post("/resume/star-apply-answers", response_model=StarApplyAnswersResponse)
+@router.post("/resume/star-apply-answers", response_model=StarApplyAnswersResponse, dependencies=[Depends(limit_heavy)])
 def star_apply_answers_endpoint(
     payload: StarApplyAnswersRequest, current_user: db.User = Depends(get_current_user)
 ) -> StarApplyAnswersResponse:

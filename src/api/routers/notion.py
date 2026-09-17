@@ -19,11 +19,16 @@ from fastapi import APIRouter, Depends, HTTPException
 from src.agent.notion_client import fetch_notion_entries, fetch_notion_entries_via_mcp
 from src.agent.pipeline import run_pipeline_batch
 from src.api.schemas import CardResponse, NotionSyncRequest, NotionSyncResponse
+from src.api.rate_limit import limit_batch
 from src.auth.deps import get_current_user
 from src.config import settings
 from src.storage import db
 
 router = APIRouter(tags=["notion"])
+
+# 한 요청에서 LLM으로 넘길 노션 페이지 수 상한 (9/17). 페이지당 parse_note() 1회라
+# 이 값이 곧 "한 번 눌렀을 때 최대 LLM 호출 수"다.
+MAX_NOTION_PAGES_PER_SYNC = 50
 
 
 def _fetch_entries(user_token: str):
@@ -41,7 +46,7 @@ def _fetch_entries(user_token: str):
     return fetch_notion_entries(user_token=user_token)
 
 
-@router.post("/notion/sync", response_model=NotionSyncResponse)
+@router.post("/notion/sync", response_model=NotionSyncResponse, dependencies=[Depends(limit_batch)])
 def sync_notion(
     payload: NotionSyncRequest, current_user: db.User = Depends(get_current_user)
 ) -> NotionSyncResponse:
@@ -56,10 +61,20 @@ def sync_notion(
 
     # 내용이 빈 페이지는 parse_note()에 넘길 근거가 없으니 건너뛴다.
     contents = [entry.content for entry in entries if entry.content.strip()]
+
+    # 한 번에 처리할 페이지 수 상한 (9/17 신규). 페이지 하나당 parse_note()가 LLM을
+    # 한 번씩 부르므로, 상한이 없으면 노션 워크스페이스가 큰 유저 한 명이 한 요청으로
+    # 수백 회 호출을 발생시킨다(비용도 문제지만 요청이 수 분씩 걸려 서버도 붙잡힌다).
+    # 넘치면 거절하지 않고 앞에서부터 잘라 처리한 뒤, 몇 개를 못 가져왔는지 알려준다 —
+    # 다시 누르면 이어서 가져갈 수 있다.
+    skipped = max(0, len(contents) - MAX_NOTION_PAGES_PER_SYNC)
+    contents = contents[:MAX_NOTION_PAGES_PER_SYNC]
+
     results = run_pipeline_batch(current_user.id, contents)
     cards = [db.get_card(current_user.id, r["card_id"]) for r in results]
 
     return NotionSyncResponse(
         imported=len(cards),
+        skipped=skipped,
         cards=[CardResponse.model_validate(c) for c in cards],
     )
