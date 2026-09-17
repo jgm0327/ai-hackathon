@@ -88,6 +88,28 @@ nginx  ┬─ /       → localhost:3000  (Next.js)
 - [ ] 서비스워커 경로(`/service-worker.js`)가 루트에서 서빙되는지 확인.
       **scope가 루트여야 푸시가 동작한다** — Streamlit에서 막혔던 바로 그 지점
 
+### 3.4.5 퇴근 알림 (9/17 변경 — cron 등록 불필요)
+
+발송 트리거가 GitHub Actions에서 **FastAPI 앱 내부 스케줄러**로 옮겨졌다
+(`src/api/scheduler.py`). 그래서 이 항목은 **추가 설정이 없다** — uvicorn이 뜨면
+스케줄러도 같이 뜬다. cron이나 systemd timer를 따로 등록하지 말 것.
+
+- [ ] `.env`에 `APP_TIMEZONE=Asia/Seoul` 확인 (기본값이라 생략 가능하지만 명시 권장)
+- [ ] `.env`에 VAPID 키가 있는지 확인 — **없으면 스케줄러가 아예 안 뜬다**(의도된 동작).
+      기동 로그에 `VAPID_PRIVATE_KEY가 없어 퇴근 알림 스케줄러를 시작하지 않습니다`가
+      찍히면 이 경우다
+- [ ] 기동 로그에 `퇴근 알림 스케줄러 시작 (60초 주기)`가 보이는지 확인
+      (`journalctl -u career-log-api | grep 스케줄러`)
+- [ ] uvicorn에 `--workers`를 붙이지 않았는지 확인 — 워커마다 스케줄러가 돌아 알림이
+      중복 발송되고, 레이트 리밋 카운터도 워커별로 갈라진다
+      (`deploy/systemd/career-log-api.service` 주석 참고)
+- [ ] GitHub Actions `send-reminder` 워크플로의 schedule 트리거가 꺼져 있는지 확인
+      (9/17에 제거함 — 되살리면 앱 스케줄러와 이중 발송)
+
+> **타임존 주의**: OCI VM은 기본이 UTC다. 앱은 `APP_TIMEZONE`으로 시간대를 직접
+> 고정하므로 VM 시계를 바꿀 필요는 없지만, `date` 명령으로 보는 서버 시각과 앱이
+> 쓰는 시각이 9시간 다르다는 점은 로그를 볼 때 기억할 것.
+
 ### 3.5 검증
 - [ ] 실기기(iPhone / Android)로 접속해 전체 루프 재현
 - [ ] 음성 입력 동작 확인
@@ -106,6 +128,9 @@ nginx  ┬─ /       → localhost:3000  (Next.js)
 | 서비스워커 등록 실패 | `/service-worker.js`가 하위 경로에서 서빙되고 있다 |
 | API 502 | uvicorn이 죽었거나 포트 불일치. `systemctl status` 확인 |
 | 빌드 중 OOM | **AMD Micro는 1GB RAM 고정**이라 `next build`가 그 자체로 못 끝날 수 있다. 다른 머신에서 빌드해 `.next` 산출물만 올리거나, swap을 최소 2GB 추가 |
+| 알림이 안 옴 (시각이 9시간 어긋남) | `.env`의 `APP_TIMEZONE` 확인. 앱이 시간대를 고정하므로 보통 문제없지만, 이 값을 지웠거나 오타가 있으면 서버 로컬 시간(UTC)으로 떨어진다 |
+| 알림이 두 번 옴 | GitHub Actions `send-reminder`의 schedule 트리거가 되살아났는지, 또는 uvicorn에 `--workers`가 붙었는지 확인 (9/17) |
+| `ZoneInfoNotFoundError` | OS에 IANA 타임존 DB가 없다. `requirements.txt`의 `tzdata`가 설치됐는지 확인 — 슬림 이미지에서 자주 빠진다 |
 | FastAPI 프로세스가 계속 죽음(OOM) | `.env`의 `EMBEDDING_PROVIDER`가 로컬 개발용(`ollama`/`local_multilingual`)으로 남아있는지 확인 — 1GB에서 `local_multilingual`은 그 자체로 OOM 확정, `ollama`는 로컬 Ollama 서버가 없으면 애초에 연결 실패. `chroma_default`(기본값)로 되돌릴 것 (2장 참고) |
 
 ---

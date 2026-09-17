@@ -23,6 +23,12 @@ WorkingDirectory=<APP_DIR>
 # .env는 커밋되지 않으므로 VM에 직접 배치해둘 것 (tasks/track-d-deploy.md 3.2절).
 # DB_PATH는 .env에서 VM의 영구 디렉터리(/opt/app/data/app.db 등)를 가리키도록 설정.
 EnvironmentFile=<APP_DIR>/.env
+# ⚠️ --workers를 붙이지 말 것 (단일 프로세스 유지, 9/17).
+# 이 프로세스 안에서 두 가지가 프로세스 메모리에 상태를 들고 돈다:
+#   1. 퇴근 알림 스케줄러(src/api/scheduler.py) — 워커마다 돌면 알림이 중복 발송된다
+#   2. 레이트 리밋 카운터(src/api/rate_limit.py) — 워커마다 따로 세서 제한이 N배로 느슨해진다
+# 워커를 늘려야 할 만큼 트래픽이 생기면, 먼저 스케줄러를 별도 프로세스로 빼고
+# 레이트 리밋을 공유 저장소(Redis 등) 기반으로 바꾼 뒤에 늘릴 것.
 ExecStart=<APP_DIR>/.venv/bin/uvicorn src.api.main:app --host 127.0.0.1 --port 8000
 Restart=on-failure
 RestartSec=3
