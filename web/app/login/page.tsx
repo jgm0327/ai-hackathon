@@ -1,8 +1,9 @@
 "use client";
 
 import Image from "next/image";
+import { preload } from "react-dom";
 import { CSSProperties, useEffect, useState } from "react";
-import { WelcomeShapeField } from "@/components/WelcomeShapeField";
+import { FIELD_ASSETS, WelcomeShapeField } from "@/components/WelcomeShapeField";
 import { kakaoLoginUrl } from "@/lib/api";
 
 /**
@@ -30,11 +31,33 @@ import { kakaoLoginUrl } from "@/lib/api";
  * 브라우저가 카카오 로그인/동의 화면으로 이어지는 리다이렉트 체인을 직접 타야 하기 때문.
  */
 
+/**
+ * 인트로가 쓰는 파일 전부 (19개). 1번 화면이 떠 있는 동안 미리 받아둔다.
+ *
+ * **왜**: 그러지 않으면 장이 바뀌는 순간에 그 장의 파일이 처음 요청된다 — 2번은
+ * 조각 6개, 3번은 13개가 한꺼번에. 애니메이션이 시작되는 바로 그 프레임에 다운로드가
+ * 겹쳐서 조각이 뒤늦게 채워지고, 전환이 끊겨 보인다(9/18 실측으로 확인).
+ * 1번 화면은 1.4초 동안 로고만 보여주므로 그 시간에 다 받아둘 수 있다.
+ */
+const INTRO_SHARD_ASSETS = [
+  "/welcome/intro-top-1.svg",
+  "/welcome/intro-top-2.svg",
+  "/welcome/intro-top-3.svg",
+  "/welcome/intro-bottom-1.svg",
+  "/welcome/intro-bottom-2.svg",
+  "/welcome/intro-bottom-3.svg",
+];
+
+const WELCOME_ASSETS = ["/welcome/logo-mark.svg", ...INTRO_SHARD_ASSETS, ...FIELD_ASSETS];
+
 /** 각 장이 머무는 시간(ms). 마지막 장은 넘어가지 않는다. */
 const STAGE_DURATIONS = [1400, 3200];
 const LAST_STAGE = 2;
 
 export default function LoginPage() {
+  // 렌더 중에 부르는 게 React가 문서화한 사용법이다 — <link rel="preload">로 끌어올려진다.
+  WELCOME_ASSETS.forEach((href) => preload(href, { as: "image" }));
+
   const [stage, setStage] = useState(0);
 
   useEffect(() => {
@@ -114,7 +137,8 @@ function ShardLayers({ shards }: { shards: typeof TOP_SHARDS }) {
             { "--dx": shard.dx, "--dy": shard.dy, "--r": shard.r, "--d": shard.d } as CSSProperties
           }
         >
-          <Image src={shard.src} alt="" fill className="object-contain" />
+          {/* lazy면 이 장이 뜨는 순간 요청이 나가서 비행 중에 뒤늦게 채워진다. */}
+          <Image src={shard.src} alt="" fill priority className="object-contain" />
         </div>
       ))}
     </>
