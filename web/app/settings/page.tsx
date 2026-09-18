@@ -15,7 +15,11 @@ import {
   getResumeDraft,
   importBackup,
   logout,
+  NotionConnection,
+  disconnectNotion,
+  getNotionConnection,
   listNotionPages,
+  notionOAuthStartUrl,
 } from "@/lib/api";
 import { useProjects } from "@/lib/useProjects";
 
@@ -38,7 +42,6 @@ function parseBackupFile(text: string): Pick<BackupFile, "projects" | "cards"> {
 }
 
 const LEAVE_TIME_STORAGE_KEY = "careerlog:leaveTime";
-const NOTION_CONNECTED_STORAGE_KEY = "careerlog:notionConnected";
 
 function jobLabel(profile: Profile | null): string | null {
   if (!profile?.job_field) return null;
@@ -61,7 +64,9 @@ export default function SettingsPage() {
   const { currentProject } = useProjects();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [leaveTime, setLeaveTime] = useState<string | null>(null);
-  const [notionConnected, setNotionConnected] = useState(false);
+  // 노션 연결 상태는 **서버에서** 읽는다. 예전엔 localStorage 플래그를 봤는데,
+  // 한 번 성공한 흔적이 남아서 실제로는 연결이 없어도 "연결됨"으로 보였다(9/18 버그).
+  const [notionConn, setNotionConn] = useState<NotionConnection | null>(null);
   const [resumeRegistered, setResumeRegistered] = useState<boolean | null>(null);
 
   const [notionOpen, setNotionOpen] = useState(false);
@@ -85,10 +90,12 @@ export default function SettingsPage() {
     getProfile()
       .then(setProfile)
       .catch(() => {});
+    getNotionConnection()
+      .then(setNotionConn)
+      .catch(() => {}); // 실패하면 "연결 안 됨"으로 보일 뿐이다
     try {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setLeaveTime(localStorage.getItem(LEAVE_TIME_STORAGE_KEY));
-      setNotionConnected(localStorage.getItem(NOTION_CONNECTED_STORAGE_KEY) === "1");
     } catch {
       // localStorage 접근 불가 — 값 없이 기본 표시로 진행
     }
@@ -136,12 +143,6 @@ export default function SettingsPage() {
       setNotionSuccess(
         `연결됐어요. 가져올 수 있는 페이지 ${pages.length}건 — 기록 화면에서 골라 주세요.`,
       );
-      setNotionConnected(true);
-      try {
-        localStorage.setItem(NOTION_CONNECTED_STORAGE_KEY, "1");
-      } catch {
-        // 로컬 기억 실패해도 연결 자체는 이미 확인됐다
-      }
     } catch (err) {
       setNotionError(err instanceof ApiError ? err.detail : "노션 연결에 실패했습니다.");
     } finally {
@@ -256,7 +257,9 @@ export default function SettingsPage() {
         >
           <span className="text-[14px] text-[#f2f2f2]">노션 연동</span>
           <div className="flex-1" />
-          <span className="text-[13px] text-[#a0a0a0]">{notionConnected ? "연결됨" : "연결 안 됨"}</span>
+          <span className="text-[13px] text-[#a0a0a0]">
+            {notionConn?.connected ? (notionConn.workspace_name ?? "연결됨") : "연결 안 됨"}
+          </span>
           <span className="text-[#5e5e5e]">›</span>
         </button>
         <div className="h-px w-full bg-[#2e2e2e]" />
@@ -353,33 +356,81 @@ export default function SettingsPage() {
       >
         <div className="flex flex-col gap-3">
           <p className="text-[14px] font-semibold text-[#f2f2f2]">노션 연결</p>
-          <p className="text-xs text-[#a0a0a0]">
-            토큰이 유효한지만 확인해요. 실제로 가져오는 건 기록 화면에서 <b>페이지를 하나
-            고를 때</b>뿐이고, 여기서 노션 내용을 저장하지는 않습니다.
-          </p>
-          <p className="text-xs text-[#5e5e5e]">
-            토큰은 이 브라우저 탭에만 잠시 보관되고 서버에 저장하지 않아요.
-          </p>
-          <input
-            type="password"
-            value={notionToken}
-            onChange={(e) => setNotionToken(e.target.value)}
-            placeholder="secret_..."
-            autoComplete="off"
-            className="w-full rounded-md border border-[#2e2e2e] bg-[#141414] px-3 py-2 text-sm text-[#f2f2f2] placeholder:text-[#5e5e5e] focus:border-[#5e5e5e] focus:outline-none"
-          />
-          {notionError && (
-            <p className="text-xs text-[#f0645c]">{notionError}</p>
+
+          {/* 이미 OAuth로 연결돼 있으면 연결 대상과 해제만 보여준다 — 토큰을 다시
+              물을 이유가 없다. */}
+          {notionConn?.connected ? (
+            <>
+              <p className="text-xs text-[#a0a0a0]">
+                <b>{notionConn.workspace_name ?? "노션 워크스페이스"}</b>에 연결돼 있어요.
+                가져오기는 기록 화면에서 페이지를 하나 고를 때만 일어납니다.
+              </p>
+              <button
+                type="button"
+                onClick={async () => {
+                  await disconnectNotion().catch(() => {});
+                  setNotionConn({ connected: false, workspace_name: null, oauth_available: notionConn.oauth_available });
+                  setNotionSuccess("연결을 해제했어요.");
+                }}
+                className="w-full rounded-[999px] border border-[#2e2e2e] py-2.5 text-sm font-semibold text-[#f2f2f2] transition-colors hover:bg-[#242424]"
+              >
+                연결 해제
+              </button>
+            </>
+          ) : (
+            <>
+              {/* OAuth 경로 — client_id가 있을 때만. 노션 인가 화면에서 가져올 페이지를
+                  직접 고르게 되므로, 고르지 않은 페이지는 앱이 볼 수 없다. */}
+              {notionConn?.oauth_available && (
+                <>
+                  <a
+                    href={notionOAuthStartUrl()}
+                    className="flex h-[44px] items-center justify-center rounded-[999px] bg-accent text-sm font-semibold text-accent-foreground transition-opacity active:opacity-80"
+                  >
+                    노션으로 연결하기
+                  </a>
+                  <p className="text-xs text-[#a0a0a0]">
+                    노션 화면에서 가져올 페이지를 직접 고르게 돼요. 고르지 않은 페이지는 이
+                    앱이 볼 수 없습니다.
+                  </p>
+                  <p className="border-t border-[#2e2e2e] pt-3 text-xs text-[#5e5e5e]">
+                    또는 통합 토큰을 직접 넣기
+                  </p>
+                </>
+              )}
+              <p className="text-xs text-[#a0a0a0]">
+                토큰이 유효한지만 확인해요. 실제로 가져오는 건 기록 화면에서 <b>페이지를 하나
+                고를 때</b>뿐이고, 여기서 노션 내용을 저장하지는 않습니다.
+              </p>
+              <p className="text-xs text-[#5e5e5e]">
+                토큰은 이 브라우저 탭에만 잠시 보관되고 서버에 저장하지 않아요.
+              </p>
+            </>
           )}
+          {/* 메시지는 연결 여부와 무관하게 보인다 — 연결 해제 결과도 여기 뜬다. */}
+          {notionError && <p className="text-xs text-[#f0645c]">{notionError}</p>}
           {notionSuccess && <p className="text-xs text-emerald-400">{notionSuccess}</p>}
-          <button
-            type="button"
-            onClick={handleNotionConnect}
-            disabled={notionSubmitting || !notionToken.trim()}
-            className="w-full rounded-[999px] bg-accent py-2.5 text-sm font-semibold text-accent-foreground transition-colors hover:bg-[#ff7a2e] disabled:opacity-40"
-          >
-            {notionSubmitting ? "확인하는 중…" : "연결 확인"}
-          </button>
+
+          {!notionConn?.connected && (
+            <>
+              <input
+                type="password"
+                value={notionToken}
+                onChange={(e) => setNotionToken(e.target.value)}
+                placeholder="secret_..."
+                autoComplete="off"
+                className="w-full rounded-md border border-[#2e2e2e] bg-[#141414] px-3 py-2 text-sm text-[#f2f2f2] placeholder:text-[#5e5e5e] focus:border-[#5e5e5e] focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={handleNotionConnect}
+                disabled={notionSubmitting || !notionToken.trim()}
+                className="w-full rounded-[999px] bg-accent py-2.5 text-sm font-semibold text-accent-foreground transition-colors hover:bg-[#ff7a2e] disabled:opacity-40"
+              >
+                {notionSubmitting ? "확인하는 중…" : "연결 확인"}
+              </button>
+            </>
+          )}
         </div>
       </BottomSheet>
 
