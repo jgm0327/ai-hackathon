@@ -54,3 +54,29 @@ body {
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
+
+/*
+ * 웰컴 인트로(로고 → 카피 → 흔적 격자)에서 장이 바뀔 때 부드럽게 넘긴다.
+ * 모션을 줄이도록 설정한 사용자에게는 애니메이션만 끄고 내용은 그대로 보여준다 —
+ * 장 넘김 자체는 탭으로도 되므로(app/login/page.tsx) 내용에 접근할 수 없게 되진 않는다.
+ */
+@keyframes welcome-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.welcome-fade {
+  animation: welcome-fade-in 420ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welcome-fade {
+    animation: none;
+  }
+}
