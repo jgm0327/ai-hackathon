@@ -12,11 +12,13 @@ import {
   ApiError,
   Card,
   CardCluster,
+  Me,
   Profile,
   SkillSummary,
   StarItem,
   bundleCardsIntoProject,
   deleteCard,
+  getMe,
   getProfile,
   getResumeDraftCount,
   getSkillSummary,
@@ -190,6 +192,8 @@ function StackPageContent() {
     () => getCached<Profile>(navKey.profile()) ?? null,
   );
   const [draftCount, setDraftCount] = useState<number | null>(null);
+  // 빈 상태 문구에 이름을 부르기 위한 것 뿐이다(318:23250) — 없으면 문구만 짧아진다.
+  const [me, setMe] = useState<Me | null>(null);
   const [addTagOpen, setAddTagOpen] = useState(false);
   const [newTagName, setNewTagName] = useState("");
   const [newTagCardIds, setNewTagCardIds] = useState<Set<number>>(new Set());
@@ -212,6 +216,13 @@ function StackPageContent() {
         if (!cancelled) setDraftCount(n);
       })
       .catch(() => {}); // 실패하면 숫자만 안 뜬다 — 진입 자체는 그대로 동작한다
+    // 빈 상태 문구의 "{이름}님의 하루는 ~"에만 쓴다(318:23250). 실패하거나 닉네임이
+    // 없으면 이름 없는 문구로 간다.
+    getMe()
+      .then((m) => {
+        if (!cancelled) setMe(m);
+      })
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -548,6 +559,16 @@ function StackPageContent() {
     return groupCardsByStarItems(visibleCards, starGroups);
   }, [groupedView, starGroups, visibleCards]);
 
+  /**
+   * "4.1-d 빈 상태" 조건 (9/18 — 한 곳으로 모음).
+   *
+   * 예전엔 빈 상태 블록 하나만 이 조건을 썼는데, 목업의 빈 상태에는 프로젝트 스위처
+   * 줄과 [경력기술서 초안 만들기]가 **없다**. 같은 조건을 세 군데가 쓰게 되면서
+   * 식을 여기로 뺐다 — 한쪽만 고쳐져서 빈 화면에 버튼이 남는 일을 막는다.
+   */
+  const isEmptyStack =
+    !loading && !groupsLoading && !error && groups.length === 0 && ungrouped.length === 0;
+
   // 페이지네이션 (9/15 신규) — 그룹 뷰는 항목이 적어 대상에서 뺀다(원래 ungrouped
   // 그대로 전부 보여준다). 일반 목록만 PAGE_SIZE씩 잘라서 보여준다.
   const totalPages = groupedView ? 1 : Math.max(1, Math.ceil(ungrouped.length / PAGE_SIZE));
@@ -737,17 +758,29 @@ function StackPageContent() {
 
   return (
     <div className="flex flex-col gap-3 px-5 pt-[8px] text-[#f2f2f2]">
-      {/* Header */}
-      <div className="flex items-center gap-[7px] pb-[8px]">
-        <p className="text-[19px] font-bold tracking-[-0.5px]">커리어 스택</p>
-        {!loading && <p className="text-[14px] font-medium text-[#828282]">{cards.length}</p>}
+      {/* Header (318:23080 / 318:23226, 9/18 개정) — 제목 20px, 개수 12px, 그리고
+          설정은 ⚙ 이모지가 아니라 Figma 아이콘이다(이모지는 기기마다 모양이 다르다).
+          목업엔 제목 왼쪽에 `‹`도 있는데 여기는 탭 루트라 돌아갈 곳이 없어서 넣지
+          않았다 — 눌러도 아무 일도 안 하는 버튼이 되는 쪽이 더 나쁘다. */}
+      <div className="flex items-center gap-[10px] pb-[8px]">
+        <p style={{ color: stackTheme.text }} className="text-[20px] font-bold leading-[32px]">
+          커리어 스택
+        </p>
+        {!loading && (
+          <p
+            style={{ color: stackTheme.textMuted }}
+            className="text-[12px] font-medium leading-[20px]"
+          >
+            {cards.length}
+          </p>
+        )}
         <div className="flex-1" />
         <Link
           href="/settings"
           aria-label="설정"
-          className="flex size-[26px] items-center justify-center rounded-full bg-[#262626] text-xs text-[#a0a0a0] transition-colors hover:bg-[#333] active:scale-[0.95]"
+          className="flex size-[22px] items-center justify-center transition-opacity active:opacity-60"
         >
-          ⚙
+          <Image src="/icons/settings.svg" alt="" width={20} height={20} aria-hidden />
         </Link>
       </div>
 
@@ -759,7 +792,7 @@ function StackPageContent() {
           {/* 스택 헤드 (294:10276) */}
           <p
             style={{ color: stackTheme.text }}
-            className="text-[20px] font-bold leading-[28px] tracking-[-0.8px]"
+            className="text-[20px] font-bold leading-[32px] tracking-[-0.8px]"
           >
             기록 <span style={{ color: stackTheme.accentText }}>{skillSummary.total_cards}</span>개를
             역량 <span style={{ color: stackTheme.accentText }}>{skillSummary.categories.length}</span>
@@ -960,8 +993,10 @@ function StackPageContent() {
         </div>
       )}
 
-      {/* 프로젝트 스위처 + 전체보기 토글 — CLAUDE.md 3장: 프로젝트별로 카드가 구분돼야 한다 */}
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+      {/* 프로젝트 스위처 + 전체보기 토글 — CLAUDE.md 3장: 프로젝트별로 카드가 구분돼야 한다.
+          기록이 0장이면 숨긴다 (9/18) — 4.1-d 빈 상태 목업에는 이 줄이 없고, 나눌
+          카드가 없는데 "인과관계로 묶어보기"를 권하는 건 빈 약속이다. */}
+      <div className={`flex flex-wrap items-center gap-x-2 gap-y-1 ${isEmptyStack ? "hidden" : ""}`}>
         <ProjectSwitcher projectsState={projectsState} />
         {projects.length > 1 && (
           <button
@@ -1044,29 +1079,36 @@ function StackPageContent() {
           사람 이름을 부르는 쪽으로 바뀌었다. 백업 불러오기 진입도 같이 들어왔다 —
           기기를 옮겨 온 사람이 여기서 막히지 않게 하는 게 목적이라 설정까지
           찾아 들어가지 않아도 되게 링크를 둔다. */}
-      {!loading && !groupsLoading && !error && groups.length === 0 && ungrouped.length === 0 && (
-        <div className="flex flex-col">
-          <div className="flex flex-col items-center py-[24px]">
+      {isEmptyStack && (
+        <div className="flex min-h-[60svh] flex-col">
+          {/* 로고 + 문구는 남는 공간 가운데에 놓고, 아래 두 버튼은 바닥에 붙인다
+              (318:23233 "Zero State"가 flex-1 + 중앙정렬이다). */}
+          <div className="flex flex-1 flex-col items-center justify-center py-[24px]">
             <Image
-              src="/welcome/logo-mark.svg"
+              /* 4.1-d의 로고는 로고마크 안에 워드마크가 들어간 72px 판이다
+                 (318:23235). 웰컴 화면이 쓰는 `/welcome/logo-mark.svg`는 글자가 없는
+                 도형만이라 다른 파일로 둔다. */
+              src="/icons/logo-mark-72.svg"
               alt=""
               width={72}
               height={72}
               aria-hidden
-              className="opacity-90"
             />
             <p
               style={{ color: stackTheme.text }}
-              className="mt-[36px] text-center text-[20px] font-bold leading-[28px]"
+              className="mt-[36px] text-center text-[20px] font-bold leading-[32px]"
             >
               아직은 비어 있어요
             </p>
+            {/* 목업의 "00님"은 로그인한 사람의 이름 자리다(318:23250). 카카오 닉네임을
+                모르면 이름 없이 "하루는 ~"으로 자연스럽게 이어지게 문구를 나눈다 —
+                "님"만 덩그러니 남거나 없는 이름을 지어내지 않는다. */}
             <p
-              style={{ color: stackTheme.textMuted }}
+              style={{ color: stackTheme.textSoft }}
               className="mt-[20px] text-center text-[14px] leading-[24px]"
             >
-              {profile?.job_detail ? `${profile.job_detail}의` : "오늘"} 하루는 분명 가득했을
-              거예요. 한 줄만 남겨두면 여기부터 쌓이기 시작해요.
+              {me?.nickname ? `${me.nickname}님의 ` : ""}하루는 분명 가득했을 거예요.
+              <br />한 줄만 남겨두면 여기부터 쌓이기 시작해요.
             </p>
           </div>
 
@@ -1092,12 +1134,15 @@ function StackPageContent() {
             <Image src="/icons/chevron-right.svg" alt="" width={16} height={16} aria-hidden />
           </Link>
 
+          {/* 318:23257 — 문구가 "기록하러 가기" → "첫 줄 남기러 가기"로 바뀌었고,
+              가는 곳도 홈(대시보드)이 아니라 실제로 쓰는 화면이어야 맞다. 홈으로
+              보내면 한 번 더 눌러야 입력창이 열린다. */}
           <Link
-            href="/"
+            href="/record"
             style={{ backgroundColor: "var(--accent)", color: "var(--accent-foreground)" }}
             className="mt-[28px] flex h-[50px] items-center justify-center rounded-[8px] text-[14px] font-bold transition-opacity active:opacity-80"
           >
-            기록하러 가기
+            첫 줄 남기러 가기
           </Link>
         </div>
       )}
@@ -1164,12 +1209,17 @@ function StackPageContent() {
         </div>
       )}
 
-      <div className="pt-2 pb-4">
+      {/* 주 액션 (318:23142) — 9/18 개정에서 문구가 "마스터 경력기술서 초안 짜기" →
+          "경력기술서 초안 만들기"로 짧아졌다. 범위 선택은 `/resume`에서 하므로
+          "마스터"라는 말이 버튼에 없어도 뜻이 달라지지 않는다.
+          기록이 0장이면 숨긴다 — 4.1-d 빈 상태의 주 액션은 [첫 줄 남기러 가기]
+          하나뿐이고(목업), 묶을 기록이 없는데 초안을 만들 수도 없다. */}
+      <div className={`pt-2 pb-4 ${isEmptyStack ? "hidden" : ""}`}>
         <Link
           href="/resume"
-          className="flex w-full items-center justify-center rounded-[14px] bg-accent py-[17px] text-[15px] font-semibold text-accent-foreground transition-colors hover:bg-[#ff7a2e] active:scale-[0.99]"
+          className="flex h-[50px] w-full items-center justify-center rounded-[8px] bg-accent text-[14px] font-bold text-accent-foreground transition-colors hover:bg-[#ff7a2e] active:scale-[0.99]"
         >
-          마스터 경력기술서 초안 짜기
+          경력기술서 초안 만들기
         </Link>
       </div>
 

@@ -129,9 +129,20 @@ export default function HomePage() {
       style={{ backgroundColor: t.homeBg, color: t.text }}
       className="-mb-6 flex min-h-full flex-col"
     >
-      {/* Header (303:15861) */}
+      {/* Header (318:22973) — 9/18 개정으로 오른쪽에 설정 진입이 돌아왔다.
+          홈 재설계(303:15859) 때 설정이 이 화면에서 빠졌고, 그 뒤 `/record`로
+          옮겨 붙였는데(01 섹션 재검토) 새 목업은 홈 헤더에 다시 둔다 — 로그인하면
+          바로 보이는 화면에 입구가 없으면 설정까지 가는 길이 사실상 없다. */}
       <div className="flex items-center px-[22px] pt-[4px] pb-[16px]">
         <p className="text-[16px] font-bold leading-[28px]">HEUNJEOG</p>
+        <span className="flex-1" />
+        <Link
+          href="/settings"
+          aria-label="설정"
+          className="flex size-[22px] items-center justify-center transition-opacity active:opacity-60"
+        >
+          <Image src="/icons/settings.svg" alt="" width={20} height={20} aria-hidden />
+        </Link>
       </div>
 
       {/* 히어로 (303:15863) */}
