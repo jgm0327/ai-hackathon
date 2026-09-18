@@ -20,9 +20,14 @@ import {
   refineCard,
   updateCard,
 } from "@/lib/api";
+import { getCached, navKey, setCached } from "@/lib/navCache";
 import { useProjects } from "@/lib/useProjects";
 
 const DRAFT_KEY = "career-log:draft-raw-text";
+
+/** 홈 버블은 상위 4개 + "미분류"까지 보여준다(서버 기본값과 같은 값을 명시해,
+ * 캐시 키가 /stack의 50개짜리 집계와 섞이지 않게 한다). */
+const HOME_TOP_N = 4;
 
 /** 타깃 트랙 칩(Figma 41:116 "시니어 백엔드 ›")에 쓸 한 줄 라벨. 프로필에 실제로
  * 있는 값만 이어 붙인다 — 없는 직무/연차를 지어내지 않는다(CLAUDE.md 2.2). */
@@ -48,6 +53,23 @@ const UNCATEGORIZED_COLOR = "rgba(58,53,46,0.88)";
 function todayDateString(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/**
+ * 이어 쓰기 배너(Figma 41:119)가 가리킬 주제 — 오늘 이전 기록 중 가장 최근 것의
+ * 대표 태그. 태그가 없는 카드는 이어 쓸 "주제"가 없으므로 건너뛴다. 카드 목록은
+ * 오래된 순이라 뒤에서부터 찾는다.
+ */
+function lastTopicOf(cards: Card[]): string | null {
+  const today = todayDateString();
+  const previous = [...cards].reverse().find((c) => c.created_at < today && c.skill_tags.length > 0);
+  return previous ? previous.skill_tags[0] : null;
+}
+
+/** 오늘 날짜 카드만. state 초기화(캐시)와 갱신 양쪽에서 같은 규칙을 쓰기 위한 헬퍼. */
+function filterToday(cards: Card[]): Card[] {
+  const today = todayDateString();
+  return cards.filter((c) => c.created_at === today);
 }
 
 function formatTodayLabel(): string {
@@ -86,8 +108,17 @@ function HomePageInner() {
 
   // "무엇이 쌓였나요" 버블 + "오늘 남긴 것" 목록 (9/16 신규) — 둘 다 카드 목록에서
   // 나오는 값이라 하나로 묶어 조회한다(중복 호출 방지).
-  const [skillSummary, setSkillSummary] = useState<SkillSummary | null>(null);
-  const [todayCards, setTodayCards] = useState<Card[]>([]);
+  //
+  // 9/18 — 탭을 옮겨 다시 들어올 때 빈 화면부터 다시 그리지 않도록 캐시에서 시작한다
+  // (`lib/navCache.ts`). 이 시점에 `currentProject`는 프로젝트 캐시 덕분에 이미
+  // 정해져 있어서, 첫 렌더부터 지난번 내용을 그릴 수 있다.
+  const cachedPid = currentProject?.id;
+  const [skillSummary, setSkillSummary] = useState<SkillSummary | null>(
+    () => (cachedPid ? getCached<SkillSummary>(navKey.skillSummary(cachedPid, HOME_TOP_N)) ?? null : null),
+  );
+  const [todayCards, setTodayCards] = useState<Card[]>(
+    () => (cachedPid ? filterToday(getCached<Card[]>(navKey.cards(cachedPid)) ?? []) : []),
+  );
 
   // 오프라인 배너 (Figma 41:762) — 자차 이동 중 신호가 끊긴 상태(CLAUDE.md 1장
   // 사용 맥락 2)에서도 방금 입력한 원문이 사라진 게 아니라는 걸 알려준다. 실제로
@@ -97,14 +128,23 @@ function HomePageInner() {
 
   // 타깃 트랙 칩 (Figma 41:116) — 지금 어떤 직무 기준으로 문장이 다듬어지는지 보여주고,
   // 누르면 설정으로 간다. 표시 전용이라 실패해도 칩만 안 뜬다.
-  const [profile, setProfile] = useState<Profile | null>(null);
+  //
+  // 9/18 — 캐시에서 시작한다. 이 칩은 화면 맨 위에 삽입되는 블록이라, 뒤늦게 나타나면
+  // 아래 내용을 통째로 밀어내서 깜박이는 것처럼 보인다(실측: 문서 높이 740 → 798).
+  const [profile, setProfile] = useState<Profile | null>(
+    () => getCached<Profile>(navKey.profile()) ?? null,
+  );
 
   // "이어 쓰기" (Figma 41:119 배너 / 89:519 "이 주제에 이어 쓰기", 9/18 신규).
   // 지금 쓰는 메모를 어느 주제(대표 태그)에 이어 붙일지. 값이 있으면 저장 직후
   // 그 태그를 카드에 확실히 얹어서, 다음에 같은 주제로 다시 찾아올 수 있게 한다.
   const [continueTag, setContinueTag] = useState<string | null>(null);
   // 배너에 쓸 "어제 하던 [X]" — 오늘 이전에 마지막으로 기록한 카드의 대표 태그.
-  const [lastTopic, setLastTopic] = useState<string | null>(null);
+  // 이 배너도 위쪽에 삽입되는 블록이라 같은 이유로 캐시에서 시작한다
+  // (실측: 문서 높이 682 → 740).
+  const [lastTopic, setLastTopic] = useState<string | null>(
+    () => (cachedPid ? lastTopicOf(getCached<Card[]>(navKey.cards(cachedPid)) ?? []) : null),
+  );
 
   const [toast, showToast] = useToast();
   const searchParams = useSearchParams();
@@ -120,6 +160,7 @@ function HomePageInner() {
     let cancelled = false;
     getProfile()
       .then((p) => {
+        setCached(navKey.profile(), p);
         if (!cancelled) setProfile(p);
       })
       .catch(() => {});
@@ -166,21 +207,19 @@ function HomePageInner() {
 
   const refreshHomeData = () => {
     if (!currentProject) return;
-    getSkillSummary(currentProject.id)
-      .then(setSkillSummary)
+    const projectId = currentProject.id;
+    getSkillSummary(projectId, HOME_TOP_N)
+      .then((summary) => {
+        setSkillSummary(summary);
+        setCached(navKey.skillSummary(projectId, HOME_TOP_N), summary);
+      })
       .catch(() => {});
-    listCards(currentProject.id)
+    listCards(projectId)
       .then((list) => {
-        const today = todayDateString();
-        setTodayCards(list.filter((c) => c.created_at === today));
+        setCached(navKey.cards(projectId), list);
+        setTodayCards(filterToday(list));
 
-        // 이어 쓰기 배너(Figma 41:119)용 — 오늘 이전 기록 중 가장 최근 것의 대표
-        // 태그. 태그가 없는 카드는 이어 쓸 "주제"가 없으므로 건너뛴다. 목록은
-        // 오래된 순이라 뒤에서부터 찾는다.
-        const previous = [...list]
-          .reverse()
-          .find((c) => c.created_at < today && c.skill_tags.length > 0);
-        setLastTopic(previous ? previous.skill_tags[0] : null);
+        setLastTopic(lastTopicOf(list));
       })
       .catch(() => {});
   };
@@ -332,10 +371,15 @@ function HomePageInner() {
       {/* 무엇이 쌓였나요 */}
       <div className="flex flex-col items-center gap-1">
         <p className="text-[27px] font-bold leading-[36px] tracking-[-0.9px]">무엇이 쌓였나요</p>
-        <p className="text-[12.5px] text-[#828282]">
-          {totalCards > 0
-            ? `기록 ${totalCards}개가 역량 ${categoryCount}개로 모였습니다`
-            : "기록이 쌓이면 여기 역량별로 모아 보여드려요"}
+        {/* 아직 모르는 상태(skillSummary === null)에서 "기록이 쌓이면…"을 띄우면,
+            잠시 뒤 실제 기록 수로 문구가 뒤집혀서 깜박이는 것처럼 보인다(9/18).
+            모를 때는 자리만 잡아둔다. */}
+        <p className="min-h-[18px] text-[12.5px] text-[#828282]">
+          {skillSummary === null
+            ? ""
+            : totalCards > 0
+              ? `기록 ${totalCards}개가 역량 ${categoryCount}개로 모였습니다`
+              : "기록이 쌓이면 여기 역량별로 모아 보여드려요"}
         </p>
       </div>
 

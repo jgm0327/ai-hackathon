@@ -8,6 +8,7 @@ import {
   listProjects,
   updateProject as apiUpdateProject,
 } from "./api";
+import { getCached, navKey, setCached } from "./navCache";
 
 /**
  * 프로젝트 목록 + 현재 프로젝트를 다루는 공용 훅.
@@ -17,16 +18,23 @@ import {
  * 화면마다 독립적으로 fetch해도 비용 문제가 없다.
  */
 export function useProjects() {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(true);
+  // 탭을 옮겨 다시 들어왔을 때 빈 목록에서 시작하지 않는다 — 마지막 값으로 첫 렌더를
+  // 그리고 백그라운드로 갱신한다(9/18, `lib/navCache.ts` 참고). 최초 방문엔 캐시가
+  // 비어 있으므로 예전과 동일하게 동작한다(서버 렌더와도 어긋나지 않는다).
+  const cached = getCached<Project[]>(navKey.projects());
+  const [projects, setProjects] = useState<Project[]>(cached ?? []);
+  const [loading, setLoading] = useState(cached === undefined);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    setLoading(true);
+    // 이미 보여줄 값이 있으면 로딩 상태로 되돌리지 않는다 — 그래야 갱신 중에도
+    // 화면이 비지 않는다.
+    if (getCached<Project[]>(navKey.projects()) === undefined) setLoading(true);
     setError(null);
     try {
       const list = await listProjects();
       setProjects(list);
+      setCached(navKey.projects(), list);
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : "프로젝트를 불러오지 못했습니다.");
     } finally {

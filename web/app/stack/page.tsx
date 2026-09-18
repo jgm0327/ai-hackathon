@@ -20,6 +20,7 @@ import {
   singleProjectScope,
   updateCard,
 } from "@/lib/api";
+import { getCached, navKey, setCached } from "@/lib/navCache";
 import { buildResumeCached } from "@/lib/resumeCache";
 import { useProjects } from "@/lib/useProjects";
 
@@ -74,6 +75,9 @@ function computeStreak(cards: Card[]): { days: { date: string; has: boolean }[];
   }
   return { days, consecutive };
 }
+
+/** 역량 리스트는 개수 제한 없이 사실상 전부 펼친다 — 캐시 키에도 이 값이 들어간다. */
+const STACK_TOP_N = 50;
 
 interface CardGroup {
   title: string;
@@ -139,13 +143,20 @@ function StackPageContent() {
   // 전까진 카드 목록이 안 바뀌는 버그가 있었다).
   const projectsState = useProjects();
   const { projects, currentProject, loading: projectsLoading } = projectsState;
-  const [cards, setCards] = useState<Card[]>([]);
-  const [loading, setLoading] = useState(true);
+  // 9/18 — 탭을 옮겨 다시 들어올 때 빈 목록부터 다시 그리지 않도록 캐시에서 시작한다
+  // (`lib/navCache.ts`). 첫 방문엔 캐시가 비어 있어 예전과 동일하게 로딩부터 간다.
+  const cachedCards = currentProject ? getCached<Card[]>(navKey.cards(currentProject.id)) : undefined;
+  const [cards, setCards] = useState<Card[]>(cachedCards ?? []);
+  const [loading, setLoading] = useState(cachedCards === undefined);
   const [error, setError] = useState<string | null>(null);
   const [activeTag, setActiveTag] = useState<string | null>(null);
   // "역량 리스트"(Figma 100:692 "4.1-h") — 홈 화면 버블과 같은 집계 엔드포인트를
   // top_n만 크게 줘서 재사용한다. 개수 제한 없이 사실상 전부 받는다.
-  const [skillSummary, setSkillSummary] = useState<SkillSummary | null>(null);
+  // 9/18 — 캐시에서 시작한다. 이 블록도 목록 위에 삽입돼서 뒤늦게 나타나면 아래를
+  // 밀어낸다(홈의 타깃 트랙 칩과 같은 문제).
+  const [skillSummary, setSkillSummary] = useState<SkillSummary | null>(
+    () => (currentProject ? getCached<SkillSummary>(navKey.skillSummary(currentProject.id, STACK_TOP_N)) ?? null : null),
+  );
   // 주간 기록 스트릭 점 클릭 필터 (9/15 신규) — 태그 필터와 동시에 걸면 "그날 +
   // 그 태그"처럼 조건이 겹쳐 헷갈리므로, 점을 누르면 태그 필터는 끄고 그 반대도
   // 마찬가지로 동작한다(아래 핸들러 참고).
@@ -168,7 +179,9 @@ function StackPageContent() {
   // 조회 대상으로도 삼지 않는다(CLAUDE.md 3장 안전장치, resilient-waddling-simon.md
   // 참고). 한 번에 클러스터 1개(가장 먼저 온 것)만 검토하게 해서 화면을 단순하게
   // 유지 — 처리 후 남은 제안이 있으면 다시 배너가 뜬다.
-  const [suggestions, setSuggestions] = useState<CardCluster[]>([]);
+  const [suggestions, setSuggestions] = useState<CardCluster[]>(
+    () => getCached<CardCluster[]>(navKey.suggestions()) ?? [],
+  );
   const [suggestionsSheetOpen, setSuggestionsSheetOpen] = useState(false);
   const [selectedCardIds, setSelectedCardIds] = useState<Set<number>>(new Set());
   const [newProjectName, setNewProjectName] = useState("");
@@ -178,7 +191,10 @@ function StackPageContent() {
 
   const refreshSuggestions = () => {
     getUnclassifiedSuggestions()
-      .then(setSuggestions)
+      .then((list) => {
+        setCached(navKey.suggestions(), list);
+        setSuggestions(list);
+      })
       .catch(() => {}); // 실패해도 배너가 안 뜰 뿐 — 화면 전체를 막을 정도는 아니다
   };
 
@@ -349,11 +365,15 @@ function StackPageContent() {
     if (projectsLoading) return;
     let cancelled = false;
     (async () => {
-      setLoading(true);
+      const projectId = showAllProjects ? undefined : (currentProject?.id ?? undefined);
+      // 이미 보여줄 값이 있으면 로딩 상태로 되돌리지 않는다 — 갱신 중에 목록이
+      // 비어버리면 그게 곧 깜박임이다.
+      const hasShown = projectId !== undefined && getCached(navKey.cards(projectId)) !== undefined;
+      if (!hasShown) setLoading(true);
       setError(null);
       try {
-        const projectId = showAllProjects ? undefined : (currentProject?.id ?? undefined);
         const list = await listCards(projectId);
+        if (projectId !== undefined) setCached(navKey.cards(projectId), list);
         if (!cancelled) setCards(list);
       } catch (err) {
         if (!cancelled) {
@@ -378,8 +398,10 @@ function StackPageContent() {
       return;
     }
     let cancelled = false;
-    getSkillSummary(currentProject.id, 50)
+    const projectId = currentProject.id;
+    getSkillSummary(projectId, STACK_TOP_N)
       .then((summary) => {
+        setCached(navKey.skillSummary(projectId, STACK_TOP_N), summary);
         if (!cancelled) setSkillSummary(summary);
       })
       .catch(() => {});
