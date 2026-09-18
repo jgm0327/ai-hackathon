@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { CareerHistoryForm } from "@/components/CareerHistoryForm";
 import { JobPicker, keepKnownJobs } from "@/components/JobPicker";
 import { ApiError, Company, JobField, Profile, getProfile, updateProfile } from "@/lib/api";
@@ -50,10 +50,23 @@ function reminderSentence(leaveTime: string): string | null {
 
 const TIME_PRESETS = ["18:00", "19:00"];
 
-export default function OnboardingPage() {
+function OnboardingPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
-  const [step, setStep] = useState<Step>(1);
+  /**
+   * 설정 → 알림에서 들어온 "알림만 고치기" 모드 (9/18 신규).
+   *
+   * 그 전까진 설정의 알림 행이 `/onboarding`으로 그냥 보내서, **알림 하나 바꾸려고
+   * 직무·목표직무·회사를 전부 다시 거쳐야** 했다. 게다가 마지막 [시작하기]는
+   * 이미 프로필이 있는 경우 화면에 머물면서 작은 메시지만 띄워서(아래 finish 참고),
+   * 스크롤 밖이면 아무 반응이 없는 것처럼 보였다 — 사용자 신고(9/18).
+   *
+   * 이 모드에서는 4단계(알림)만 띄우고, 저장하면 설정으로 돌아간다.
+   */
+  const notifyOnly = searchParams.get("only") === "notify";
+
+  const [step, setStep] = useState<Step>(notifyOnly ? 4 : 1);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -131,6 +144,12 @@ export default function OnboardingPage() {
     }
     const ok = await persist();
     if (!ok) return;
+    if (notifyOnly) {
+      // 알림만 고치러 온 경우 — 저장하면 온 곳(설정)으로 돌려보낸다. 화면에 머물면서
+      // 작은 메시지만 띄우면 "아무 반응이 없다"로 읽힌다(사용자 신고, 9/18).
+      router.push("/settings");
+      return;
+    }
     if (hasExistingProfile) {
       setSavedMessage("저장했습니다.");
       return;
@@ -146,7 +165,8 @@ export default function OnboardingPage() {
     );
   }
 
-  const stepLabel = `${step} / 4`;
+  // 알림만 고치러 온 경우엔 "4 / 4"가 의미 없다 — 단계가 하나뿐이다.
+  const stepLabel = notifyOnly ? "알림" : `${step} / 4`;
 
   return (
     // 화면 높이를 확보해야 `flex-1` 스페이서가 버튼을 바닥으로 밀어낸다 — Figma의
@@ -157,6 +177,20 @@ export default function OnboardingPage() {
     // 24px 길어져 그 스크롤이 주소창 접힘을 유발한다.
     <div className="-mb-6 flex min-h-[100svh] flex-col px-5 pb-6 pt-2 text-[#f2f2f2]">
       {/* 헤더 — 4단계엔 Figma에도 헤더가 없다(뒤로 갈 곳이 아니라 끝내는 화면). */}
+      {notifyOnly && (
+        <div className="flex items-center gap-2 pt-2">
+          <button
+            type="button"
+            onClick={() => router.push("/settings")}
+            aria-label="뒤로"
+            className="text-[17px] text-[#f2f2f2]"
+          >
+            ←
+          </button>
+          <p className="text-[15px] font-semibold text-[#f2f2f2]">알림 설정</p>
+        </div>
+      )}
+
       {step < 4 && (
         <div className="flex items-center gap-3 py-2">
           <button
@@ -377,7 +411,11 @@ export default function OnboardingPage() {
             disabled={saving || push.status === "subscribing"}
             className="mt-6 w-full rounded-[12px] bg-accent py-4 text-[15px] font-semibold text-accent-foreground transition-colors hover:bg-[#ff7a2e] disabled:opacity-40"
           >
-            {saving || push.status === "subscribing" ? "설정하는 중…" : "시작하기"}
+            {saving || push.status === "subscribing"
+              ? "설정하는 중…"
+              : notifyOnly
+                ? "저장"
+                : "시작하기"}
           </button>
           <button
             type="button"
@@ -385,7 +423,7 @@ export default function OnboardingPage() {
             disabled={saving}
             className="pt-3 text-center text-[13px] text-[#828282] underline underline-offset-2 disabled:opacity-40"
           >
-            알림 없이 시작하기
+            {notifyOnly ? "알림 끄고 저장" : "알림 없이 시작하기"}
           </button>
         </>
       )}
@@ -404,5 +442,14 @@ export default function OnboardingPage() {
         </button>
       )}
     </div>
+  );
+}
+
+/** `useSearchParams()`(설정에서 넘어오는 `?only=notify`)를 쓰므로 `<Suspense>`가 필요하다. */
+export default function OnboardingPage() {
+  return (
+    <Suspense fallback={null}>
+      <OnboardingPageInner />
+    </Suspense>
   );
 }

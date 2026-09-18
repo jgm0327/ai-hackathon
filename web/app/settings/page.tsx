@@ -238,8 +238,10 @@ export default function SettingsPage() {
           <span className="text-[#5e5e5e]">›</span>
         </Link>
         <div className="h-px w-full bg-[#2e2e2e]" />
+        {/* 알림만 고치는 모드로 보낸다 — 그 전엔 직무·목표직무·회사를 전부 다시
+            거쳐야 했다(사용자 신고, 9/18). */}
         <Link
-          href="/onboarding"
+          href="/onboarding?only=notify"
           className="flex items-center gap-2 px-4 py-[13px] transition-colors hover:bg-[#242424]"
         >
           <span className="text-[14px] text-[#f2f2f2]">알림</span>

@@ -429,11 +429,21 @@ function RecordPageInner() {
           className="mt-[12px] flex flex-col rounded-[8px] border pt-[26px] pb-[23px] pl-[24px] pr-[20px]"
         >
           {/* maxLength는 서버(schemas.py MAX_RAW_TEXT)와 같은 값 */}
+          {/* Enter = 변환, Shift+Enter = 줄바꿈 (9/18 사용자 요청).
+              **한글 입력 중(조합 중)에는 무시해야 한다** — 한글은 글자를 확정할 때도
+              Enter를 누르는데, 그걸 제출로 받으면 "안녕"을 치다가 "안"에서 변환이
+              돌아버린다. `isComposing`이 그 구분을 해준다. */}
           <textarea
             ref={textareaRef}
             value={rawText}
             onChange={(e) => updateRawText(e.target.value)}
-            placeholder="오늘 뭐 하셨어요?"
+            onKeyDown={(e) => {
+              if (e.key !== "Enter" || e.shiftKey) return;
+              if (e.nativeEvent.isComposing) return;
+              e.preventDefault();
+              handleConvert();
+            }}
+            placeholder="오늘 뭐 하셨어요? (Enter로 변환, Shift+Enter 줄바꿈)"
             rows={4}
             maxLength={2000}
             aria-label="오늘 한 일"
