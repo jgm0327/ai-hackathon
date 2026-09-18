@@ -22,7 +22,9 @@
    * 모자라고 흰색이 맞다.
    */
   --accent: #ff5d00;
-  --accent-foreground: #ffffff;
+  /* 오렌지 위 글자는 **검정**이다 — Figma의 모든 주요 버튼이 그렇고(목업 픽셀로 확인),
+   * 대비도 검정이 흰색보다 높다(#ff5d00 위 검정 약 5.5:1 vs 흰색 약 3.2:1). */
+  --accent-foreground: #000000;
 }
 
 @theme inline {
