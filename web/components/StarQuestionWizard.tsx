@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ApiError, StarItem, applyStarAnswers } from "@/lib/api";
@@ -145,11 +146,17 @@ export function StarQuestionWizard({
   return (
     <div className="flex flex-col gap-4 rounded-[14px] border border-[#2e2e2e] bg-[#1e1e1e] p-4">
       <div className="flex items-center justify-between">
-        <button type="button" onClick={onCancel} aria-label="뒤로" className="text-[17px] text-[#f2f2f2]">
-          ←
+        {/* 뒤로는 ← 문자가 아니라 `icon/chevron-left`, 제목은 20px/32다(307:18696). */}
+        <button
+          type="button"
+          onClick={onCancel}
+          aria-label="뒤로"
+          className="flex size-[22px] items-center justify-center transition-opacity active:opacity-60"
+        >
+          <Image src="/icons/chevron-left.svg" alt="" width={20} height={20} aria-hidden />
         </button>
-        <p className="text-sm font-semibold text-[#f2f2f2]">초안 점검</p>
-        <p className="text-xs text-[#828282]">
+        <p className="text-[20px] font-bold leading-[32px] text-[#ede9e2]">초안 점검</p>
+        <p className="text-[12px] leading-[20px] text-[#918c84]">
           {index + 1} / {questions.length}
         </p>
       </div>
@@ -163,9 +170,10 @@ export function StarQuestionWizard({
       </div>
 
       <div className="flex flex-col gap-2 rounded-xl bg-[#181818] p-3">
-        <div className="flex items-center gap-1.5">
-          <span aria-hidden>✨</span>
-          <p className="text-[11px] font-medium tracking-wide text-[#828282]">AI가 물어요</p>
+        <div className="flex items-center gap-[6px]">
+          {/* ✨ 이모지 대신 Figma의 `icon/sparkles` */}
+          <Image src="/icons/sparkles.svg" alt="" width={15} height={15} aria-hidden />
+          <p className="text-[12px] font-medium leading-[20px] text-[#918c84]">AI가 물어요</p>
         </div>
         <p className="text-[15px] font-bold leading-snug text-[#f2f2f2]">{questions[index]}</p>
       </div>
@@ -184,7 +192,7 @@ export function StarQuestionWizard({
           type="button"
           onClick={handleSkip}
           disabled={phase === "applying"}
-          className="flex-1 rounded-[11px] border-[1.5px] border-[#2e2e2e] bg-[#1c1c1c] py-[13px] text-[12px] font-semibold text-[#f2f2f2] transition-colors hover:bg-[#242424] disabled:opacity-40"
+          className="flex h-[50px] flex-1 items-center justify-center rounded-[8px] border border-[#34322e] text-[14px] font-medium text-[#ede9e2] transition-opacity active:opacity-70 disabled:opacity-40"
         >
           건너뛰기
         </button>
@@ -192,7 +200,7 @@ export function StarQuestionWizard({
           type="button"
           onClick={handleAnswerNext}
           disabled={!currentAnswer.trim() || phase === "applying"}
-          className="flex-1 rounded-[11px] bg-accent py-[13px] text-[12px] font-semibold text-accent-foreground transition-colors hover:bg-[#ff7a2e] disabled:opacity-40"
+          className="flex h-[50px] flex-1 items-center justify-center rounded-[8px] bg-accent text-[14px] font-bold text-accent-foreground transition-colors hover:bg-[#ff7a2e] disabled:opacity-40"
         >
           {phase === "applying" ? "반영하는 중…" : isLast ? "답하고 완료" : "답하고 다음"}
         </button>

@@ -190,7 +190,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
         ...(init?.headers ?? {}),
       },
     });
-  } catch {
+  } catch (err) {
+    // 호출부가 스스로 끊은 경우(AbortController)는 "연결 실패"가 아니다 — 그대로
+    // 올려보내서 호출부가 취소로 구분할 수 있게 한다(9/19, 4.2-a "만들기 취소").
+    if (err instanceof DOMException && err.name === "AbortError") throw err;
     // 네트워크 자체가 실패한 경우 (백엔드 미기동 등) — 에러 상태로 통일해서 던진다.
     throw new ApiError(0, "서버에 연결할 수 없습니다.");
   }
@@ -541,9 +544,13 @@ export function buildResume(
   scope: ResumeScope,
   jdText?: string,
   skillTag?: string,
+  /** 9/19 — "만들기 취소"(Figma 4.2-a `307:18536`)가 실제로 요청을 끊는다.
+   *  중간에 버리기만 하면 서버는 계속 LLM을 돌린다. */
+  signal?: AbortSignal,
 ): Promise<StarItem[]> {
   return request<{ items: StarItem[] }>("/resume", {
     method: "POST",
+    signal,
     body: JSON.stringify({
       ...scopeBody(scope),
       ...(jdText ? { jd_text: jdText } : {}),

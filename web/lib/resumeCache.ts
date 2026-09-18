@@ -77,7 +77,7 @@ function writeCache(key: string, data: CachedResume): void {
  */
 export async function buildResumeCached(
   scope: ResumeScope,
-  opts?: { jdText?: string; cards?: Card[] },
+  opts?: { jdText?: string; cards?: Card[]; signal?: AbortSignal },
 ): Promise<StarItem[]> {
   const cards = opts?.cards ?? (await listCardsInScope(scope));
   const cardIds = sortedIds(cards);
@@ -88,7 +88,7 @@ export async function buildResumeCached(
     return cached.items;
   }
 
-  const items = await buildResume(scope, opts?.jdText);
+  const items = await buildResume(scope, opts?.jdText, undefined, opts?.signal);
   writeCache(key, { cardIds, items, generatedAt: new Date().toISOString() });
   return items;
 }

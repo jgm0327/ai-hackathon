@@ -51,15 +51,3 @@ export function CardResultSkeleton() {
     </div>
   );
 }
-
-/** `/resume`의 STAR 항목 대기 스켈레톤. */
-export function StarItemSkeleton() {
-  return (
-    <div className="space-y-2 rounded-xl border border-[#2e2e2e] bg-[#1e1e1e] p-4">
-      <SkeletonLine className="h-4 w-1/2" />
-      <SkeletonLine className="h-3 w-full" />
-      <SkeletonLine className="h-3 w-5/6" />
-      <SkeletonLine className="h-3 w-2/3" />
-    </div>
-  );
-}

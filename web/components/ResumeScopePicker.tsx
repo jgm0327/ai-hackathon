@@ -87,7 +87,10 @@ export function ResumeScopePicker({
   return (
     <div className="flex flex-col gap-3 rounded-[14px] border border-[#2e2e2e] bg-[#1e1e1e] p-4">
       <div>
-        <p className="text-[17px] font-bold text-[#f2f2f2]">그동안 이런 걸 하셨어요</p>
+        {/* 목업은 20px/32다(307:18420 — 346×32). 17px로 잡혀 있었다. */}
+        <p className="text-[20px] font-bold leading-[32px] text-[#ede9e2]">
+          그동안 이런 걸 하셨어요
+        </p>
         <p className="mt-1 text-[12px] text-[#a0a0a0]">
           {stats.totalCards > 0
             ? `기록 ${stats.totalCards}개를 모았어요. 포함할 범위를 골라주세요.`
@@ -178,7 +181,8 @@ export function ResumeScopePicker({
         type="button"
         onClick={onSubmit}
         disabled={submitting || nothingSelected}
-        className="w-full rounded-[999px] bg-accent py-3 text-base font-semibold text-accent-foreground transition-colors hover:bg-[#ff7a2e] disabled:opacity-40 disabled:hover:bg-accent"
+        // 목업은 높이 50 · 라운드 8 · 14px bold다(307:18459, Button 컴포넌트 설명과 동일).
+        className="flex h-[50px] w-full items-center justify-center rounded-[8px] bg-accent text-[14px] font-bold text-accent-foreground transition-colors hover:bg-[#ff7a2e] disabled:opacity-40 disabled:hover:bg-accent"
       >
         {submitting
           ? "경력기술서 만드는 중…"

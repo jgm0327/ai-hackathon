@@ -182,3 +182,23 @@ body {
     animation: none;
   }
 }
+
+/* "4.2-a 초안 생성 중"의 점 3개 (Figma `307:18526` 레이어 이름이 모션을 적어 두고
+   있다: 위로 8px · 각 점 120ms 지연 · 600ms 루프 · ease-in-out). 지연은 인라인
+   `animationDelay`로 준다 — 점마다 클래스를 세 개 만들 이유가 없다. */
+@keyframes resume-dot-bounce {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* 동작을 줄이는 설정에서는 점이 제자리에 멈춰 있게 둔다 — 로딩 표시 자체는 남는다. */
+  .animate-\[resume-dot-bounce_600ms_ease-in-out_infinite\] {
+    animation: none;
+  }
+}

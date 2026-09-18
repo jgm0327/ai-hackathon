@@ -3,11 +3,10 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ResumeCompareCarousel } from "@/components/ResumeCompareCarousel";
 import { ResumeScopePicker, formatProjectPeriod } from "@/components/ResumeScopePicker";
 import { StarItemSection, formatStarItemForClipboard } from "@/components/StarItemCard";
-import { StarItemSkeleton } from "@/components/Skeleton";
 import { StarQuestionWizard } from "@/components/StarQuestionWizard";
 import { BottomSheet } from "@/components/BottomSheet";
 import {
@@ -162,9 +161,11 @@ export default function ResumePage() {
   // Figma 41:737 "초안 생성 실패" 전용 화면 — "저장된 카드 N장은 그대로 있습니다"
   // 문구에 쓸 개수. 실패했을 때만 조회하면 되므로 평소 렌더링 경로엔 영향 없다.
   const [errorCardCount, setErrorCardCount] = useState<number | null>(null);
-  // Figma 41:714 "초안 생성 중" — "카드 N장을 조합하고 있어요" 문구용. handleBuild가
+  // Figma 4.2-a "초안 생성 중" — "기록 N개를 엮고 있어요" 문구용. handleBuild가
   // 카드 목록을 조회하는 김에 같이 채운다(별도 네트워크 호출 추가 없음).
   const [loadingCardCount, setLoadingCardCount] = useState<number | null>(null);
+  /** 진행 중인 초안 생성 요청 — 4.2-a의 [만들기 취소]가 이걸로 끊는다. */
+  const buildAbortRef = useRef<AbortController | null>(null);
   const [showBuildForm, setShowBuildForm] = useState(true);
   const [copied, setCopied] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -322,6 +323,10 @@ export default function ResumePage() {
 
   const handleBuild = async () => {
     if (!scope || isScopeEmpty(scope)) return;
+    // "만들기 취소"(4.2-a)가 실제로 요청을 끊도록 컨트롤러를 만들어 둔다 — 화면만
+    // 되돌리면 서버는 계속 LLM을 돌린다.
+    const controller = new AbortController();
+    buildAbortRef.current = controller;
     setLoading(true);
     setError(null);
     setErrorCardCount(null);
@@ -334,16 +339,26 @@ export default function ResumePage() {
       const usedJdText = jdText.trim() || undefined;
       const cards = await listCards().then((all) => filterCardsInScope(all, scope));
       setLoadingCardCount(cards.length);
-      const result = await buildResumeCached(scope, { jdText: usedJdText, cards });
+      const result = await buildResumeCached(scope, {
+        jdText: usedJdText,
+        cards,
+        signal: controller.signal,
+      });
       setItems(result);
       setBuiltJdText(usedJdText);
       setGeneratedAt(peekCachedResumeGeneratedAt(scope, usedJdText));
       setShowBuildForm(false);
       setMode("ai");
     } catch (err) {
+      // 사용자가 직접 취소한 것은 실패가 아니다 — 만들기 화면으로 그냥 돌아간다.
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setLoading(false);
+        buildAbortRef.current = null;
+        return;
+      }
       setError(err instanceof ApiError ? err.detail : "경력기술서 생성에 실패했습니다.");
       // 카드는 이미 안전하게 저장돼 있다 — 실패해도 몇 장이 남아있는지 보여줘서
-      // 안심시킨다(Figma 41:737). 이 조회 자체가 실패해도 실패 화면은 그대로 보여준다.
+      // 안심시킨다(Figma 4.2-b). 이 조회 자체가 실패해도 실패 화면은 그대로 보여준다.
       try {
         const all = await listCards();
         setErrorCardCount(filterCardsInScope(all, scope).length);
@@ -352,6 +367,7 @@ export default function ResumePage() {
       }
     } finally {
       setLoading(false);
+      buildAbortRef.current = null;
     }
   };
 
@@ -702,8 +718,8 @@ export default function ResumePage() {
                 {copied ? "복사됨" : "복사"}
               </button>
             </div>
-            <Link href="/" className="text-center text-[11px] text-[#828282]">
-              다시 기록하러 가기 ↩
+            <Link href="/record" className="text-center text-[12px] leading-[20px] text-[#918c84]">
+              다시 기록하러 가기
             </Link>
           </div>
         </div>
@@ -723,37 +739,49 @@ export default function ResumePage() {
       ) : (
         <>
           {error && !items ? (
-            <div className="flex flex-col items-center gap-4 px-4 py-16">
-              <div className="flex size-12 items-center justify-center rounded-full bg-[#181818]">
-                <span className="h-[18px] w-[3px] rounded-full bg-[#f0645c]" />
-              </div>
-              <div className="flex flex-col items-center gap-1">
-                <p className="text-[15px] font-semibold text-[#f2f2f2]">초안 생성에 실패했어요</p>
-                <p className="text-center text-[13px] text-[#a0a0a0]">
-                  {errorCardCount != null && `저장된 카드 ${errorCardCount}장은 그대로 있습니다.`}
-                  {errorCardCount != null && <br />}
-                  잠시 후 다시 시도해 주세요.
-                </p>
-              </div>
-              <div className="flex w-full flex-col gap-2.5">
-                <button
-                  type="button"
-                  onClick={handleBuild}
-                  className="w-full rounded-[12px] bg-accent py-4 text-[14px] font-semibold text-accent-foreground transition-colors hover:bg-[#ff7a2e] active:scale-[0.98]"
-                >
-                  다시 시도
-                </button>
+            /* "4.2-b 초안 생성 실패" (Figma `307:18546`, 9/19 목업 반영).
+               버튼이 위아래로 쌓여 있고 "다시 시도"가 주 액션(주황)이었는데, 목업은
+               **좌우로 나란히, 둘 다 테두리형**이다 — 되돌아가든 다시 만들든 어느
+               쪽도 더 권하지 않는다는 뜻으로 읽힌다. */
+            <div className="flex flex-col items-center px-[22px] pt-[24px]">
+              <Image
+                src="/icons/error-circle.svg"
+                alt=""
+                width={56}
+                height={56}
+                aria-hidden
+              />
+              <p className="mt-[44px] text-center text-[20px] font-bold leading-[32px] text-[#ede9e2]">
+                초안을 다 만들지 못했어요
+              </p>
+              <p className="mt-[36px] text-center text-[14px] leading-[24px] text-[#bdb7ae]">
+                {errorCardCount != null && (
+                  <>
+                    쌓아두신 기록 {errorCardCount}개는 그대로 있어요.
+                    <br />
+                  </>
+                )}
+                잠시 뒤에 다시 만들어 볼까요?
+              </p>
+              <div className="mt-[44px] flex w-full items-center gap-[10px]">
                 <Link
                   href="/stack"
-                  className="flex w-full items-center justify-center rounded-[12px] border-[1.5px] border-[#2e2e2e] bg-[#1c1c1c] py-4 text-[14px] font-semibold text-[#f2f2f2] transition-colors hover:bg-[#242424]"
+                  className="flex h-[56px] flex-1 items-center justify-center rounded-[8px] border border-[#34322e] text-[14px] font-medium leading-[24px] text-[#ede9e2] transition-opacity active:opacity-70"
                 >
                   스택으로 돌아가기
                 </Link>
+                <button
+                  type="button"
+                  onClick={handleBuild}
+                  className="flex h-[56px] flex-1 items-center justify-center rounded-[8px] border border-[#34322e] text-[14px] font-medium leading-[24px] text-[#ede9e2] transition-opacity active:opacity-70"
+                >
+                  다시 만들기
+                </button>
               </div>
             </div>
           ) : (
             <>
-          {(!items || showBuildForm) && jdRequirements && (
+          {!loading && (!items || showBuildForm) && jdRequirements && (
             <div className="flex flex-col gap-3 rounded-[14px] border border-[#2e2e2e] bg-[#1e1e1e] p-4">
               <div className="flex items-center justify-between">
                 <button
@@ -851,7 +879,7 @@ export default function ResumePage() {
 
           {/* 4.2.1 범위 선택 (Figma 89:161, 9/18 신규) — 무엇을 넣을지 먼저 고른다.
               기본값이 현재 프로젝트 하나라, 그냥 버튼만 누르면 예전과 같은 결과다. */}
-          {(!items || showBuildForm) && !jdRequirements && scope && allCards && (
+          {!loading && (!items || showBuildForm) && !jdRequirements && scope && allCards && (
             <ResumeScopePicker
               projects={projects}
               cards={allCards}
@@ -864,7 +892,7 @@ export default function ResumePage() {
             />
           )}
 
-          {(!items || showBuildForm) && !jdRequirements && (
+          {!loading && (!items || showBuildForm) && !jdRequirements && (
             <div className="flex flex-col gap-3 rounded-[14px] border border-[#2e2e2e] bg-[#1e1e1e] p-4">
               <p className="text-[15px] font-bold text-[#f2f2f2]">지원할 공고가 있나요?</p>
               <p className="text-xs leading-relaxed text-[#a0a0a0]">
@@ -976,9 +1004,10 @@ export default function ResumePage() {
                 <button
                   type="button"
                   onClick={startEditing}
-                  className="text-xs font-medium text-[#f2f2f2] underline underline-offset-2"
+                  className="flex items-center gap-[6px] text-[12px] font-medium text-[#ede9e2]"
                 >
-                  직접 수정하기 ✎
+                  <Image src="/icons/pencil.svg" alt="" width={14} height={14} aria-hidden />
+                  <span className="underline underline-offset-2">직접 수정하기</span>
                 </button>
               )}
             </div>
@@ -988,22 +1017,40 @@ export default function ResumePage() {
             <p className="rounded-lg bg-[#2a1614] px-3 py-2 text-sm text-[#f0645c]">{error}</p>
           )}
 
+          {/* "4.2-a 초안 생성 중" (Figma `307:18525`, 9/19 목업 반영).
+              스피너 + 스켈레톤 2장이었는데, 목업은 **점 3개 + 한 줄 + 취소 버튼**만
+              두고 가운데 정렬한다. 스켈레톤을 없앤 이유가 읽히는 게, 10~30초 걸리는
+              작업에 가짜 결과 모양을 보여주면 거의 다 된 것처럼 오해된다. */}
           {loading && (
-            <div className="flex flex-col items-center gap-2 rounded-[14px] border border-[#2e2e2e] bg-[#1e1e1e] px-4 py-8">
-              <span
-                aria-hidden
-                className="h-5 w-5 animate-spin rounded-full border-2 border-[#3a3a3a] border-t-[#f2f2f2]"
-              />
-              <p className="text-[13px] font-medium text-[#f2f2f2]">
-                {loadingCardCount != null
-                  ? `카드 ${loadingCardCount}장을 조합하고 있어요`
-                  : "카드를 조합하고 있어요"}
-              </p>
-              <p className="text-[11px] text-[#a0a0a0]">보통 10~30초 걸립니다</p>
-              <div className="flex w-full flex-col gap-3 pt-3">
-                <StarItemSkeleton />
-                <StarItemSkeleton />
+            <div className="flex flex-col items-center px-[22px] pt-[24px]">
+              {/* 점 3개 — 위로 8px, 각 점 120ms 지연, 600ms 루프 (목업 레이어 이름) */}
+              <div aria-hidden className="flex items-end gap-[8px]">
+                {[0, 120, 240].map((delay) => (
+                  <span
+                    key={delay}
+                    style={{ backgroundColor: "var(--accent)", animationDelay: `${delay}ms` }}
+                    className="size-[10px] animate-[resume-dot-bounce_600ms_ease-in-out_infinite] rounded-full"
+                  />
+                ))}
               </div>
+              <p className="mt-[44px] text-center text-[20px] font-bold leading-[32px] text-[#ede9e2]">
+                {loadingCardCount != null
+                  ? `기록 ${loadingCardCount}개를 엮고 있어요`
+                  : "기록을 엮고 있어요"}
+              </p>
+              <p className="mt-[36px] text-center text-[12px] leading-[20px] text-[#918c84]">
+                보통 10~30초 걸려요
+              </p>
+              <button
+                type="button"
+                onClick={() => buildAbortRef.current?.abort()}
+                className="mt-[80px] flex h-[56px] w-full items-center justify-center rounded-[8px] border border-[#34322e] text-[14px] font-medium leading-[24px] text-[#ede9e2] transition-opacity active:opacity-70"
+              >
+                만들기 취소
+              </button>
+              <p className="mt-[8px] text-[12px] leading-[20px] text-[#918c84]">
+                취소해도 쌓아두신 기록은 그대로 있어요
+              </p>
             </div>
           )}
 
@@ -1075,6 +1122,12 @@ export default function ResumePage() {
                 </div>
               )}
 
+              {/* 저장 · 내보내기 (Figma 4.2 `307:18512`) — 9/19: 목업에 있는 **"파일로
+                  내보내기" 라벨**이 빠져 있었고 버튼 높이가 44가 아니었다.
+                  칩은 목업이 Word / 마크다운 / 노션 복사 3개인데 우리는 2개다 —
+                  마크다운과 노션 복사가 **완전히 같은 텍스트**를 복사해서 9/16에
+                  하나로 합쳤다(노션이 붙여넣기 때 마크다운을 블록으로 바꿔준다).
+                  같은 일을 하는 버튼을 둘로 늘리지 않는다. */}
               {items.length > 0 && (
                 <div className="flex flex-col gap-[10px] rounded-[14px] border border-[#2e2e2e] bg-[#1e1e1e] p-4">
                   {exportError && (
@@ -1082,25 +1135,31 @@ export default function ResumePage() {
                       {exportError}
                     </p>
                   )}
-                  <div className="flex gap-2">
+                  <p className="text-[12px] font-medium leading-[20px] text-[#918c84]">
+                    파일로 내보내기
+                  </p>
+                  <div className="flex gap-[10px]">
                     <button
                       type="button"
                       onClick={handleExportDocx}
                       disabled={exporting}
-                      className="flex flex-1 items-center justify-center rounded-[11px] border-[1.5px] border-[#2e2e2e] bg-[#1c1c1c] py-[13px] text-[12px] font-semibold text-[#f2f2f2] transition-colors hover:bg-[#242424] disabled:opacity-40"
+                      className="flex h-[44px] flex-1 items-center justify-center rounded-[8px] border border-[#34322e] text-[12px] font-medium text-[#ede9e2] transition-opacity active:opacity-70 disabled:opacity-40"
                     >
                       {exporting ? "내보내는 중…" : "Word"}
                     </button>
                     <button
                       type="button"
                       onClick={handleCopy}
-                      className="flex flex-1 items-center justify-center rounded-[11px] border-[1.5px] border-[#2e2e2e] bg-[#1c1c1c] py-[13px] text-[12px] font-semibold text-[#f2f2f2] transition-colors hover:bg-[#242424]"
+                      className="flex h-[44px] flex-1 items-center justify-center rounded-[8px] border border-[#34322e] text-[12px] font-medium text-[#ede9e2] transition-opacity active:opacity-70"
                     >
-                      {copied ? "복사됨" : "복사"}
+                      {copied ? "복사됨" : "마크다운 복사"}
                     </button>
                   </div>
-                  <Link href="/" className="text-center text-[11px] text-[#828282]">
-                    다시 기록하러 가기 ↩
+                  <Link
+                    href="/record"
+                    className="flex items-center justify-center gap-[6px] text-center text-[12px] leading-[20px] text-[#918c84]"
+                  >
+                    다시 기록하러 가기
                   </Link>
                 </div>
               )}

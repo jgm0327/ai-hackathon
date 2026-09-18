@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { BottomSheet } from "@/components/BottomSheet";
@@ -108,9 +109,10 @@ export function StarItemSection({
               type="button"
               onClick={() => openEditSheet(row.field, row.value)}
               aria-label={`${row.label} 문장 수정`}
-              className="shrink-0 text-[11px] text-[#828282] hover:text-[#a0a0a0]"
+              className="flex size-[20px] shrink-0 items-center justify-center transition-opacity active:opacity-60"
             >
-              ✎
+              {/* ✎ 문자 대신 Figma의 `icon/pencil` */}
+              <Image src="/icons/pencil.svg" alt="" width={14} height={14} aria-hidden />
             </button>
           </div>
         ))}
@@ -127,9 +129,9 @@ export function StarItemSection({
                   type="button"
                   onClick={() => openEditSheet("result", item.result)}
                   aria-label="결과 문장 수정"
-                  className="shrink-0 text-[11px] text-[#828282] hover:text-[#a0a0a0]"
+                  className="flex size-[20px] shrink-0 items-center justify-center transition-opacity active:opacity-60"
                 >
-                  ✎
+                  <Image src="/icons/pencil.svg" alt="" width={14} height={14} aria-hidden />
                 </button>
               </div>
             ) : showResultInput ? (
