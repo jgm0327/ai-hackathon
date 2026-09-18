@@ -59,6 +59,11 @@ def send_due_reminders(window_minutes: int = 5) -> int:
         if entry.get("last_sent_date") == today_str:
             continue  # 오늘 이미 보냄
 
+        # 주말 제외 (9/18 신규 — Figma 온보딩 4/4 "주말에는 쉬어요"). 이 키가 없는
+        # 기존 구독은 예전처럼 매일 받는다 — 켠 적 없는 설정을 소급 적용하지 않는다.
+        if entry.get("skip_weekends") and now.weekday() >= 5:  # 5=토, 6=일
+            continue
+
         try:
             parsed = datetime.strptime(entry["leave_time"], "%H:%M")
         except (KeyError, ValueError):

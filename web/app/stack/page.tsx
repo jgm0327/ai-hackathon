@@ -859,7 +859,7 @@ function StackPageContent() {
           </div>
           <Link
             href="/"
-            className="rounded-full bg-[#f2f2f2] px-4 py-2 text-xs font-semibold text-[#141210] transition-colors hover:bg-white"
+            className="rounded-full bg-accent px-4 py-2 text-xs font-semibold text-accent-foreground transition-colors hover:bg-[#ff7a2e]"
           >
             기록하러 가기
           </Link>
@@ -931,7 +931,7 @@ function StackPageContent() {
       <div className="pt-2 pb-4">
         <Link
           href="/resume"
-          className="flex w-full items-center justify-center rounded-[14px] bg-[#f2f2f2] py-[17px] text-[15px] font-semibold text-[#141210] transition-colors hover:bg-white active:scale-[0.99]"
+          className="flex w-full items-center justify-center rounded-[14px] bg-accent py-[17px] text-[15px] font-semibold text-accent-foreground transition-colors hover:bg-[#ff7a2e] active:scale-[0.99]"
         >
           마스터 경력기술서 초안 짜기
         </Link>
@@ -1050,7 +1050,7 @@ function StackPageContent() {
               type="button"
               onClick={handleBundle}
               disabled={bundling || selectedCardIds.size === 0}
-              className="w-full rounded-xl bg-[#f2f2f2] py-2.5 text-sm font-semibold text-[#141210] transition-colors hover:bg-white disabled:opacity-40"
+              className="w-full rounded-xl bg-accent py-2.5 text-sm font-semibold text-accent-foreground transition-colors hover:bg-[#ff7a2e] disabled:opacity-40"
             >
               {bundling ? "묶는 중…" : `선택한 ${selectedCardIds.size}개를 프로젝트로 묶기`}
             </button>

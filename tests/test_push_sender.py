@@ -145,3 +145,56 @@ def test_malformed_leave_time_does_not_block_other_users(push_env):
         with patch("src.push.push_sender.list_subscriptions", return_value=subs):
             assert send_due_reminders() == 1
     send.assert_called_once()
+
+
+# --- 주말 제외 (9/18 신규, Figma 온보딩 4/4 "주말에는 쉬어요") ---
+
+
+def test_skip_weekends_blocks_saturday_send():
+    """토요일엔 보내지 않는다."""
+    saturday = datetime(2026, 9, 19, 17, 45, tzinfo=KST)  # 2026-09-19는 토요일
+    assert saturday.weekday() == 5
+    entry = {
+        "subscription": {"endpoint": "e"},
+        "leave_time": "18:00",
+        "skip_weekends": True,
+    }
+    with (
+        patch("src.push.push_sender.list_subscriptions", return_value={"u1": entry}),
+        patch("src.push.push_sender.now_local", return_value=saturday),
+        patch("src.push.push_sender.send_push") as mock_send,
+        patch("src.push.push_sender.mark_reminder_sent"),
+    ):
+        assert send_due_reminders() == 0
+    assert mock_send.call_count == 0
+
+
+def test_skip_weekends_still_sends_on_weekday():
+    friday = datetime(2026, 9, 18, 17, 45, tzinfo=KST)  # 금요일
+    assert friday.weekday() == 4
+    entry = {
+        "subscription": {"endpoint": "e"},
+        "leave_time": "18:00",
+        "skip_weekends": True,
+    }
+    with (
+        patch("src.push.push_sender.list_subscriptions", return_value={"u1": entry}),
+        patch("src.push.push_sender.now_local", return_value=friday),
+        patch("src.push.push_sender.send_push") as mock_send,
+        patch("src.push.push_sender.mark_reminder_sent"),
+    ):
+        assert send_due_reminders() == 1
+    assert mock_send.call_count == 1
+
+
+def test_legacy_entry_without_flag_still_sends_on_weekend():
+    """켠 적 없는 설정을 기존 구독에 소급 적용하지 않는다."""
+    saturday = datetime(2026, 9, 19, 17, 45, tzinfo=KST)
+    entry = {"subscription": {"endpoint": "e"}, "leave_time": "18:00"}  # 플래그 없음
+    with (
+        patch("src.push.push_sender.list_subscriptions", return_value={"u1": entry}),
+        patch("src.push.push_sender.now_local", return_value=saturday),
+        patch("src.push.push_sender.send_push"),
+        patch("src.push.push_sender.mark_reminder_sent"),
+    ):
+        assert send_due_reminders() == 1

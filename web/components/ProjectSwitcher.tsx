@@ -159,7 +159,7 @@ export function ProjectSwitcher({
                 type="button"
                 onClick={handleCreate}
                 disabled={submitting}
-                className="flex-1 rounded-md bg-[#f2f2f2] py-2 text-sm font-medium text-[#171717] transition-colors hover:bg-white disabled:opacity-50 disabled:hover:bg-[#f2f2f2]"
+                className="flex-1 rounded-md bg-accent py-2 text-sm font-medium text-accent-foreground transition-colors hover:bg-[#ff7a2e] disabled:opacity-50 disabled:hover:bg-accent"
               >
                 {submitting ? "생성 중…" : "만들기"}
               </button>

@@ -434,7 +434,7 @@ function HomePageInner() {
                 type="submit"
                 disabled={submitting || isOffline}
                 aria-label={isOffline ? "연결을 기다리는 중" : "경력 변환하기"}
-                className="flex size-[36px] items-center justify-center rounded-full bg-[#f2f2f2] text-sm font-semibold text-[#141210] transition-colors disabled:opacity-40"
+                className="flex size-[36px] items-center justify-center rounded-full bg-accent text-sm font-semibold text-accent-foreground transition-colors disabled:opacity-40"
               >
                 {submitting ? "…" : "↑"}
               </button>
@@ -499,7 +499,7 @@ function HomePageInner() {
                     type="button"
                     onClick={handleRefine}
                     disabled={refining}
-                    className="flex flex-1 items-center justify-center rounded-[12px] bg-[#f2f2f2] py-4 text-[14px] font-semibold text-[#141210] transition-colors active:scale-[0.98] disabled:opacity-40"
+                    className="flex flex-1 items-center justify-center rounded-[12px] bg-accent py-4 text-[14px] font-semibold text-accent-foreground transition-colors active:scale-[0.98] disabled:opacity-40"
                   >
                     {refining ? "정리하는 중…" : "다시 시도"}
                   </button>
@@ -541,7 +541,7 @@ function HomePageInner() {
                   <button
                     type="button"
                     onClick={handleCopyResult}
-                    className="flex flex-1 items-center justify-center rounded-[12px] bg-[#f2f2f2] py-4 text-[14px] font-semibold text-[#141210] transition-colors active:scale-[0.98]"
+                    className="flex flex-1 items-center justify-center rounded-[12px] bg-accent py-4 text-[14px] font-semibold text-accent-foreground transition-colors active:scale-[0.98]"
                   >
                     {copiedResult ? "복사됨" : "복사하기"}
                   </button>

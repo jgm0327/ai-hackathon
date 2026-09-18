@@ -11,11 +11,25 @@
 :root {
   --background: #141210;
   --foreground: #f2f2f2;
+  /*
+   * 9/18 신규 — Figma "00 · 온보딩"(268:5731)이 들여온 브랜드 강조색.
+   * 그 전까지 이 앱엔 강조색이 없었고 주요 버튼이 전부 흰색(#f2f2f2)이었다.
+   * 목업의 모든 주요 버튼("오늘부터 기록하기", "선택 완료", "다음", "시작하기")과
+   * 강조 숫자(4/365)가 이 색이다.
+   *
+   * 유틸리티로 쓸 땐 `bg-accent` / `text-accent`처럼 쓴다(@theme inline이 만들어준다).
+   * 위에 얹는 글자는 --accent-foreground를 쓸 것 — 이 오렌지 위에서 검정은 대비가
+   * 모자라고 흰색이 맞다.
+   */
+  --accent: #ff5d00;
+  --accent-foreground: #ffffff;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -24,4 +38,17 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/*
+ * 가로 스크롤 목록(온보딩 직군 세그먼트 등)에서 스크롤바를 숨긴다 — 모바일 목업엔
+ * 스크롤바가 없고, 데스크톱 브라우저에서만 굵은 막대가 나와 레이아웃이 달라 보인다.
+ * 스크롤 자체는 그대로 동작한다.
+ */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }

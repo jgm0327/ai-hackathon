@@ -118,7 +118,7 @@ export function StarQuestionWizard({
           <button
             type="button"
             onClick={() => onApply(result.item)}
-            className="flex-1 rounded-[11px] bg-[#f2f2f2] py-[13px] text-[12px] font-semibold text-[#171717] transition-colors hover:bg-white"
+            className="flex-1 rounded-[11px] bg-accent py-[13px] text-[12px] font-semibold text-accent-foreground transition-colors hover:bg-[#ff7a2e]"
           >
             적용
           </button>
@@ -192,7 +192,7 @@ export function StarQuestionWizard({
           type="button"
           onClick={handleAnswerNext}
           disabled={!currentAnswer.trim() || phase === "applying"}
-          className="flex-1 rounded-[11px] bg-[#f2f2f2] py-[13px] text-[12px] font-semibold text-[#171717] transition-colors hover:bg-white disabled:opacity-40"
+          className="flex-1 rounded-[11px] bg-accent py-[13px] text-[12px] font-semibold text-accent-foreground transition-colors hover:bg-[#ff7a2e] disabled:opacity-40"
         >
           {phase === "applying" ? "반영하는 중…" : isLast ? "답하고 완료" : "답하고 다음"}
         </button>

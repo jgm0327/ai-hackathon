@@ -614,7 +614,7 @@ export default function ResumePage() {
                 type="button"
                 onClick={handleSaveDraft}
                 disabled={saving}
-                className="flex flex-1 items-center justify-center rounded-[11px] bg-[#f2f2f2] py-[13px] text-[12px] font-semibold text-[#171717] transition-colors hover:bg-white disabled:opacity-40"
+                className="flex flex-1 items-center justify-center rounded-[11px] bg-accent py-[13px] text-[12px] font-semibold text-accent-foreground transition-colors hover:bg-[#ff7a2e] disabled:opacity-40"
               >
                 {saving ? "저장 중…" : saveStatus === "saved" ? "저장됨" : "저장"}
               </button>
@@ -671,7 +671,7 @@ export default function ResumePage() {
                 <button
                   type="button"
                   onClick={handleBuild}
-                  className="w-full rounded-[12px] bg-[#f2f2f2] py-4 text-[14px] font-semibold text-[#171717] transition-colors hover:bg-white active:scale-[0.98]"
+                  className="w-full rounded-[12px] bg-accent py-4 text-[14px] font-semibold text-accent-foreground transition-colors hover:bg-[#ff7a2e] active:scale-[0.98]"
                 >
                   다시 시도
                 </button>
@@ -737,7 +737,7 @@ export default function ResumePage() {
                           <div className="flex items-center gap-2">
                             <span
                               aria-hidden
-                              className={`flex size-[13px] shrink-0 items-center justify-center rounded-full text-[8px] ${hasEvidence ? "bg-[#f2f2f2] text-[#171717]" : "bg-[#333] text-transparent"}`}
+                              className={`flex size-[13px] shrink-0 items-center justify-center rounded-full text-[8px] ${hasEvidence ? "bg-accent text-accent-foreground" : "bg-[#333] text-transparent"}`}
                             >
                               ✓
                             </span>
@@ -774,7 +774,7 @@ export default function ResumePage() {
                 type="button"
                 onClick={handleBuild}
                 disabled={!scope || isScopeEmpty(scope) || loading}
-                className="w-full rounded-[999px] bg-[#f2f2f2] py-3 text-base font-semibold text-[#171717] transition-colors hover:bg-white disabled:opacity-40"
+                className="w-full rounded-[999px] bg-accent py-3 text-base font-semibold text-accent-foreground transition-colors hover:bg-[#ff7a2e] disabled:opacity-40"
               >
                 {loading ? "경력기술서 만드는 중… (최대 10초)" : "이 공고에 맞춰 초안 만들기"}
               </button>
@@ -823,7 +823,7 @@ export default function ResumePage() {
                   type="button"
                   onClick={handleAnalyzeJd}
                   disabled={!scope || isScopeEmpty(scope) || loading || loadingRequirements}
-                  className="w-full rounded-[999px] bg-[#f2f2f2] py-3 text-base font-semibold text-[#171717] transition-colors hover:bg-white disabled:opacity-40 disabled:hover:bg-[#f2f2f2]"
+                  className="w-full rounded-[999px] bg-accent py-3 text-base font-semibold text-accent-foreground transition-colors hover:bg-[#ff7a2e] disabled:opacity-40 disabled:hover:bg-accent"
                 >
                   {loadingRequirements
                     ? "공고 분석하는 중…"
@@ -872,7 +872,7 @@ export default function ResumePage() {
                     type="button"
                     onClick={handleEnhance}
                     disabled={!pasteText.trim() || !scope || isScopeEmpty(scope) || enhancing}
-                    className="w-full rounded-[999px] bg-[#f2f2f2] py-3 text-sm font-semibold text-[#171717] transition-colors hover:bg-white disabled:opacity-40"
+                    className="w-full rounded-[999px] bg-accent py-3 text-sm font-semibold text-accent-foreground transition-colors hover:bg-[#ff7a2e] disabled:opacity-40"
                   >
                     {enhancing ? "보강하는 중…" : "보강해서 비교하기"}
                   </button>

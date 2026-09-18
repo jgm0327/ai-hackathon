@@ -153,7 +153,7 @@ export function StarItemSection({
                     type="button"
                     onClick={handleApplyResult}
                     disabled={!resultInput.trim()}
-                    className="rounded-full bg-[#f2f2f2] px-2.5 py-1 text-xs font-medium text-[#171717] disabled:opacity-40"
+                    className="rounded-full bg-accent px-2.5 py-1 text-xs font-medium text-accent-foreground disabled:opacity-40"
                   >
                     적용
                   </button>

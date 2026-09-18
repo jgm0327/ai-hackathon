@@ -363,7 +363,7 @@ export default function SettingsPage() {
             type="button"
             onClick={handleNotionSync}
             disabled={notionSubmitting || !notionToken.trim()}
-            className="w-full rounded-[999px] bg-[#f2f2f2] py-2.5 text-sm font-semibold text-[#171717] transition-colors hover:bg-white disabled:opacity-40"
+            className="w-full rounded-[999px] bg-accent py-2.5 text-sm font-semibold text-accent-foreground transition-colors hover:bg-[#ff7a2e] disabled:opacity-40"
           >
             {notionSubmitting ? "가져오는 중…" : "동기화"}
           </button>
@@ -407,7 +407,7 @@ export default function SettingsPage() {
                 type="button"
                 onClick={handleImportBackup}
                 disabled={backupBusy === "import"}
-                className="flex flex-1 items-center justify-center rounded-[12px] bg-[#f2f2f2] py-3.5 text-[14px] font-semibold text-[#171717] disabled:opacity-40"
+                className="flex flex-1 items-center justify-center rounded-[12px] bg-accent py-3.5 text-[14px] font-semibold text-accent-foreground disabled:opacity-40"
               >
                 {backupBusy === "import" ? "불러오는 중…" : "불러오기"}
               </button>

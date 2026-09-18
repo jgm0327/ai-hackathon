@@ -117,7 +117,7 @@ export function ResumeCompareCarousel({
           type="button"
           onClick={() => advance(item.enhanced)}
           disabled={!hasEvidence}
-          className="flex-1 rounded-[11px] bg-[#f2f2f2] py-[13px] text-[12px] font-semibold text-[#171717] transition-colors hover:bg-white disabled:opacity-40"
+          className="flex-1 rounded-[11px] bg-accent py-[13px] text-[12px] font-semibold text-accent-foreground transition-colors hover:bg-[#ff7a2e] disabled:opacity-40"
         >
           적용
         </button>

@@ -168,7 +168,7 @@ export default function CardDetailPage() {
                     type="button"
                     onClick={handleSave}
                     disabled={saving}
-                    className="flex-1 rounded-[11px] bg-[#f2f2f2] py-2.5 text-[12px] font-semibold text-[#171717] disabled:opacity-40"
+                    className="flex-1 rounded-[11px] bg-accent py-2.5 text-[12px] font-semibold text-accent-foreground disabled:opacity-40"
                   >
                     {saving ? "저장 중…" : "저장"}
                   </button>
@@ -240,7 +240,7 @@ export default function CardDetailPage() {
               주제가 없는 카드(태그 0개)는 이어 쓸 대상이 없으므로 일반 기록으로 보낸다. */}
           <Link
             href={topic ? `/?topic=${encodeURIComponent(topic)}` : "/"}
-            className="w-full rounded-[12px] bg-[#f2f2f2] py-4 text-center text-[14px] font-semibold text-[#171717] transition-colors hover:bg-white active:scale-[0.98]"
+            className="w-full rounded-[12px] bg-accent py-4 text-center text-[14px] font-semibold text-accent-foreground transition-colors hover:bg-[#ff7a2e] active:scale-[0.98]"
           >
             {topic ? "이 주제에 이어 쓰기" : "기록하러 가기"}
           </Link>

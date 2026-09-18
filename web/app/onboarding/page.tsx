@@ -2,61 +2,88 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { PushSetup } from "@/components/PushSetup";
-import {
-  ApiError,
-  DEV_JOB_DETAILS,
-  JOB_FIELDS,
-  JobField,
-  Profile,
-  YEARS_SEGMENTS,
-  YearsSegment,
-  getProfile,
-  updateProfile,
-} from "@/lib/api";
+import { CareerHistoryForm } from "@/components/CareerHistoryForm";
+import { JobPicker, keepKnownJobs } from "@/components/JobPicker";
+import { ApiError, Company, JobField, Profile, getProfile, updateProfile } from "@/lib/api";
+import { categoryOfJob } from "@/lib/jobTaxonomy";
 import { markOnboardingSkipped } from "@/lib/onboardingSkip";
+import { usePushSubscription } from "@/lib/usePushSubscription";
 
 /**
- * 온보딩 화면 (`/onboarding`, P2 — CLAUDE.md 6장 "온보딩(현재 직무/목표 직무/연차)",
- * Figma "2.0 목적지·푸시 설정" 대응).
+ * 온보딩 (`/onboarding`) — Figma "00 · 온보딩" 섹션(`268:5731`) 4단계 재설계 (9/18).
  *
- * 연 1~3회 정도만 열어보는 화면이라 매일 쓰는 입력 경로(`/`)와는 완전히 분리돼 있다
- * (CLAUDE.md 2.1). 직군/연차는 자유 입력이 아니라 고정 칩만 허용한다(2.4) — 서버가
- * Pydantic `Literal`로 다시 한번 강제하므로, 여기서 잘못된 값을 보낼 방법 자체가 없다.
+ * 그 전까지는 한 화면에 직군 6칩 → 세부직무 → 연차 4세그먼트 → 퇴근알림이 전부
+ * 들어 있었고, 화면이 라이트 테마로 남아 있어 나머지 앱과도 따로 놀았다. 새 설계는
+ * 네 단계로 나뉜다:
  *
- * 퇴근 시각 + 웹 푸시 설정은 이미 만들어진 `<PushSetup />`을 그대로 재사용한다 —
- * Figma 화면은 이 둘을 한 화면에 묶어서 보여주지만, 로직 자체는 독립적이라
- * 별도 컴포넌트로 나눠도 화면 구성만 합치면 된다.
+ *   1/4 어떤 일을 하세요?      — 현재 직무 (단일)      `268:5827`
+ *   2/4 어디로 가고 싶으세요?  — 목표 직무 (다중)      `268:5888`
+ *   3/4 어디서 얼마나 일하셨어요? — 회사·기간 → 연차 자동 계산  `268:5732`
+ *   4/4 언제 알려드릴까요?     — 퇴근 알림             `268:5777` (+거부 변형 `268:5806`)
+ *
+ * **왜 이게 CLAUDE.md 2.1을 안 깨는가**: 2.1이 막는 건 *매일* 반복되는 경로(메모 입력
+ * → 변환)에 선택지를 끼우는 것이다. 이 화면은 연 1~3회짜리라 기준을 만족한다.
+ *
+ * **2.4 배제 목록과의 관계**: "연차 직접 입력"은 배제 항목이었고 그동안 4개 세그먼트로
+ * 받았다. 3/4 화면이 그걸 대체한다 — 사용자가 이 Figma를 보고 명시적으로 "전부 구현"을
+ * 지시해서 진행했다(2026-09-18). 저장되는 값은 **여전히 그 4개 구간**이고(서버가 회사
+ * 기간에서 계산), 사람에게 묻는 방식만 바뀐 것이다.
+ *
+ * 설정 변경 목적으로 다시 들어온 경우(이미 프로필이 있음)엔 저장 후 `/`로 튕기지 않고
+ * 화면에 남는다 — 9/15 피드백("퇴근 시각만 바꾸려는데 메인으로 나가버린다").
  */
+
+type Step = 1 | 2 | 3 | 4;
+
+/** 퇴근 시각에서 실제 발송 시각(15분 전)을 만들어 문구로 (Figma 268:5794). */
+function reminderSentence(leaveTime: string): string | null {
+  const [h, m] = leaveTime.split(":").map(Number);
+  if (!Number.isInteger(h) || !Number.isInteger(m)) return null;
+  const total = h * 60 + m - 15;
+  if (total < 0) return null;
+  const hour = Math.floor(total / 60) % 24;
+  const minute = total % 60;
+  const meridiem = hour < 12 ? "오전" : "저녁";
+  const display = hour % 12 === 0 ? 12 : hour % 12;
+  return `퇴근 15분 전, ${meridiem} ${display}시 ${minute}분에 보낼게요`;
+}
+
+const TIME_PRESETS = ["18:00", "19:00"];
+
 export default function OnboardingPage() {
   const router = useRouter();
 
-  const [jobField, setJobField] = useState<JobField | null>(null);
-  const [jobDetail, setJobDetail] = useState<string | null>(null);
-  const [yearsSegment, setYearsSegment] = useState<YearsSegment | null>(null);
+  const [step, setStep] = useState<Step>(1);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
 
-  // 최초 온보딩인지, 이미 설정을 마친 뒤 다시 들어온(설정 변경) 건지 구분한다
-  // (9/15 신규 — "퇴근 시각을 바꾸려고 들어왔는데 저장하면 메인으로 튕겨서 다시
-  // 들어와야 한다"는 피드백 반영). 로드 시점의 스냅샷으로 한 번만 정하고, 그 뒤
-  // 폼을 만지는 동안에는 안 바뀐다 — 안 그러면 저장 전에 라벨이 계속 흔들린다.
+  const [currentJob, setCurrentJob] = useState<string[]>([]);
+  const [targetJobs, setTargetJobs] = useState<string[]>([]);
+  const [companies, setCompanies] = useState<Company[]>([]);
+
+  // 설정 변경 방문인지 최초 온보딩인지. 로드 시점 스냅샷으로 한 번만 정한다 —
+  // 폼을 만지는 동안 라벨이 흔들리지 않게(9/15).
   const [hasExistingProfile, setHasExistingProfile] = useState(false);
+
+  const push = usePushSubscription();
+  const [customTime, setCustomTime] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     getProfile()
       .then((profile: Profile) => {
         if (cancelled) return;
-        setJobField(profile.job_field);
-        setJobDetail(profile.job_detail);
-        setYearsSegment(profile.years_segment);
-        setHasExistingProfile(profile.job_field !== null && profile.years_segment !== null);
+        // 저장된 직무가 지금 분류표에 없으면(표를 갈아끼운 경우) 화면에서 뺀다 —
+        // 칩으로 못 만드는 값이 선택된 것처럼 보이면 해제할 방법이 없다.
+        setCurrentJob(profile.job_detail ? keepKnownJobs([profile.job_detail]) : []);
+        setTargetJobs(keepKnownJobs(profile.target_jobs));
+        setCompanies(profile.companies);
+        setHasExistingProfile(profile.job_field !== null);
       })
       .catch(() => {
-        // 프로필 조회 실패는 치명적이지 않다 — 빈 상태로 온보딩을 새로 시작하면 된다.
+        // 조회 실패는 치명적이지 않다 — 빈 상태로 새로 시작하면 된다.
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -66,171 +93,312 @@ export default function OnboardingPage() {
     };
   }, []);
 
-  const handleSelectJobField = (field: JobField) => {
-    setJobField(field);
-    // 직군이 바뀌면 이전 직군의 세부 직무는 더 이상 유효하지 않을 수 있으므로 초기화한다.
-    if (field !== "개발") setJobDetail(null);
-  };
-
-  const canSubmit = jobField !== null && yearsSegment !== null && !saving;
-
-  const handleSubmit = async () => {
-    if (!jobField || !yearsSegment) return;
+  /** 프로필을 저장한다. 4단계 끝에서 한 번만 부르고, 그 전 단계는 화면 상태로만 든다. */
+  const persist = async (): Promise<boolean> => {
+    const job = currentJob[0];
+    const category = job ? categoryOfJob(job) : null;
+    if (!category) {
+      setError("직무를 먼저 골라주세요.");
+      setStep(1);
+      return false;
+    }
     setSaving(true);
     setError(null);
-    setSavedMessage(null);
     try {
-      await updateProfile(jobField, yearsSegment, jobDetail ?? undefined);
-      if (hasExistingProfile) {
-        // 설정 변경 방문이면 메인으로 돌려보내지 않는다 — 퇴근 알림도 여기서 같이
-        // 만지는 경우가 많아서, 저장 후에도 화면에 남아 확인/재조정할 수 있어야 한다.
-        setSavedMessage("저장했습니다.");
-      } else {
-        router.push("/");
-      }
+      await updateProfile({
+        jobField: category as JobField,
+        jobDetail: job,
+        targetJobs,
+        // 빈 배열도 그대로 보낸다 — "회사 정보 없이 시작할게요"로 넘어온 경우
+        // 예전에 넣어둔 목록을 지우는 게 맞다.
+        companies: companies.filter((c) => c.name.trim() && c.started_at),
+      });
+      return true;
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : "저장에 실패했습니다. 다시 시도해 주세요.");
+      return false;
     } finally {
       setSaving(false);
     }
   };
 
+  /** 마지막 단계 — 저장하고 (원하면) 알림까지 켠 뒤 홈으로. */
+  const finish = async (withPush: boolean) => {
+    if (withPush) {
+      // 권한 요청은 반드시 이 클릭 핸들러 안에서 시작해야 한다(lib/usePushSubscription.ts).
+      // 거부돼도 온보딩 자체는 계속 진행한다 — 알림은 필수가 아니다.
+      await push.subscribe();
+    }
+    const ok = await persist();
+    if (!ok) return;
+    if (hasExistingProfile) {
+      setSavedMessage("저장했습니다.");
+      return;
+    }
+    router.push("/");
+  };
+
   if (loading) {
     return (
-      <div className="px-4 pt-4">
-        <p className="text-sm text-zinc-400">불러오는 중…</p>
+      <div className="px-5 pt-6">
+        <p className="text-[13px] text-[#828282]">불러오는 중…</p>
       </div>
     );
   }
 
+  const stepLabel = `${step} / 4`;
+
   return (
-    <div className="flex flex-col gap-6 px-4 pt-4 pb-8">
-      <div>
-        {hasExistingProfile && (
+    // 화면 높이를 확보해야 `flex-1` 스페이서가 버튼을 바닥으로 밀어낸다 — Figma의
+    // 네 화면 모두 주요 버튼이 화면 하단에 붙어 있다. 하단 탭바는 이 화면에서 숨겨진다.
+    <div className="flex min-h-[100dvh] flex-col px-5 pb-6 pt-2 text-[#f2f2f2]">
+      {/* 헤더 — 4단계엔 Figma에도 헤더가 없다(뒤로 갈 곳이 아니라 끝내는 화면). */}
+      {step < 4 && (
+        <div className="flex items-center gap-3 py-2">
           <button
             type="button"
-            onClick={() => router.back()}
-            className="mb-2 text-sm text-zinc-400 hover:text-zinc-600"
+            onClick={() => (step === 1 ? router.back() : setStep((s) => (s - 1) as Step))}
+            aria-label="뒤로"
+            className="text-[18px] text-[#f2f2f2]"
           >
-            ‹ 뒤로
+            ‹
           </button>
-        )}
-        <h1 className="text-lg font-semibold text-zinc-900">
-          {hasExistingProfile ? "직군·알림 설정" : "커리어 스택 시작하기"}
-        </h1>
-        <p className="mt-1 text-sm text-zinc-500">
-          {hasExistingProfile
-            ? "직군·연차나 퇴근 알림이 바뀌었으면 여기서 바꿀 수 있어요."
-            : "몇 가지만 알려주시면 기록을 더 잘 정리해 드려요. 나중에 언제든 바꿀 수 있어요."}
-        </p>
-      </div>
-
-      <section className="space-y-2">
-        <h2 className="text-sm font-medium text-zinc-700">
-          {hasExistingProfile ? "직군" : "어떤 일을 하세요?"}
-        </h2>
-        <div className="flex flex-wrap gap-2">
-          {JOB_FIELDS.map((field) => (
-            <ChipButton
-              key={field}
-              label={field}
-              selected={jobField === field}
-              onClick={() => handleSelectJobField(field)}
-            />
-          ))}
+          {step <= 2 && (
+            <>
+              <p className="text-[14px] text-[#f2f2f2]">직군 · 직무</p>
+              <div className="flex-1" />
+              <p className="text-[13px] text-[#828282]">{step === 1 ? "단일 선택" : "다중 선택"}</p>
+            </>
+          )}
         </div>
-      </section>
+      )}
 
-      {jobField === "개발" && (
-        <section className="space-y-2">
-          <h2 className="text-sm font-medium text-zinc-700">세부 직무</h2>
-          <div className="flex flex-wrap gap-2">
-            {DEV_JOB_DETAILS.map((detail) => (
-              <ChipButton
-                key={detail}
-                label={detail}
-                selected={jobDetail === detail}
-                onClick={() => setJobDetail(jobDetail === detail ? null : detail)}
-              />
-            ))}
+      <p className="pt-3 text-[13px] text-[#828282]">{stepLabel}</p>
+
+      {step === 1 && (
+        <>
+          <h1 className="pt-3 text-[24px] font-bold tracking-[-0.4px]">어떤 일을 하세요?</h1>
+          <p className="pt-2 pb-4 text-[14px] text-[#a0a0a0]">하나만 골라주세요</p>
+          <JobPicker
+            multiple={false}
+            selected={currentJob}
+            onChange={setCurrentJob}
+            onConfirm={() => setStep(2)}
+          />
+        </>
+      )}
+
+      {step === 2 && (
+        <>
+          <h1 className="pt-3 text-[24px] font-bold tracking-[-0.4px]">어디로 가고 싶으세요?</h1>
+          <p className="pt-2 pb-4 text-[14px] text-[#a0a0a0]">여러 개 골라도 됩니다</p>
+          <JobPicker
+            multiple
+            selected={targetJobs}
+            onChange={setTargetJobs}
+            onConfirm={() => setStep(3)}
+            footer={
+              <button
+                type="button"
+                onClick={() => {
+                  setTargetJobs([]);
+                  setStep(3);
+                }}
+                className="w-full pt-3 text-center text-[13px] text-[#828282] underline underline-offset-2"
+              >
+                지금 하는 일을 계속할게요
+              </button>
+            }
+          />
+        </>
+      )}
+
+      {step === 3 && (
+        <>
+          <h1 className="pt-3 text-[24px] font-bold tracking-[-0.4px]">
+            어디서 얼마나 일하셨어요?
+          </h1>
+          <p className="pt-2 text-[14px] leading-relaxed text-[#a0a0a0]">
+            회사와 기간만 알려주시면, 기록이 비어 있는 구간을 짚어드릴 수 있어요.
+          </p>
+
+          <div className="pt-5">
+            <CareerHistoryForm companies={companies} onChange={setCompanies} />
           </div>
-        </section>
+
+          {error && (
+            <p className="mt-4 rounded-lg bg-[#2a1614] px-3 py-2 text-[13px] text-[#f0645c]">
+              {error}
+            </p>
+          )}
+
+          <div className="flex-1" />
+
+          <button
+            type="button"
+            onClick={() => setStep(4)}
+            className="mt-6 w-full rounded-[12px] bg-accent py-4 text-[15px] font-semibold text-accent-foreground transition-colors hover:bg-[#ff7a2e]"
+          >
+            다음
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setCompanies([]);
+              setStep(4);
+            }}
+            className="pt-3 text-center text-[13px] text-[#828282] underline underline-offset-2"
+          >
+            회사 정보 없이 시작할게요
+          </button>
+        </>
       )}
 
-      <section className="space-y-2">
-        <h2 className="text-sm font-medium text-zinc-700">연차</h2>
-        <div className="flex flex-wrap gap-2">
-          {YEARS_SEGMENTS.map((segment) => (
-            <ChipButton
-              key={segment}
-              label={segment === "10+" ? "10년 이상" : `${segment}년`}
-              selected={yearsSegment === segment}
-              onClick={() => setYearsSegment(segment)}
-            />
-          ))}
-        </div>
-      </section>
+      {step === 4 && (
+        <>
+          <h1 className="pt-3 text-[24px] font-bold tracking-[-0.4px]">언제 알려드릴까요?</h1>
 
-      <section className="space-y-2 border-t border-zinc-200 pt-4">
-        <h2 className="text-sm font-medium text-zinc-700">퇴근 알림</h2>
-        <p className="text-xs text-zinc-500">
-          퇴근 시각을 설정하면 15분 전에 오늘 기록을 남기라고 알려드려요. (건너뛰어도 괜찮아요)
-        </p>
-        <PushSetup />
-      </section>
+          {push.status === "denied" ? (
+            /* 2.4-b 알림 권한 거부 (Figma 268:5806) */
+            <>
+              <p className="pt-3 text-[14px] leading-relaxed text-[#a0a0a0]">
+                알림이 꺼져 있어요. 기기 설정에서 켜면 잊지 않고 알려드릴게요.
+              </p>
+              <p className="pt-6 text-[13px] text-[#828282]">알림 없이도 앱은 그대로 쓸 수 있어요</p>
+              <div className="mt-3 rounded-[14px] bg-[#1c1c1c] px-4 py-5">
+                <p className="text-[15px] font-semibold text-[#f2f2f2]">설정 › 알림 › 오늘의 흔적</p>
+                <p className="pt-1.5 text-[13px] text-[#828282]">여기서 켤 수 있어요</p>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="pt-3 text-[14px] leading-relaxed text-[#a0a0a0]">
+                퇴근 무렵에 한 번만 보낼게요. 알림을 받고 싶지 않으면 건너뛰어도 돼요.
+              </p>
 
-      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
-      {savedMessage && (
-        <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-          {savedMessage}
-        </p>
+              {/* 퇴근 시간 (Figma 268:5786) */}
+              <div className="flex gap-2 pt-7">
+                {TIME_PRESETS.map((time) => {
+                  const active = !customTime && push.leaveTime === time;
+                  return (
+                    <button
+                      key={time}
+                      type="button"
+                      onClick={() => {
+                        setCustomTime(false);
+                        push.setLeaveTime(time);
+                      }}
+                      aria-pressed={active}
+                      className={`flex-1 rounded-[12px] py-4 text-[16px] transition-colors ${
+                        active
+                          ? "bg-accent font-semibold text-accent-foreground"
+                          : "bg-[#1c1c1c] text-[#d4d4d4] hover:bg-[#242424]"
+                      }`}
+                    >
+                      {time}
+                    </button>
+                  );
+                })}
+                <button
+                  type="button"
+                  onClick={() => setCustomTime(true)}
+                  aria-pressed={customTime}
+                  className={`flex-1 rounded-[12px] py-4 text-[14px] transition-colors ${
+                    customTime
+                      ? "bg-accent font-semibold text-accent-foreground"
+                      : "bg-[#1c1c1c] text-[#d4d4d4] hover:bg-[#242424]"
+                  }`}
+                >
+                  직접 입력
+                </button>
+              </div>
+
+              {customTime && (
+                <input
+                  type="time"
+                  value={push.leaveTime}
+                  onChange={(e) => push.setLeaveTime(e.target.value)}
+                  aria-label="퇴근 시각"
+                  className="mt-3 w-full rounded-[12px] bg-[#1c1c1c] px-4 py-3 text-[15px] text-[#f2f2f2] focus:outline-none focus:ring-1 focus:ring-[#5e5e5e]"
+                />
+              )}
+
+              <p className="pt-5 text-[13px] text-[#828282]">
+                {reminderSentence(push.leaveTime) ?? "퇴근 15분 전에 보낼게요"}
+              </p>
+
+              {/* 주말 제외 (Figma 268:5796) */}
+              <button
+                type="button"
+                onClick={() => push.setSkipWeekends(!push.skipWeekends)}
+                role="switch"
+                aria-checked={push.skipWeekends}
+                className="mt-7 flex w-full items-center"
+              >
+                <span className="text-[15px] text-[#f2f2f2]">주말에는 쉬어요</span>
+                <span className="flex-1" />
+                <span
+                  aria-hidden
+                  className={`flex h-[30px] w-[50px] items-center rounded-full p-[3px] transition-colors ${
+                    push.skipWeekends ? "bg-accent" : "bg-[#3a3a3a]"
+                  }`}
+                >
+                  <span
+                    className={`size-[24px] rounded-full bg-white transition-transform ${
+                      push.skipWeekends ? "translate-x-[20px]" : ""
+                    }`}
+                  />
+                </span>
+              </button>
+            </>
+          )}
+
+          {push.message && <p className="pt-4 text-[13px] text-[#828282]">{push.message}</p>}
+          {error && (
+            <p className="mt-4 rounded-lg bg-[#2a1614] px-3 py-2 text-[13px] text-[#f0645c]">
+              {error}
+            </p>
+          )}
+          {savedMessage && (
+            <p className="mt-4 rounded-lg bg-[#16241c] px-3 py-2 text-[13px] text-emerald-400">
+              {savedMessage}
+            </p>
+          )}
+
+          <div className="flex-1" />
+
+          <button
+            type="button"
+            onClick={() => finish(push.status !== "denied" && push.status !== "subscribed")}
+            disabled={saving || push.status === "subscribing"}
+            className="mt-6 w-full rounded-[12px] bg-accent py-4 text-[15px] font-semibold text-accent-foreground transition-colors hover:bg-[#ff7a2e] disabled:opacity-40"
+          >
+            {saving || push.status === "subscribing" ? "설정하는 중…" : "시작하기"}
+          </button>
+          <button
+            type="button"
+            onClick={() => finish(false)}
+            disabled={saving}
+            className="pt-3 text-center text-[13px] text-[#828282] underline underline-offset-2 disabled:opacity-40"
+          >
+            알림 없이 시작하기
+          </button>
+        </>
       )}
 
-      <button
-        type="button"
-        onClick={handleSubmit}
-        disabled={!canSubmit}
-        className="w-full rounded-xl bg-zinc-900 py-3 text-base font-semibold text-white transition-colors hover:bg-zinc-800 disabled:opacity-40 disabled:hover:bg-zinc-900"
-      >
-        {saving ? "저장하는 중…" : hasExistingProfile ? "저장" : "내 커리어 스택 시작하기"}
-      </button>
-
-      {!hasExistingProfile && (
+      {/* 최초 온보딩일 때만 — 설정 변경으로 들어온 경우엔 나갈 길이 이미 헤더에 있다. */}
+      {!hasExistingProfile && step < 4 && (
         <button
           type="button"
           onClick={() => {
             markOnboardingSkipped();
             router.push("/");
           }}
-          className="text-center text-sm text-zinc-400 underline underline-offset-2"
+          className="pt-4 text-center text-[13px] text-[#5e5e5e] underline underline-offset-2"
         >
           나중에 설정하기
         </button>
       )}
     </div>
-  );
-}
-
-function ChipButton({
-  label,
-  selected,
-  onClick,
-}: {
-  label: string;
-  selected: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors active:scale-[0.98] ${
-        selected
-          ? "border-zinc-900 bg-zinc-900 text-white hover:bg-zinc-800"
-          : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
-      }`}
-    >
-      {label}
-    </button>
   );
 }

@@ -40,7 +40,7 @@ def get_vapid_public_key() -> VapidPublicKeyResponse:
 def subscribe(payload: PushSubscribeRequest) -> None:
     user_id = _endpoint_to_user_id(payload.endpoint)
     subscription = {"endpoint": payload.endpoint, "keys": payload.keys.model_dump()}
-    save_subscription(user_id, subscription, payload.leave_time)
+    save_subscription(user_id, subscription, payload.leave_time, payload.skip_weekends)
 
 
 @router.delete("/push/subscribe", status_code=204)

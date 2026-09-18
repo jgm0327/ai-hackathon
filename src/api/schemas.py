@@ -345,6 +345,9 @@ class PushSubscribeRequest(BaseModel):
     endpoint: str = Field(max_length=2_000)
     keys: PushKeys
     leave_time: str = Field(max_length=16)  # "HH:MM"
+    # 9/18 신규 — Figma 온보딩 4/4 "주말에는 쉬어요". 기본값 False라 기존 프론트가
+    # 이 필드를 안 보내도 동작이 그대로다.
+    skip_weekends: bool = False
 
 
 class PushUnsubscribeRequest(BaseModel):
@@ -359,22 +362,53 @@ class VapidPublicKeyResponse(BaseModel):
 # 직군/연차는 자유 입력이 아니라 고정된 칩 세트다(Figma "2.0 목적지·푸시 설정" 화면,
 # CLAUDE.md 2.4: 연차 직접 입력 배제 — 세그먼트 4개로 충분). Literal로 강제하면 잘못된
 # 값이 스키마 단계에서 422로 걸러진다.
-JobField = Literal["개발", "기획·PM", "디자인", "마케팅", "영업", "데이터"]
+# 9/18 — Figma "00 · 온보딩"(268:5731) 재설계로 직군 세트가 바뀌었다.
+# 예전: 개발 / 기획·PM / 디자인 / 마케팅 / 영업 / 데이터
+# 지금: 마케팅·광고 / 경영·비즈니스 / 디자인 / 개발 / 영업 / 고객서비스·리테일
+JobField = Literal["마케팅·광고", "경영·비즈니스", "디자인", "개발", "영업", "고객서비스·리테일"]
 YearsSegment = Literal["1-3", "4-6", "7-10", "10+"]
 
 
+class CompanyPayload(BaseModel):
+    """재직 이력 한 건 (9/18 신규, Figma 3/4 "어디서 얼마나 일하셨어요?").
+
+    기간은 월 단위("2024-03" 또는 "2024.03")다 — Figma가 월까지만 받는다.
+    `ended_at`이 없으면 재직 중.
+    """
+
+    name: str = Field(min_length=1, max_length=100)
+    started_at: str = Field(max_length=16)
+    ended_at: str | None = Field(default=None, max_length=16)
+
+
 class ProfileResponse(_FromAttributes):
-    job_field: JobField | None
+    # ⚠️ 응답 쪽은 Literal이 아니라 str이다. 9/18에 직군 세트가 바뀌었는데, 그 전에
+    # 저장된 값("기획·PM", "데이터")을 Literal로 검증하면 **기존 유저의 프로필 조회가
+    # 통째로 500난다.** 고정 칩만 허용한다는 원칙(CLAUDE.md 2.4)은 쓰기 경로
+    # (ProfileUpdateRequest)에서 계속 강제하고, 읽기는 저장된 값을 그대로 돌려준다.
+    job_field: str | None
     job_detail: str | None
     years_segment: YearsSegment | None
+    # 9/18 신규 — 2/4 "어디로 가고 싶으세요?"(다중), 3/4 회사·기간.
+    target_jobs: list[str] = []
+    companies: list[CompanyPayload] = []
+    # 3/4 화면이 보여주는 "지금까지 6년 3개월". 회사 목록에서 서버가 계산한 값이라
+    # 프론트가 따로 세지 않아도 되고, 저장된 years_segment와 항상 같은 근거를 쓴다.
+    total_months: int = 0
 
 
 class ProfileUpdateRequest(BaseModel):
     job_field: JobField
-    # 세부 직무는 직군에 따라 선택지가 달라지고(Figma엔 "개발" 하위만 구체적으로
-    # 나열돼 있음), 아직 모든 직군의 하위 칩 세트가 확정되지 않아 자유 문자열로 둔다.
+    # 세부 직무(1/4에서 고른 직무 칩). 직군별 목록이 프론트의 분류표에 있고 서버는
+    # 그 표를 들고 있지 않아 자유 문자열로 둔다 — 직군 자체는 위에서 Literal로 막는다.
     job_detail: str | None = Field(default=None, max_length=100)
-    years_segment: YearsSegment
+    # 9/18 — 연차는 더 이상 직접 받지 않는다. 회사 기간에서 서버가 계산한다
+    # (Figma "연차는 여기서 자동으로 계산해요"). 회사를 하나도 안 넣고 건너뛴 경우를
+    # 위해 값 자체는 optional로 남겨둔다.
+    years_segment: YearsSegment | None = None
+    target_jobs: list[Annotated[str, Field(max_length=100)]] = Field(default=[], max_length=20)
+    # None이면 회사 목록을 건드리지 않는다(직무만 고치러 다시 들어온 경우).
+    companies: list[CompanyPayload] | None = Field(default=None, max_length=30)
 
 
 class MeResponse(BaseModel):

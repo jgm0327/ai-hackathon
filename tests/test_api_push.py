@@ -43,13 +43,15 @@ def test_subscribe_saves_with_hashed_endpoint_as_user_id(client):
 
     assert response.status_code == 201
     mock_save.assert_called_once()
-    user_id, subscription, leave_time = mock_save.call_args[0]
+    user_id, subscription, leave_time, skip_weekends = mock_save.call_args[0]
     assert len(user_id) == 64  # sha256 hexdigest
     assert subscription == {
         "endpoint": payload["endpoint"],
         "keys": {"p256dh": "p-key", "auth": "a-key"},
     }
     assert leave_time == "18:00"
+    # 9/18 신규 — 프론트가 안 보내면 기존 동작(매일 발송) 그대로.
+    assert skip_weekends is False
 
 
 def test_subscribe_is_deterministic_per_endpoint(client):
@@ -79,3 +81,18 @@ def test_unsubscribe_deletes_by_hashed_endpoint(client):
     assert response.status_code == 204
     mock_delete.assert_called_once()
     assert len(mock_delete.call_args[0][0]) == 64
+
+
+def test_subscribe_passes_skip_weekends_through(client):
+    """온보딩 4/4 "주말에는 쉬어요" 토글 (9/18 신규)."""
+    payload = {
+        "endpoint": "https://example.com/push/xyz",
+        "keys": {"p256dh": "p-key", "auth": "a-key"},
+        "leave_time": "19:00",
+        "skip_weekends": True,
+    }
+    with patch("src.api.routers.push.save_subscription") as mock_save:
+        response = client.post("/api/push/subscribe", json=payload)
+
+    assert response.status_code == 201
+    assert mock_save.call_args[0][3] is True

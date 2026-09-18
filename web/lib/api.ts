@@ -86,6 +86,9 @@ export interface PushSubscriptionPayload {
   keys: { p256dh: string; auth: string };
   /** "HH:MM" — 발송 시각 계산에 쓴다 (9/13 계약에 추가된 필드). */
   leave_time: string;
+  /** 9/18 신규 — 주말엔 보내지 않는다 (Figma 온보딩 4/4 "주말에는 쉬어요").
+   * 서버 기본값이 false라 안 보내도 기존 동작(매일 발송) 그대로다. */
+  skip_weekends?: boolean;
 }
 
 export interface UpdateProjectPatch {
@@ -94,21 +97,51 @@ export interface UpdateProjectPatch {
   ended_at?: string;
 }
 
-/** 고정 칩 세트 — 자유 입력이 아니다 (CLAUDE.md 2.4, `docs/05-api-contract.md` §9). */
-export const JOB_FIELDS = ["개발", "기획·PM", "디자인", "마케팅", "영업", "데이터"] as const;
+/** 고정 칩 세트 — 자유 입력이 아니다 (CLAUDE.md 2.4, `docs/05-api-contract.md` §9).
+ *
+ * 9/18 — Figma "00 · 온보딩"(268:5731) 재설계로 직군 세트가 바뀌었다.
+ * 목록 자체는 `lib/jobTaxonomy.ts`가 단일 진실 공급원이고, 여기선 서버 계약(Literal)과
+ * 맞춘 타입만 둔다. */
+export const JOB_FIELDS = [
+  "마케팅·광고",
+  "경영·비즈니스",
+  "디자인",
+  "개발",
+  "영업",
+  "고객서비스·리테일",
+] as const;
 export type JobField = (typeof JOB_FIELDS)[number];
 
 export const YEARS_SEGMENTS = ["1-3", "4-6", "7-10", "10+"] as const;
 export type YearsSegment = (typeof YEARS_SEGMENTS)[number];
 
-/** "개발" 직군 하위 세부 직무 — Figma에 구체적으로 나온 유일한 직군이라 여기서만 칩으로 고정한다.
- * 다른 직군은 `job_detail`을 자유 입력(또는 생략)으로 받는다. */
-export const DEV_JOB_DETAILS = ["백엔드", "프론트엔드", "안드로이드", "iOS", "DevOps", "데이터엔지니어"] as const;
+/** 재직 이력 한 건 (9/18 신규, Figma 3/4 "어디서 얼마나 일하셨어요?").
+ * 기간은 월 단위("2024-03")다. `ended_at`이 null이면 재직 중. */
+export interface Company {
+  name: string;
+  started_at: string;
+  ended_at: string | null;
+}
 
 export interface Profile {
-  job_field: JobField | null;
+  /** 9/18 이전에 저장된 값("기획·PM", "데이터")이 그대로 올 수 있어서 좁히지 않는다 —
+   * 서버도 같은 이유로 응답 쪽은 Literal이 아니다(src/api/schemas.py 참고). */
+  job_field: string | null;
   job_detail: string | null;
   years_segment: YearsSegment | null;
+  /** 2/4 "어디로 가고 싶으세요?" 다중 선택 결과. 직무 이름만 담긴다. */
+  target_jobs: string[];
+  companies: Company[];
+  /** 회사 기간에서 **서버가** 계산한 총 재직 개월 수 (겹치는 기간은 한 번만 센다). */
+  total_months: number;
+}
+
+export interface ProfileUpdate {
+  jobField: JobField;
+  jobDetail?: string | null;
+  targetJobs?: string[];
+  /** 생략(undefined)하면 서버가 기존 회사 목록을 건드리지 않는다. 빈 배열은 "다 지워라". */
+  companies?: Company[];
 }
 
 // ---------------------------------------------------------------------------
@@ -564,17 +597,19 @@ export function getProfile(): Promise<Profile> {
   return request<Profile>("/profile");
 }
 
-export function updateProfile(
-  jobField: JobField,
-  yearsSegment: YearsSegment,
-  jobDetail?: string,
-): Promise<Profile> {
+/**
+ * 9/18 — 연차(`years_segment`)는 더 이상 보내지 않는다. 회사 기간에서 서버가
+ * 계산한다(Figma "연차는 여기서 자동으로 계산해요. 따로 묻지 않을게요").
+ * 화면이 보여주는 "6년 3개월"과 저장되는 구간이 갈라지지 않게 하려는 것이다.
+ */
+export function updateProfile(update: ProfileUpdate): Promise<Profile> {
   return request<Profile>("/profile", {
     method: "PUT",
     body: JSON.stringify({
-      job_field: jobField,
-      years_segment: yearsSegment,
-      ...(jobDetail ? { job_detail: jobDetail } : {}),
+      job_field: update.jobField,
+      ...(update.jobDetail ? { job_detail: update.jobDetail } : {}),
+      ...(update.targetJobs ? { target_jobs: update.targetJobs } : {}),
+      ...(update.companies !== undefined ? { companies: update.companies } : {}),
     }),
   });
 }

@@ -22,7 +22,9 @@ export function TabBar() {
   const pathname = usePathname();
 
   // 로그인 화면(9/14 신규)은 아직 로그인 전이라 앱 내비게이션이 의미가 없다 — 탭을 숨긴다.
-  if (pathname === "/login") return null;
+  // 온보딩(9/18)도 마찬가지로 끝까지 진행하는 전체 화면 흐름이라 탭을 숨긴다 —
+  // Figma "00 · 온보딩"의 네 화면 어디에도 하단 탭바가 없다.
+  if (pathname === "/login" || pathname === "/onboarding") return null;
 
   return (
     <nav className="sticky bottom-0 z-40 border-t border-[#2a2a2a] bg-[#141210]/95 backdrop-blur">
@@ -34,7 +36,7 @@ export function TabBar() {
               <Link
                 href={tab.href}
                 className={`flex flex-col items-center gap-0.5 py-2.5 text-xs ${
-                  active ? "font-medium text-[#ffa259]" : "text-[#5e5e5e]"
+                  active ? "font-medium text-accent" : "text-[#5e5e5e]"
                 }`}
               >
                 {tab.label}

@@ -178,7 +178,7 @@ export function ResumeScopePicker({
         type="button"
         onClick={onSubmit}
         disabled={submitting || nothingSelected}
-        className="w-full rounded-[999px] bg-[#f2f2f2] py-3 text-base font-semibold text-[#171717] transition-colors hover:bg-white disabled:opacity-40 disabled:hover:bg-[#f2f2f2]"
+        className="w-full rounded-[999px] bg-accent py-3 text-base font-semibold text-accent-foreground transition-colors hover:bg-[#ff7a2e] disabled:opacity-40 disabled:hover:bg-accent"
       >
         {submitting
           ? "경력기술서 만드는 중…"
@@ -196,7 +196,7 @@ function Checkbox({ checked }: { checked: boolean }) {
       aria-hidden
       className={`flex size-[19px] shrink-0 items-center justify-center rounded-[5px] border text-[11px] ${
         checked
-          ? "border-[#f2f2f2] bg-[#f2f2f2] text-[#171717]"
+          ? "border-accent bg-accent text-accent-foreground"
           : "border-[#3a3a3a] bg-transparent text-transparent"
       }`}
     >

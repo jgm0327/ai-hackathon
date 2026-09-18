@@ -19,7 +19,7 @@ SQLite로 충분하다 — 단일 VM, 단일 프로세스, 데이터 수천 건 
 import json
 import secrets
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -99,6 +99,26 @@ class Profile:
     job_field: str | None
     job_detail: str | None
     years_segment: str | None
+    # 9/18 신규 (Figma "00 · 온보딩" 268:5731 재설계).
+    # target_jobs: "2/4 어디로 가고 싶으세요?" 다중 선택 결과. 직무 이름만 담는다
+    #   (직군은 프론트가 직무 분류표에서 되찾을 수 있어서 중복 저장하지 않는다).
+    # companies: "3/4 어디서 얼마나 일하셨어요?" — 회사와 기간. years_segment는 이걸로
+    #   서버가 계산해서 채운다(Figma "연차는 여기서 자동으로 계산해요. 따로 묻지 않을게요").
+    target_jobs: list[str] = field(default_factory=list)
+    companies: list["Company"] = field(default_factory=list)
+
+
+@dataclass
+class Company:
+    """유저가 온보딩에서 입력한 재직 이력 한 건 (9/18 신규).
+
+    `started_at`/`ended_at`은 "YYYY-MM"이다 — Figma가 월 단위까지만 받는다
+    ("2024.03"). `ended_at`이 None이면 재직 중.
+    """
+
+    name: str
+    started_at: str
+    ended_at: str | None = None
 
 
 def _connect() -> sqlite3.Connection:
@@ -172,6 +192,23 @@ def init_db() -> None:
                 job_field     TEXT,
                 job_detail    TEXT,
                 years_segment TEXT
+            )
+            """
+        )
+        # 9/18 신규 — 기존 DB 파일엔 CREATE TABLE IF NOT EXISTS가 새 컬럼을 추가해주지
+        # 않으므로 직접 마이그레이션한다(cards.created_time과 같은 패턴, 멱등).
+        profile_columns = {row["name"] for row in conn.execute("PRAGMA table_info(profile)")}
+        if "target_jobs" not in profile_columns:
+            conn.execute("ALTER TABLE profile ADD COLUMN target_jobs TEXT")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS profile_companies (
+                id         INTEGER PRIMARY KEY,
+                user_id    INTEGER NOT NULL REFERENCES users(id),
+                name       TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                ended_at   TEXT,
+                position   INTEGER NOT NULL DEFAULT 0
             )
             """
         )
@@ -631,26 +668,64 @@ def get_profile(user_id: int) -> Profile:
     init_db()
     with _connect() as conn:
         row = conn.execute("SELECT * FROM profile WHERE user_id = ?", (user_id,)).fetchone()
-    return _row_to_profile(row) if row else Profile(job_field=None, job_detail=None, years_segment=None)
+        company_rows = conn.execute(
+            "SELECT * FROM profile_companies WHERE user_id = ? ORDER BY position, id",
+            (user_id,),
+        ).fetchall()
+
+    companies = [
+        Company(name=r["name"], started_at=r["started_at"], ended_at=r["ended_at"])
+        for r in company_rows
+    ]
+    if row is None:
+        return Profile(
+            job_field=None, job_detail=None, years_segment=None, target_jobs=[], companies=companies
+        )
+    profile = _row_to_profile(row)
+    profile.companies = companies
+    return profile
 
 
 def save_profile(
-    user_id: int, job_field: str | None, job_detail: str | None, years_segment: str | None
+    user_id: int,
+    job_field: str | None,
+    job_detail: str | None,
+    years_segment: str | None,
+    target_jobs: list[str] | None = None,
+    companies: list[Company] | None = None,
 ) -> None:
-    """그 유저의 온보딩 프로필을 저장한다(유저당 1행, upsert). 항상 세 필드 전체를 덮어쓴다."""
+    """그 유저의 온보딩 프로필을 저장한다(유저당 1행, upsert). 넘긴 값으로 전체를 덮어쓴다.
+
+    `companies`를 주면 기존 회사 목록을 통째로 갈아끼운다 — 온보딩 화면이 목록 전체를
+    편집해서 한 번에 보내는 구조라(부분 수정 API가 없다) 이쪽이 화면과 맞는다.
+    `None`이면 회사 목록은 손대지 않는다(직무만 고치러 다시 들어온 경우).
+    """
     init_db()
     with _connect() as conn:
         conn.execute(
             """
-            INSERT INTO profile (user_id, job_field, job_detail, years_segment)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO profile (user_id, job_field, job_detail, years_segment, target_jobs)
+            VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(user_id) DO UPDATE SET
                 job_field = excluded.job_field,
                 job_detail = excluded.job_detail,
-                years_segment = excluded.years_segment
+                years_segment = excluded.years_segment,
+                target_jobs = excluded.target_jobs
             """,
-            (user_id, job_field, job_detail, years_segment),
+            (user_id, job_field, job_detail, years_segment, json.dumps(target_jobs or [], ensure_ascii=False)),
         )
+        if companies is not None:
+            conn.execute("DELETE FROM profile_companies WHERE user_id = ?", (user_id,))
+            conn.executemany(
+                """
+                INSERT INTO profile_companies (user_id, name, started_at, ended_at, position)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                [
+                    (user_id, c.name, c.started_at, c.ended_at, i)
+                    for i, c in enumerate(companies)
+                ],
+            )
 
 
 def load_seed_cards(user_id: int, path: str = "data/seed_cards.json") -> None:
@@ -741,8 +816,16 @@ def _row_to_resume_draft(row: sqlite3.Row) -> ResumeDraft:
 
 
 def _row_to_profile(row: sqlite3.Row) -> Profile:
+    # target_jobs는 9/18에 추가된 컬럼이라 그 이전 행에는 아예 없다(마이그레이션으로
+    # 컬럼은 생기지만 값은 NULL). 그 경우 빈 목록으로 읽는다.
+    raw_target = row["target_jobs"] if "target_jobs" in row.keys() else None
+    try:
+        target_jobs = json.loads(raw_target) if raw_target else []
+    except (TypeError, ValueError):
+        target_jobs = []
     return Profile(
         job_field=row["job_field"],
         job_detail=row["job_detail"],
         years_segment=row["years_segment"],
+        target_jobs=target_jobs if isinstance(target_jobs, list) else [],
     )

@@ -24,13 +24,21 @@ _STORE_PATH = Path("data/push_subscriptions.json")  # Upstash 미설정 시 로�
 _REDIS_KEY = "push_subscriptions"
 
 
-def save_subscription(user_id: str, subscription: dict, leave_time: str) -> None:
+def save_subscription(
+    user_id: str, subscription: dict, leave_time: str, skip_weekends: bool = False
+) -> None:
     """유저의 PushSubscription 객체와 퇴근 시각을 저장한다.
 
     subscription: 브라우저 Push API가 발급하는 {"endpoint": ..., "keys": {...}} 형태.
     leave_time: "HH:MM" 형식. 서버가 이 시각-15분에 맞춰 발송할 때 사용.
+    skip_weekends: 주말엔 보내지 않는다 (9/18 신규 — Figma 온보딩 4/4 "주말에는 쉬어요").
+        기존 구독 엔트리엔 이 키가 없으므로 읽는 쪽이 기본값 False로 다뤄야 한다.
     """
-    entry = {"subscription": subscription, "leave_time": leave_time}
+    entry = {
+        "subscription": subscription,
+        "leave_time": leave_time,
+        "skip_weekends": skip_weekends,
+    }
     if _upstash_configured():
         _upstash_command("HSET", _REDIS_KEY, user_id, json.dumps(entry, ensure_ascii=False))
     else:

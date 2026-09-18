@@ -51,12 +51,15 @@ export default function LoginPage() {
       </div>
 
       <div className="mt-8 flex items-baseline gap-1.5">
-        <p className="text-[28px] font-bold tracking-[-0.6px]">{Object.keys(SAMPLE_RECORDED_DAYS).length}</p>
-        <p className="text-[17px] font-medium tracking-[-0.3px] text-[#555]">/ 365</p>
+        {/* 강조 숫자는 브랜드 오렌지 (Figma 268:6016) */}
+        <p className="text-[40px] font-bold leading-none tracking-[-1px] text-accent">
+          {Object.keys(SAMPLE_RECORDED_DAYS).length}
+        </p>
+        <p className="text-[22px] font-medium tracking-[-0.3px] text-[#8a8a8a]">/ 365</p>
       </div>
-      <p className="mt-1 text-[13px] text-[#8a8a8a]">1년 중 기억나는 날</p>
+      <p className="mt-2 text-[14px] text-[#8a8a8a]">우리의 기억은 생각보다 쉽게 흐려져요</p>
 
-      <p className="mt-8 text-[17px] font-medium leading-[24px] tracking-[-0.3px]">
+      <p className="mt-7 text-[17px] font-medium leading-[24px] tracking-[-0.3px]">
         대부분의 1년은 이렇게 지나갑니다.
         <br />
         하루 한 줄이면 나머지도 남습니다.
@@ -64,11 +67,11 @@ export default function LoginPage() {
 
       <a
         href={kakaoLoginUrl()}
-        className="mt-8 flex h-[50px] w-full items-center justify-center rounded-[14px] border border-[#e8e8e8] bg-white text-[14px] font-medium text-[#171717] transition-colors hover:bg-zinc-100 active:scale-[0.98]"
+        className="mt-8 flex h-[54px] w-full items-center justify-center rounded-[14px] bg-accent text-[15px] font-semibold text-accent-foreground transition-colors hover:bg-[#ff7a2e] active:scale-[0.98]"
       >
-        시작하기
+        오늘부터 기록하기
       </a>
-      <p className="mt-1 text-center text-[11.5px] text-[#555]">카카오 로그인으로 안전하게 보관돼요</p>
+      <p className="mt-2 text-center text-[11.5px] text-[#555]">카카오 로그인으로 안전하게 보관돼요</p>
     </div>
   );
 }
