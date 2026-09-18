@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { CardResultSheet } from "@/components/CardResultSheet";
@@ -18,12 +19,14 @@ import {
   createCard,
   getMetricQuestion,
   getProfile,
+  listCards,
   refineCard,
   updateCard,
   uploadCardPhoto,
 } from "@/lib/api";
 import { resizeImageForUpload } from "@/lib/imageResize";
 import { getCached, navKey, setCached } from "@/lib/navCache";
+import { useProjects } from "@/lib/useProjects";
 
 /** 홈 대시보드와 같은 키 — 어느 쪽에서 쓰다 말았든 이어서 쓸 수 있어야 한다. */
 const DRAFT_KEY = "career-log:draft-raw-text";
@@ -31,6 +34,26 @@ const DRAFT_KEY = "career-log:draft-raw-text";
 function formatTodayLabel(): string {
   const d = new Date();
   return `${d.getMonth() + 1}월 ${d.getDate()}일 · 오늘`;
+}
+
+/** "YYYY-MM-DD" 오늘 (로컬 기준) — `card.created_at`과 같은 포맷이라 문자열 비교로 쓴다. */
+function todayDateString(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/**
+ * 이어 쓰기 배너(Figma 3.0-i `299:12194`)가 가리킬 주제 — **오늘 이전** 기록 중 가장
+ * 최근 것의 대표 역량.
+ *
+ * 태그가 없는 카드는 이어 쓸 "주제"가 없으므로 건너뛴다. 카드 목록은 최신순이라
+ * 앞에서부터 찾는다. 오늘 이미 그 주제를 건드렸으면 호출부가 배너를 숨긴다 — 방금
+ * 쓴 걸 다시 이어 쓰라고 권하면 잔소리가 된다.
+ */
+function lastTopicOf(cards: Card[]): string | null {
+  const today = todayDateString();
+  const previous = cards.find((c) => c.created_at < today && c.skill_tags.length > 0);
+  return previous ? previous.skill_tags[0] : null;
 }
 
 /** 타깃 트랙 라벨 — 프로필에 실제로 있는 값만 쓴다(없는 직무를 지어내지 않는다). */
@@ -83,6 +106,12 @@ function RecordPageInner() {
   // 화면이 뜨고, 고른 페이지 본문이 이 입력창에 들어온다. 대량 가져오기는 없다.
   const [notionOpen, setNotionOpen] = useState(false);
 
+  // 이어 쓰기 배너 (Figma 3.0-i) — "어제 쓰던 [X]에 이어 쓰기". 홈이 대시보드로
+  // 바뀌면서 갈 곳을 잃었던 블록이라 여기로 옮겨 왔다(9/18 재검토).
+  const { currentProject, loading: projectsLoading } = useProjects();
+  const [lastTopic, setLastTopic] = useState<string | null>(null);
+  const [todayTopics, setTodayTopics] = useState<string[]>([]);
+
   const [profile, setProfile] = useState<Profile | null>(
     () => getCached<Profile>(navKey.profile()) ?? null,
   );
@@ -103,6 +132,24 @@ function RecordPageInner() {
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (projectsLoading || !currentProject) return;
+    const projectId = currentProject.id;
+    let cancelled = false;
+    listCards(projectId)
+      .then((list) => {
+        setCached(navKey.cards(projectId), list);
+        if (cancelled) return;
+        setLastTopic(lastTopicOf(list));
+        const today = todayDateString();
+        setTodayTopics(list.filter((c) => c.created_at === today).flatMap((c) => c.skill_tags));
+      })
+      .catch(() => {}); // 실패해도 배너만 안 뜬다 — 입력 자체는 그대로 된다
+    return () => {
+      cancelled = true;
+    };
+  }, [projectsLoading, currentProject]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -291,9 +338,49 @@ function RecordPageInner() {
           <Image src="/icons/chevron-left.svg" alt="" width={20} height={20} aria-hidden />
         </button>
         <h1 className="text-[20px] font-bold leading-[32px]">기록하기</h1>
+        <div className="flex-1" />
+        {/* 설정 진입 (Figma 3.1 우상단) — 홈이 대시보드로 바뀌며 ⚙가 사라졌는데,
+            목업은 이 화면 헤더에 두고 있다. 기록 탭 쪽의 유일한 설정 입구다. */}
+        <Link
+          href="/settings"
+          aria-label="설정"
+          style={{ backgroundColor: t.cardBg, color: t.textSoft }}
+          className="flex size-[26px] items-center justify-center rounded-full text-[12px] transition-opacity active:opacity-70"
+        >
+          ⚙
+        </Link>
       </div>
 
       <div className="flex flex-1 flex-col pt-[24px]">
+        {/* 타깃 트랙 (Figma 3.0-i `299:12191`) — 어떤 직무 기준으로 문장이 다듬어지는지.
+            프로필이 비어 있으면 아예 안 띄운다(빈 칩은 정보가 아니라 잡음이다). */}
+        {jobLabel(profile) && (
+          <Link
+            href="/settings"
+            style={{ color: t.textMuted }}
+            className="mb-[12px] flex items-center gap-[6px] self-start text-[12px] font-medium leading-[20px] transition-opacity active:opacity-60"
+          >
+            {jobLabel(profile)}
+            <Image src="/icons/chevron-right.svg" alt="" width={16} height={16} aria-hidden />
+          </Link>
+        )}
+
+        {/* 이어 쓰기 배너 (Figma 3.0-i `299:12194`) — 오늘 그 주제를 이미 건드렸거나
+            이미 맥락이 잡혀 있으면 띄우지 않는다. */}
+        {lastTopic && !topic && !todayTopics.includes(lastTopic) && (
+          <button
+            type="button"
+            onClick={() => setTopic(lastTopic)}
+            style={{ backgroundColor: t.cardBg }}
+            className="mb-[12px] flex items-center gap-[10px] rounded-[12px] px-[16px] py-[14px] text-left transition-opacity active:opacity-80"
+          >
+            <span className="flex-1 text-[14px] font-medium leading-[24px]">
+              어제 쓰던 [{lastTopic}]에 이어 쓰기
+            </span>
+            <Image src="/icons/chevron-right.svg" alt="" width={16} height={16} aria-hidden />
+          </button>
+        )}
+
         {/* 맥락 배너 (299:12230) — 없으면 아예 안 띄운다. 빈 배너는 정보가 아니다. */}
         {topic && (
           <div

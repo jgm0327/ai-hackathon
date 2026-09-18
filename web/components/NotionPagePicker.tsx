@@ -140,8 +140,32 @@ export function NotionPagePicker({ open, onClose, onPicked }: NotionPagePickerPr
               노션 통합(integration) 토큰을 넣으면 그 통합에 공유된 페이지 목록을 보여드려요.
               목록에서 고른 페이지 하나만 가져옵니다.
             </p>
+
+            {/* 요청 권한 (Figma 3.0-a `299:12141`).
+                3.0-a는 notion.so의 OAuth 동의 화면이라 우리가 만들 수 없지만(client_id
+                미발급), **무엇을 읽는지 밝히는 부분은 우리 화면에서도 보여줄 수 있다.**
+                아래 두 줄은 실제 이 앱이 부르는 API 두 개와 정확히 일치한다 —
+                `POST /notion/pages`(목록)와 `POST /notion/pages/{id}/content`(본문).
+                여기 없는 동작은 하지 않는다. */}
+            <div
+              style={{ backgroundColor: t.cardBg }}
+              className="mt-1 flex flex-col gap-[16px] rounded-[12px] px-[16px] py-[17px]"
+            >
+              {["최근 수정한 페이지 목록 조회", "선택한 페이지의 본문 읽기"].map((perm) => (
+                <span key={perm} className="flex items-center gap-2">
+                  <span
+                    aria-hidden
+                    style={{ backgroundColor: t.textMuted }}
+                    className="size-[5px] shrink-0 rounded-full"
+                  />
+                  <span className="flex-1 text-[14px] leading-[24px]">{perm}</span>
+                </span>
+              ))}
+            </div>
+
             <p style={{ color: t.textMuted }} className="text-[12px] leading-[20px]">
-              토큰은 이 브라우저 탭에만 잠시 보관되고 서버에 저장하지 않아요.
+              쓰기 권한은 쓰지 않아요. 토큰은 이 브라우저 탭에만 잠시 보관되고 서버에
+              저장하지 않습니다.
             </p>
             <input
               value={token}
