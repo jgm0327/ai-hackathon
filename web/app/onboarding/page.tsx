@@ -151,7 +151,11 @@ export default function OnboardingPage() {
   return (
     // 화면 높이를 확보해야 `flex-1` 스페이서가 버튼을 바닥으로 밀어낸다 — Figma의
     // 네 화면 모두 주요 버튼이 화면 하단에 붙어 있다. 하단 탭바는 이 화면에서 숨겨진다.
-    <div className="flex min-h-[100dvh] flex-col px-5 pb-6 pt-2 text-[#f2f2f2]">
+    //
+    // `svh`와 `-mb-6`은 로그인 화면과 같은 이유다 (9/18) — dvh는 모바일 주소창이
+    // 접히면 커져서 버튼이 아래로 밀리고, 레이아웃의 pb-6이 남으면 문서가 뷰포트보다
+    // 24px 길어져 그 스크롤이 주소창 접힘을 유발한다.
+    <div className="-mb-6 flex min-h-[100svh] flex-col px-5 pb-6 pt-2 text-[#f2f2f2]">
       {/* 헤더 — 4단계엔 Figma에도 헤더가 없다(뒤로 갈 곳이 아니라 끝내는 화면). */}
       {step < 4 && (
         <div className="flex items-center gap-3 py-2">

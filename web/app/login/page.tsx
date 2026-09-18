@@ -4,7 +4,7 @@ import Image from "next/image";
 import { preload } from "react-dom";
 import { CSSProperties, useEffect, useState } from "react";
 import { FIELD_ASSETS, WelcomeShapeField } from "@/components/WelcomeShapeField";
-import { kakaoLoginUrl } from "@/lib/api";
+import { getMe, kakaoLoginUrl } from "@/lib/api";
 
 /**
  * 웰컴 스크린 (`/login`) — Figma "00 · 온보딩"의 웰컴 3화면을 순서대로 보여준다.
@@ -59,6 +59,26 @@ export default function LoginPage() {
   WELCOME_ASSETS.forEach((href) => preload(href, { as: "image" }));
 
   const [stage, setStage] = useState(0);
+  // 로그인 여부가 정해지기 전에는 인트로를 그리지 않는다 (9/18 — "다른 화면이 번쩍한다").
+  // `<AuthGate />`는 로그인된 사용자를 이 주소에서 `/`로 돌려보내는데, 그 판단이
+  // 네트워크 왕복(`GET /api/auth/me`)이라 그 사이에 인트로가 한 번 그려졌다가
+  // 사라진다. 배포 환경에서는 그 왕복이 길어서 눈에 띈다.
+  const [loggedOut, setLoggedOut] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getMe()
+      .then((me) => {
+        if (!cancelled) setLoggedOut(me === null);
+      })
+      .catch(() => {
+        // 판단이 안 되면 인트로를 보여주는 쪽으로 — 로그인 화면이 기본 상태다.
+        if (!cancelled) setLoggedOut(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (stage >= LAST_STAGE) return;
@@ -70,11 +90,23 @@ export default function LoginPage() {
     if (stage < LAST_STAGE) setStage((s) => s + 1);
   };
 
+  // 판단 중(혹은 로그인 상태)이면 배경만 깔아둔다 — 곧 `/`로 이동한다.
+  if (loggedOut !== true) {
+    return <div className="-mb-6 min-h-[100svh] bg-[#1a1917]" />;
+  }
+
   return (
     <div
       onClick={advance}
-      className="flex min-h-[100dvh] flex-col bg-[#1a1917] text-[#fafafa]"
+      className="-mb-6 flex min-h-[100svh] flex-col bg-[#1a1917] text-[#fafafa]"
     >
+      {/* 높이 두 가지를 같이 고친다 (9/18 — "버튼이 먼저 보이고 밑으로 간다"):
+          1. `dvh` → `svh`. dvh는 모바일 주소창이 접히면 값이 커지는 단위라, 그때마다
+             이 컨테이너가 늘어나고 아래 `flex-1` 스페이서가 같이 늘어나 버튼이 내려간다.
+             svh는 "주소창이 보이는 상태의 높이"로 고정이라 흔들리지 않는다.
+          2. `-mb-6`으로 레이아웃(`app/layout.tsx`의 `main`)이 주는 pb-6(24px)을 상쇄.
+             그게 남아 있으면 문서가 뷰포트보다 정확히 24px 길어져(실측 755 vs 731)
+             스크롤이 생기고, 그 스크롤이 위 1번의 주소창 접힘을 유발한다. */}
       {/* key로 장이 바뀔 때마다 페이드가 다시 돈다. 모션을 줄이는 설정이면
           globals.css가 애니메이션을 끈다. */}
       <div key={stage} className="welcome-fade flex flex-1 flex-col">
