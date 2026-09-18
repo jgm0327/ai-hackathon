@@ -57,7 +57,9 @@ log "빌드 산출물 내려받는 중"
 TMP_TGZ="$(mktemp /tmp/web-build.XXXXXX.tar.gz)"
 trap 'rm -f "$TMP_TGZ"' EXIT
 # --fail: 404/500이면 HTML을 tar에 넘기지 않고 여기서 멈춘다.
-curl --fail --location --silent --show-error --output "$TMP_TGZ" "$RELEASE_URL"
+# 쿼리스트링은 캐시 우회용이다 — 태그(web-latest)를 고정해두고 같은 파일 이름을 덮어쓰는
+# 구조라, GitHub CDN 엣지가 옛 파일을 들고 있으면 최신 빌드를 받지 못한다.
+curl --fail --location --silent --show-error --output "$TMP_TGZ"   -H 'Cache-Control: no-cache' "${RELEASE_URL}?t=$(date +%s)"
 ls -lh "$TMP_TGZ"
 
 log "새 빌드 펼치는 중"
@@ -75,6 +77,36 @@ for required in server.js .next/static; do
 done
 chown -R "$APP_USER:$APP_USER" "$INCOMING"
 cat "$INCOMING/BUILD_INFO" 2>/dev/null || true
+
+# 받아온 빌드가 최신 프론트 변경을 담고 있는지 확인한다.
+#
+# 이게 어긋나는 경우가 실제로 두 번 있었다(9/18):
+#   1. Actions 빌드가 끝나기 전에 스크립트를 돌렸다
+#   2. git pull만 하고 스크립트를 안 돌려서 예전 빌드가 계속 서빙됐다
+# 둘 다 "배포했는데 화면이 안 바뀐다"로 나타나서 원인을 찾는 데 시간이 걸린다.
+#
+# HEAD와 그냥 비교하면 안 된다 — 빌드 워크플로는 `web/` 변경에만 돌기 때문에,
+# 백엔드나 이 스크립트만 고친 커밋 뒤에는 정상인데도 해시가 달라진다. 그래서
+# **빌드 시점 이후에 `web/`(과 워크플로 자체)를 건드린 커밋이 있는지**를 센다.
+BUILT_COMMIT="$(sed -n 's/^commit=//p' "$INCOMING/BUILD_INFO" 2>/dev/null)"
+PENDING=0
+if [ -n "$BUILT_COMMIT" ]; then
+  PENDING="$(git -C "$APP_DIR" rev-list --count "$BUILT_COMMIT..HEAD"     -- web .github/workflows/build-web.yml 2>/dev/null || echo 0)"
+fi
+# 막지는 않는다(고의로 예전 빌드로 되돌릴 수도 있다) — 크게 경고만 한다.
+if [ "$PENDING" != "0" ]; then
+  cat >&2 <<WARN
+
+⚠️  받아온 빌드에 최신 프론트 변경이 빠져 있습니다.
+    이 빌드:  $BUILT_COMMIT
+    이후 web/ 을 건드린 커밋이 $PENDING 개 더 있습니다.
+    Actions 빌드가 아직 안 끝났을 수 있습니다:
+    https://github.com/jgm0327/ai-hackathon/actions/workflows/build-web.yml
+    그래도 계속 진행합니다 — 원하던 게 아니면 Ctrl+C로 지금 멈추세요. (5초)
+
+WARN
+  sleep 5
+fi
 
 log "교체 후 재시작"
 rm -rf "$PREVIOUS"
