@@ -154,6 +154,9 @@ export function CardResultSheet({
   const sentence =
     translation && translation.related ? translation.translated_sentence : card.refined_sentence;
 
+  /** 저장 상태 줄에 적을 저장 위치 — 카드의 대표 태그(서버 집계와 같은 규칙). */
+  const savedTag = card.skill_tags[0] ?? null;
+
   const perspectiveLabel = (() => {
     if (activeTarget && unrelated) return `${activeTarget}와는 조금 멀어요`;
     if (activeTarget) return `${currentJob ?? "현재 직무"} → ${activeTarget}`;
@@ -165,6 +168,13 @@ export function CardResultSheet({
     if (translation?.headline) return translation.headline;
     return caseSummary || "오늘 기록을 이렇게 정리했어요.";
   })();
+
+  /** 저장 상태 줄과 액션 버튼 사이에 블록(수치 안내 / 원문 보기 / 다음 기록 제안)이
+   * 들어가는가 — 그에 따라 액션 위 여백이 20px과 36px로 갈린다(목업 기준). */
+  const hasBlockBeforeActions =
+    (!activeTarget && !hasNumber(sentence)) ||
+    (!!activeTarget && !!translation?.related) ||
+    (unrelated && !!translation?.suggestion);
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center">
@@ -213,7 +223,7 @@ export function CardResultSheet({
 
         <p
           style={{ color: t.text }}
-          className="mt-[20px] text-[20px] font-bold leading-[28px] tracking-[-0.4px]"
+          className="mt-[20px] text-[20px] font-bold leading-[32px] tracking-[-0.4px]"
         >
           {headline}
         </p>
@@ -232,22 +242,39 @@ export function CardResultSheet({
           </p>
         </div>
 
-        {/* 직접 수정 진입 (Figma 286:7140) — 현재 직무 관점에서만. 번역 문장은
-            저장된 값이 아니라서 "고치기"의 대상이 아니다. */}
-        {!activeTarget && (
-          <button
-            type="button"
-            onClick={onEditSentence}
-            className="mt-[8px] flex items-center justify-end gap-[6px]"
-          >
-            <Image src="/icons/pencil.svg" alt="" width={16} height={16} aria-hidden />
+        {/* 저장 상태 + 직접 수정 진입 (Figma `318:23858`, 9/18 개정).
+            그 전엔 [✎ 문장 고치기]만 오른쪽에 떠 있었다. 새 목업은 같은 줄 왼쪽에
+            **어디에 저장됐는지**를 같이 적는다 — 결과 시트는 이미 저장이 끝난
+            자리인데 그 사실이 화면에 없어서, 닫으면 어디로 갔는지 알 수 없었다.
+
+            **저장 위치는 카드의 실제 대표 태그를 쓴다.** 목업의 3.1-b(직무 전환
+            번역)는 번역된 역량 이름("UX 정보 구조 설계에 저장했어요")을 적지만,
+            번역 결과는 저장하지 않으므로(CLAUDE.md 3장) 그렇게 적으면 사실이
+            아니다. 관점을 바꿔도 저장된 곳은 그대로다. */}
+        {!unrelated && (
+          <div className="flex items-center gap-[8px] py-[12px]">
+            <Image src="/icons/check.svg" alt="" width={14} height={14} aria-hidden />
             <span
-              style={{ color: t.textSoft }}
-              className="text-[12px] font-medium leading-[20px] tracking-[0.4px]"
+              style={{ color: t.textMuted }}
+              className="text-[12px] font-medium leading-[20px]"
             >
-              문장 고치기
+              {savedTag ? `${savedTag}에 저장했어요` : "기록에 저장했어요"}
             </span>
-          </button>
+            <span className="flex-1" />
+            <button
+              type="button"
+              onClick={onEditSentence}
+              className="flex items-center gap-[10px] transition-opacity active:opacity-60"
+            >
+              <Image src="/icons/pencil.svg" alt="" width={14} height={14} aria-hidden />
+              <span
+                style={{ color: t.textSoft }}
+                className="text-[12px] font-medium leading-[20px]"
+              >
+                문장 고치기
+              </span>
+            </button>
+          </div>
         )}
 
         {/* "3.1-n 결과 · 수치 없음" (Figma `299:12512`, 9/18 신규).
@@ -335,7 +362,7 @@ export function CardResultSheet({
             대조할 수 있어야 "없는 말을 지어낸 건 아닌지" 유저가 직접 확인한다
             (CLAUDE.md 2.2를 화면에서 검증 가능하게 하는 장치). */}
         {activeTarget && translation?.related && (
-          <details className="mt-[36px]">
+          <details className="mt-[20px]">
             <summary
               style={{ color: t.textMuted }}
               className="flex cursor-pointer list-none items-center gap-2 text-[12px] leading-[20px] tracking-[0.4px] [&::-webkit-details-marker]:hidden"
@@ -383,8 +410,15 @@ export function CardResultSheet({
           <p className="mt-4 text-[12px] text-red-400">{translateError ?? error}</p>
         )}
 
-        {/* 액션 (Figma 286:7144 / 286:7270) */}
-        <div className="mt-[36px] flex items-center gap-[10px]">
+        {/* 액션 (Figma 318:23866 / 286:7270).
+            저장 상태 줄과 액션 사이 여백은 그 사이에 뭐가 들어가는지에 따라 다르다 —
+            목업 기준 아무것도 없으면 20px(3.1), 수치 안내나 원문 보기가 끼면 그 블록
+            **뒤에** 36px(3.1-n / 3.1-b). */}
+        <div
+          className={`flex items-center gap-[10px] ${
+            hasBlockBeforeActions ? "mt-[36px]" : "mt-[20px]"
+          }`}
+        >
           <button
             type="button"
             // 3.1-c의 왼쪽 버튼은 "기록 고치기"다 — 접점이 없다는 말을 듣고 나서

@@ -38,9 +38,13 @@ export function Toast({ toast }: { toast: ToastMessage | null }) {
       aria-live="polite"
       className="pointer-events-none fixed inset-x-0 bottom-[110px] z-50 flex justify-center px-6"
     >
-      <p className="rounded-full bg-[#2f2f2f] px-4 py-2.5 text-[12px] font-medium text-[#f2f2f2] shadow-lg">
-        {toast.text}
-      </p>
+      {/* 9/18 개정 (Figma `318:23876`) — 어두운 알약에서 **크림 배경 + 검은 글자**로
+          바뀌었다. 어두운 시트 위에 어두운 토스트가 떠서 잘 안 보였다.
+          왼쪽 점은 아이콘이 아니라 단색 원(#191614)이라 CSS로 그린다. */}
+      <div className="flex items-center gap-[8px] rounded-[4px] bg-[#ede9e2] px-[18px] py-[11px] shadow-lg">
+        <span aria-hidden className="size-[13px] shrink-0 rounded-full bg-[#191614]" />
+        <p className="text-[12px] font-medium leading-[20px] text-black">{toast.text}</p>
+      </div>
     </div>
   );
 }
