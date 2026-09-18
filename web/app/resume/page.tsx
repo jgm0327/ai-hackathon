@@ -1,12 +1,14 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { ResumeCompareCarousel } from "@/components/ResumeCompareCarousel";
 import { ResumeScopePicker, formatProjectPeriod } from "@/components/ResumeScopePicker";
 import { StarItemSection, formatStarItemForClipboard } from "@/components/StarItemCard";
 import { StarItemSkeleton } from "@/components/Skeleton";
 import { StarQuestionWizard } from "@/components/StarQuestionWizard";
+import { BottomSheet } from "@/components/BottomSheet";
 import {
   ApiError,
   Card,
@@ -27,6 +29,7 @@ import {
   saveResumeDraft,
   singleProjectIdOf,
   singleProjectScope,
+  createSavedResume,
 } from "@/lib/api";
 import {
   buildResumeCached,
@@ -141,6 +144,7 @@ function formatSavedAt(iso: string): string {
  * 신뢰할 수 있는 최신 버전이라서).
  */
 export default function ResumePage() {
+  const router = useRouter();
   const { projects, currentProject, loading: projectsLoading } = useProjects();
 
   // "4.2.1 범위 선택" (9/18 신규, Figma 89:161). 기본값은 현재 프로젝트 하나 —
@@ -168,6 +172,12 @@ export default function ResumePage() {
   // "숫자 되묻기" 인라인 입력(9/15 신규)이 캐시를 정확한 키로 갱신하려면, 지금
   // 보고 있는 items가 어떤 jdText로 생성됐는지 알아야 한다(캐시 키 = projectId+jdText).
   const [builtJdText, setBuiltJdText] = useState<string | undefined>(undefined);
+  // "보관" (Figma 4.3, 9/18) — 이름을 달아 저장본으로 남긴다. 작업 중 초안(위 draft*)
+  // 과는 별개 저장소다.
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [archiveTitle, setArchiveTitle] = useState("");
+  const [archiving, setArchiving] = useState(false);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
   // Figma 41:236 "생성 2/18 · 3,420자" 메타 표시용 (9/16 신규).
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
 
@@ -547,6 +557,46 @@ export default function ResumePage() {
     setMode("edit");
   };
 
+  /**
+   * "저장본으로 보관" (Figma 4.3, 9/18 신규).
+   *
+   * 위 `handleSaveDraft()`와는 다른 동작이다 — 그건 "작업 중 초안"을 프로젝트 칸에
+   * 덮어쓰고, 이건 이름을 달아 **따로 남긴다**. 같은 카드에서 공고별로 다르게 쓴
+   * 버전을 나란히 두려면 덮어쓰기만으로는 안 된다.
+   *
+   * 항목 수·기록 수·공고 기반 여부는 **지금 화면에 실제로 있는 값**을 세서 같이
+   * 보낸다 — 나중에 본문에서 역산하면 저장 당시와 달라질 수 있고, 그건 목록에 없는
+   * 숫자를 만들어내는 셈이다(CLAUDE.md 2.2).
+   */
+  const handleArchive = async () => {
+    const title = archiveTitle.trim();
+    if (!title) {
+      setArchiveError("이름을 입력해 주세요.");
+      return;
+    }
+    const content = mode === "edit" ? draftContent : buildResumeMarkdown(heading, displayItems ?? []);
+    setArchiving(true);
+    setArchiveError(null);
+    try {
+      await createSavedResume({
+        title,
+        content,
+        itemCount: displayItems?.length ?? 0,
+        // 이 초안이 실제로 근거로 쓴 기록 수 — 항목마다 붙은 source_card_ids를
+        // 합집합으로 센다(같은 카드가 여러 항목에 쓰였어도 한 번만).
+        cardCount: new Set((displayItems ?? []).flatMap((item) => item.source_card_ids)).size,
+        jdBased: !!builtJdText,
+      });
+      setArchiveOpen(false);
+      setArchiveTitle("");
+      router.push("/resume/saved");
+    } catch (err) {
+      setArchiveError(err instanceof ApiError ? err.detail : "보관하지 못했어요.");
+    } finally {
+      setArchiving(false);
+    }
+  };
+
   const handleSaveDraft = async () => {
     if (!scope) return;
     setSaving(true);
@@ -617,6 +667,19 @@ export default function ResumePage() {
                 className="flex flex-1 items-center justify-center rounded-[11px] bg-accent py-[13px] text-[12px] font-semibold text-accent-foreground transition-colors hover:bg-[#ff7a2e] disabled:opacity-40"
               >
                 {saving ? "저장 중…" : saveStatus === "saved" ? "저장됨" : "저장"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  // heading은 프로필/프로젝트가 없으면 null이다 — 그땐 사용자가
+                  // 직접 쓰게 빈 칸으로 연다.
+                  setArchiveTitle(heading ?? "");
+                  setArchiveError(null);
+                  setArchiveOpen(true);
+                }}
+                className="flex flex-1 items-center justify-center rounded-[11px] border-[1.5px] border-[#2e2e2e] bg-[#1c1c1c] py-[13px] text-[12px] font-semibold text-[#f2f2f2] transition-colors hover:bg-[#242424]"
+              >
+                보관
               </button>
               <button
                 type="button"
@@ -1038,6 +1101,35 @@ export default function ResumePage() {
           )}
         </>
       )}
+
+      {/* "보관" — 저장본으로 남기기 (Figma 4.3, 9/18 신규).
+          이름을 받는 이유: 목록에서 "무신사 · 프로덕트 마케터"처럼 **무엇을 위해 쓴
+          버전인지**로 구분해야 여러 개가 의미를 갖는다. AI가 이름을 짓지 않는다
+          (CLAUDE.md 2.2 — 프로젝트 이름을 사람이 짓는 것과 같은 이유). */}
+      <BottomSheet open={archiveOpen} onClose={() => setArchiveOpen(false)} title="저장본으로 보관">
+        <div className="flex flex-col gap-3">
+          <p className="text-[12px] leading-[20px] text-[#a0a0a0]">
+            이름을 달아 남겨두면 [내 경력기술서]에 쌓입니다. 작업 중 초안과 달리 새로 만들어도
+            덮어써지지 않아요.
+          </p>
+          <input
+            value={archiveTitle}
+            onChange={(e) => setArchiveTitle(e.target.value)}
+            placeholder="예: 무신사 · 프로덕트 마케터"
+            maxLength={200}
+            className="rounded-[10px] bg-[#262626] px-3 py-2.5 text-sm text-[#f2f2f2] placeholder:text-[#5e5e5e] focus:outline-none"
+          />
+          {archiveError && <p className="text-[12px] text-red-400">{archiveError}</p>}
+          <button
+            type="button"
+            onClick={handleArchive}
+            disabled={archiving}
+            className="flex h-[50px] items-center justify-center rounded-[8px] bg-accent text-[14px] font-bold text-accent-foreground transition-opacity active:opacity-80 disabled:opacity-40"
+          >
+            {archiving ? "보관하는 중…" : "보관하기"}
+          </button>
+        </div>
+      </BottomSheet>
     </div>
   );
 }

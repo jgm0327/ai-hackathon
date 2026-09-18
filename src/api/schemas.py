@@ -66,6 +66,12 @@ class MetricQuestionResponse(BaseModel):
     placeholder: str = ""
 
 
+class MetricAnswerRequest(BaseModel):
+    """POST /api/cards/{id}/metric-answer — Figma 3.1-n "지금 채우기" (9/18 신규)."""
+
+    answer: str = Field(min_length=1, max_length=MAX_ANSWER)
+
+
 class CardTranslateRequest(BaseModel):
     """POST /api/cards/{id}/translate — Figma 3.1-b / 3.1-c "직무 전환 번역".
 
@@ -238,7 +244,39 @@ class ResumeRequest(BaseModel):
     skill_tag: str | None = Field(default=None, max_length=MAX_TITLE)
 
 
-# Figma 4.1-h "내 경력기술서  3개" (9/18 신규) — 프로젝트별 초안 + 마스터 초안 합계.
+# Figma 4.3 "내 경력기술서 (저장본)" (9/18 신규). `resume_drafts`(작업 중 초안)와는
+# 다른 개념이다 — 이건 이름 붙여 남겨둔 완성본이고 여러 개 가질 수 있다.
+class SavedResumeCreateRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=MAX_TITLE)
+    content: str = Field(max_length=MAX_DRAFT_CONTENT)
+    # 목록에 그대로 찍히는 숫자라 저장 시점에 실제로 센 값을 받는다 — 나중에 본문에서
+    # 역산하면 저장 당시와 달라질 수 있고, 그건 없는 숫자를 만드는 셈이다(2.2).
+    item_count: int = Field(default=0, ge=0, le=1000)
+    card_count: int = Field(default=0, ge=0, le=100000)
+    jd_based: bool = False
+
+
+class SavedResumeResponse(_FromAttributes):
+    id: int
+    title: str
+    item_count: int
+    card_count: int
+    jd_based: bool
+    created_at: str
+    updated_at: str
+
+
+class SavedResumeDetailResponse(SavedResumeResponse):
+    """목록엔 본문을 싣지 않는다 — 저장본이 여럿이면 응답이 통째로 무거워진다."""
+
+    content: str
+
+
+class SavedResumeListResponse(BaseModel):
+    resumes: list[SavedResumeResponse]
+
+
+# Figma 4.1-h "내 경력기술서  3개" (9/18 신규) — 저장본 개수.
 class ResumeDraftCountResponse(BaseModel):
     count: int
 

@@ -122,6 +122,30 @@ class ResumeDraft:
 
 
 @dataclass
+class SavedResume:
+    """이름 붙여 보관한 경력기술서 (9/18 신규, Figma 4.3 "내 경력기술서 (저장본)").
+
+    **`resume_drafts`와는 다른 것이다.** 그쪽은 "지금 작업 중인 초안"(프로젝트당 1개,
+    덮어쓰기)이고, 이건 "다 만들어서 남겨둔 문서"(여러 개, 이름과 날짜를 가짐)다.
+    화면에서도 4.2 빌더 vs 4.3 목록으로 나뉘어 있다.
+
+    `item_count`/`card_count`/`jd_based`는 목록에 그대로 찍히는 값이라 **저장 시점에
+    클라이언트가 실제로 센 값을 받아 그대로 보관한다** — 나중에 본문을 파싱해서
+    역산하면 저장 당시와 달라질 수 있고, 그건 화면에 없는 숫자를 지어내는 셈이 된다
+    (CLAUDE.md 2.2).
+    """
+
+    id: int
+    title: str
+    content: str
+    item_count: int
+    card_count: int
+    jd_based: bool
+    created_at: str
+    updated_at: str
+
+
+@dataclass
 class Profile:
     """온보딩에서 받는 유저 프로필 — 싱글턴(단일 유저 데모 전제, 인증 없음).
 
@@ -230,6 +254,22 @@ def init_db() -> None:
         # 9/18 신규 — 기록 첨부 사진 (Figma "03 · 커리어 스택" 4.1-b).
         # `ON DELETE`를 SQLite가 기본으로 강제하지 않으므로(외래키 미활성) 카드 삭제
         # 시 사진 행/파일 정리는 `delete_card()`가 직접 한다.
+        # 9/18 신규 — 이름 붙여 보관한 경력기술서 (Figma 4.3). 위 SavedResume 주석 참고.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS saved_resumes (
+                id         INTEGER PRIMARY KEY,
+                user_id    INTEGER NOT NULL REFERENCES users(id),
+                title      TEXT NOT NULL,
+                content    TEXT NOT NULL,
+                item_count INTEGER NOT NULL DEFAULT 0,
+                card_count INTEGER NOT NULL DEFAULT 0,
+                jd_based   INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS card_photos (
@@ -515,6 +555,7 @@ def update_card(
     confidence: float | None = None,
     ai_sentence: str | None = None,
     sentence_edited: bool | None = None,
+    raw_text: str | None = None,
 ) -> Card | None:
     """카드의 skill_tags/refined_sentence/confidence를 손으로(또는 재정리로) 고친다
     (9/14 카테고리 수정 신규, 9/15 문장 수정 + confidence 추가).
@@ -558,6 +599,13 @@ def update_card(
     if sentence_edited is not None:
         sets.append("sentence_edited = ?")
         params.append(1 if sentence_edited else 0)
+    # 9/18 — 원문 자체를 바꾸는 유일한 경로는 "수치 뒤늦게 채우기"(Figma 3.1-n)다.
+    # 유저가 답한 값을 원문에 붙여야 나중에 재파싱해도 그 숫자가 살아남는다
+    # (`pipeline.add_metric_answer()` 주석 참고). 클라이언트가 직접 부를 수 있는
+    # PATCH 스키마에는 노출하지 않는다.
+    if raw_text is not None:
+        sets.append("raw_text = ?")
+        params.append(raw_text)
     if sets:
         with _connect() as conn:
             conn.execute(
@@ -871,6 +919,79 @@ def save_resume_draft(user_id: int, project_id: int, content: str, now: str) -> 
             (project_id, user_id, content, now),
         )
     return ResumeDraft(project_id=project_id, content=content, updated_at=now)
+
+
+def create_saved_resume(
+    user_id: int,
+    title: str,
+    content: str,
+    item_count: int,
+    card_count: int,
+    jd_based: bool,
+    now: str,
+) -> SavedResume:
+    """경력기술서를 이름 붙여 보관한다 (9/18 신규, Figma 4.3)."""
+    init_db()
+    with _connect() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO saved_resumes
+                (user_id, title, content, item_count, card_count, jd_based, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (user_id, title, content, item_count, card_count, 1 if jd_based else 0, now, now),
+        )
+        saved_id = cur.lastrowid
+    return SavedResume(
+        id=saved_id,
+        title=title,
+        content=content,
+        item_count=item_count,
+        card_count=card_count,
+        jd_based=jd_based,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def list_saved_resumes(user_id: int) -> list[SavedResume]:
+    """최근에 손댄 것부터. 4.3 목록이 그 순서로 그린다."""
+    init_db()
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM saved_resumes WHERE user_id = ? ORDER BY updated_at DESC, id DESC",
+            (user_id,),
+        ).fetchall()
+    return [_row_to_saved_resume(r) for r in rows]
+
+
+def get_saved_resume(user_id: int, saved_id: int) -> SavedResume | None:
+    init_db()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM saved_resumes WHERE id = ? AND user_id = ?", (saved_id, user_id)
+        ).fetchone()
+    return _row_to_saved_resume(row) if row else None
+
+
+def delete_saved_resume(user_id: int, saved_id: int) -> None:
+    """없거나 남의 것이어도 조용히 무시한다(멱등)."""
+    init_db()
+    with _connect() as conn:
+        conn.execute("DELETE FROM saved_resumes WHERE id = ? AND user_id = ?", (saved_id, user_id))
+
+
+def _row_to_saved_resume(row: sqlite3.Row) -> SavedResume:
+    return SavedResume(
+        id=row["id"],
+        title=row["title"],
+        content=row["content"],
+        item_count=row["item_count"],
+        card_count=row["card_count"],
+        jd_based=bool(row["jd_based"]),
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
 
 
 def count_resume_drafts(user_id: int) -> int:

@@ -885,7 +885,7 @@ function StackPageContent() {
 
           {/* 내 경력기술서 진입 (294:10326) */}
           <Link
-            href="/resume"
+            href="/resume/saved"
             style={{ backgroundColor: stackTheme.cardBg }}
             className="mt-[28px] flex items-center gap-2 rounded-[12px] p-[16px] transition-opacity active:opacity-80"
           >

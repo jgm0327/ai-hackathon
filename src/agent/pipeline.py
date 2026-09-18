@@ -136,6 +136,43 @@ def retry_refinement(user_id: int, card_id: int) -> Card | None:
     )
 
 
+def add_metric_answer(user_id: int, card_id: int, answer: str) -> Card | None:
+    """이미 저장된 기록에 성과 수치를 뒤늦게 채워 넣는다 (9/18 신규, Figma 3.1-n).
+
+    3.1-q가 **변환 전에** 묻는 경로라면 이건 **변환 후에** 채우는 경로다 — 결과를 보고
+    "아 그러고 보니 3.2%p 올랐지"를 그 자리에서 더할 수 있게 한다.
+
+    `run_pipeline()`이 `metric_answer`를 다루는 방식과 똑같이 **`raw_text` 뒤에 한 줄로
+    붙이고 다시 파싱한다.** 별도 컬럼에 두면 나중에 "다시 만들기"로 재파싱할 때 그
+    숫자만 조용히 빠진다. 유저가 타이핑한 값만 들어가므로 CLAUDE.md 2.2에 어긋나지 않는다.
+
+    **사람이 직접 고친 문장은 덮어쓰지 않는다** — `retry_refinement()`와 같은 규칙이다
+    (3.1-d "직접 고친 문장은 다시 변환해도 유지돼요"). 그 경우 새 문장은 `ai_sentence`에만
+    들어가고, 유저는 "AI 문장으로 되돌리기"로 가져다 쓸 수 있다.
+
+    이 유저 소유가 아니거나 없으면 None. 답이 비어 있으면 아무것도 하지 않고 현재 카드를
+    그대로 돌려준다(LLM을 부를 이유가 없다).
+    """
+    card = get_card(user_id, card_id)
+    if card is None:
+        return None
+    if not answer.strip():
+        return card
+
+    raw_text = f"{card.raw_text}\n(결과 수치: {answer.strip()})"
+    parsed = parse_note(raw_text)
+    parsed.skill_tags = canonicalize_tags(parsed.skill_tags)
+    return update_card(
+        user_id,
+        card_id,
+        raw_text=raw_text,
+        skill_tags=parsed.skill_tags,
+        refined_sentence=None if card.sentence_edited else parsed.refined_sentence,
+        confidence=parsed.confidence,
+        ai_sentence=parsed.refined_sentence,
+    )
+
+
 def run_pipeline_batch(user_id: int, raw_texts: list[str]) -> list[dict]:
     """노션 동기화 등으로 여러 건을 한 번에 처리할 때 사용."""
     return [run_pipeline(user_id, text) for text in raw_texts]

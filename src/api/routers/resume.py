@@ -25,6 +25,10 @@ from src.api.schemas import (
     JdRequirementsResponse,
     ResumeDraftCountResponse,
     ResumeDraftResponse,
+    SavedResumeCreateRequest,
+    SavedResumeDetailResponse,
+    SavedResumeListResponse,
+    SavedResumeResponse,
     ResumeDraftSaveRequest,
     ResumeEnhanceRequest,
     ResumeEnhanceResponse,
@@ -67,12 +71,64 @@ def create_resume(
 
 @router.get("/resume/draft-count", response_model=ResumeDraftCountResponse)
 def resume_draft_count(current_user: db.User = Depends(get_current_user)) -> ResumeDraftCountResponse:
-    """저장된 초안 개수 (9/18 신규, Figma 4.1-h "내 경력기술서  3개").
+    """저장본 개수 (9/18 신규, Figma 4.1-h "내 경력기술서  3개").
 
-    프로젝트별 초안 + 마스터 초안을 합친 수다. 화면에 띄울 숫자를 짐작하지 않기 위해
-    있는 엔드포인트라, 가벼운 COUNT 두 번으로 끝난다.
+    화면에 띄울 숫자를 짐작하지 않기 위해 있는 엔드포인트다(CLAUDE.md 2.2).
+    4.3 목록이 세는 것과 같은 값이어야 해서 `saved_resumes`를 센다.
     """
-    return ResumeDraftCountResponse(count=db.count_resume_drafts(current_user.id))
+    return ResumeDraftCountResponse(count=len(db.list_saved_resumes(current_user.id)))
+
+
+@router.get("/resume/saved", response_model=SavedResumeListResponse)
+def list_saved_resumes_endpoint(
+    current_user: db.User = Depends(get_current_user),
+) -> SavedResumeListResponse:
+    """"4.3 내 경력기술서 (저장본)" 목록 (9/18 신규).
+
+    본문(`content`)은 싣지 않는다 — 저장본이 여럿이면 목록 응답이 통째로 무거워진다.
+    본문이 필요하면 `GET /api/resume/saved/{id}`로 하나만 받는다.
+    """
+    saved = db.list_saved_resumes(current_user.id)
+    return SavedResumeListResponse(resumes=[SavedResumeResponse.model_validate(r) for r in saved])
+
+
+@router.post("/resume/saved", response_model=SavedResumeDetailResponse, status_code=201)
+def create_saved_resume_endpoint(
+    payload: SavedResumeCreateRequest, current_user: db.User = Depends(get_current_user)
+) -> SavedResumeDetailResponse:
+    """빌더에서 만든 경력기술서를 이름 붙여 보관한다 (9/18 신규).
+
+    `resume_drafts`(작업 중 초안, 프로젝트당 1개 덮어쓰기)와 **별개**다 — 저장본은
+    여러 개 남길 수 있고 지우기 전엔 안 사라진다.
+    """
+    saved = db.create_saved_resume(
+        current_user.id,
+        payload.title.strip(),
+        payload.content,
+        payload.item_count,
+        payload.card_count,
+        payload.jd_based,
+        _now_iso(),
+    )
+    return SavedResumeDetailResponse.model_validate(saved)
+
+
+@router.get("/resume/saved/{saved_id}", response_model=SavedResumeDetailResponse)
+def get_saved_resume_endpoint(
+    saved_id: int, current_user: db.User = Depends(get_current_user)
+) -> SavedResumeDetailResponse:
+    saved = db.get_saved_resume(current_user.id, saved_id)
+    if saved is None:
+        raise HTTPException(status_code=404, detail="저장본을 찾을 수 없습니다")
+    return SavedResumeDetailResponse.model_validate(saved)
+
+
+@router.delete("/resume/saved/{saved_id}", status_code=204)
+def delete_saved_resume_endpoint(
+    saved_id: int, current_user: db.User = Depends(get_current_user)
+) -> None:
+    # 없거나 남의 것이어도 204 — 다른 삭제 엔드포인트와 같은 멱등 규칙이다.
+    db.delete_saved_resume(current_user.id, saved_id)
 
 
 @router.post("/resume/enhance", response_model=ResumeEnhanceResponse, dependencies=[Depends(limit_heavy)])

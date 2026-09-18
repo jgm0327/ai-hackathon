@@ -21,7 +21,7 @@ JD 매칭을 여기서 하지 않는다(run_pipeline이 이미 그렇게 되어 
 from fastapi import APIRouter, Depends, HTTPException
 
 from src.agent.card_clustering import suggest_clusters
-from src.agent.pipeline import retry_refinement, run_pipeline
+from src.agent.pipeline import add_metric_answer, retry_refinement, run_pipeline
 from src.agent.tag_suggester import suggest_tags_for_cards
 from src.api.rate_limit import limit_heavy, limit_light
 from src.api.schemas import (
@@ -34,6 +34,7 @@ from src.api.schemas import (
     CardTagSuggestion,
     CardTranslateRequest,
     CardTranslateResponse,
+    MetricAnswerRequest,
     MetricQuestionRequest,
     MetricQuestionResponse,
     ProjectResponse,
@@ -127,6 +128,30 @@ def translate_card_endpoint(
         translated_sentence=result.translated_sentence,
         suggestion=result.suggestion,
     )
+
+
+@router.post(
+    "/cards/{card_id}/metric-answer",
+    response_model=CardResponse,
+    dependencies=[Depends(limit_light)],
+)
+def add_metric_answer_endpoint(
+    card_id: int,
+    payload: MetricAnswerRequest,
+    current_user: db.User = Depends(get_current_user),
+) -> CardResponse:
+    """"3.1-n 결과 · 수치 없음"의 [지금 채우기] (9/18 신규).
+
+    3.1-q가 **변환 전에** 묻는 경로라면 이건 **변환 후에** 채우는 경로다. 답한 값은
+    `raw_text` 뒤에 한 줄로 붙고 문장이 다시 만들어진다 — 별도 컬럼에 두면 나중에
+    "다시 만들기"로 재파싱할 때 그 숫자만 조용히 빠진다.
+
+    유저가 타이핑한 값만 들어가므로 CLAUDE.md 2.2(숫자 생성 금지)에 어긋나지 않는다.
+    """
+    card = add_metric_answer(current_user.id, card_id, payload.answer)
+    if card is None:
+        raise HTTPException(status_code=404, detail="카드를 찾을 수 없습니다")
+    return CardResponse.model_validate(card)
 
 
 @router.post("/cards/{card_id}/refine", response_model=CardResponse, dependencies=[Depends(limit_light)])

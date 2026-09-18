@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { useEffect, useState } from "react";
 import { resultTheme as t } from "@/components/resultTheme";
-import { Card, CardTranslation, translateCard } from "@/lib/api";
+import { ApiError, Card, CardTranslation, addMetricAnswer, translateCard } from "@/lib/api";
 
 interface CardResultSheetProps {
   card: Card;
@@ -21,6 +21,22 @@ interface CardResultSheetProps {
   regenerating: boolean;
   /** "다시 만들기"가 실패했을 때의 문구. 시트를 닫지 않고 그 자리에 보여준다. */
   error?: string | null;
+  /** 변환 전 추가 질문(3.1-q)에서 **건너뛴** 질문. 3.1-n 안내 문구를 구체적으로
+   * 적는 데 쓴다. 없으면 일반 문구로 간다 — 묻지도 않은 질문을 지어내지 않는다. */
+  skippedMetricQuestion?: string | null;
+  /** 수치를 채워 카드가 갱신됐을 때. 호출부가 목록/헤드라인을 다시 그린다. */
+  onMetricFilled?: (card: Card) => void;
+}
+
+/**
+ * 문장에 숫자가 하나라도 있는지 (Figma 3.1-n "수치 없음" 판정).
+ *
+ * LLM이 아니라 정규식으로 본다 — 결과 시트는 이미 변환을 마친 자리라 여기서 호출을
+ * 하나 더 얹을 이유가 없고, "숫자가 있나"는 애초에 판단이 필요한 문제가 아니다.
+ * 한글 수사("세 배")는 못 잡지만, 못 잡으면 안내가 한 번 더 뜰 뿐이라 손해가 작다.
+ */
+function hasNumber(sentence: string): boolean {
+  return /\d/.test(sentence);
 }
 
 /**
@@ -50,12 +66,22 @@ export function CardResultSheet({
   copied,
   regenerating,
   error,
+  skippedMetricQuestion,
+  onMetricFilled,
 }: CardResultSheetProps) {
   // null이면 현재 직무 관점(3.1), 값이 있으면 그 목표 직무 관점(3.1-b/3.1-c).
   const [targetIndex, setTargetIndex] = useState<number | null>(null);
   const [translation, setTranslation] = useState<CardTranslation | null>(null);
   const [translating, setTranslating] = useState(false);
   const [translateError, setTranslateError] = useState<string | null>(null);
+
+  // 3.1-n "수치 없음" — [지금 채우기]를 누르면 그 자리에서 입력창이 열린다. 화면을
+  // 따로 띄우지 않는 건, 결과를 보다가 숫자 하나 더하는 동작이라 맥락을 끊으면
+  // 오히려 번거롭기 때문이다(3.1-q는 변환 전이라 전체 화면이 맞다).
+  const [fillingMetric, setFillingMetric] = useState(false);
+  const [metricDraft, setMetricDraft] = useState("");
+  const [savingMetric, setSavingMetric] = useState(false);
+  const [metricError, setMetricError] = useState<string | null>(null);
 
   const activeTarget = targetIndex === null ? null : targetJobs[targetIndex];
 
@@ -103,6 +129,23 @@ export function CardResultSheet({
     }
     setTargetIndex(next);
     runTranslate(targetJobs[next]);
+  };
+
+  const handleFillMetric = async () => {
+    const answer = metricDraft.trim();
+    if (!answer) return;
+    setSavingMetric(true);
+    setMetricError(null);
+    try {
+      const updated = await addMetricAnswer(card.id, answer);
+      onMetricFilled?.(updated);
+      setFillingMetric(false);
+      setMetricDraft("");
+    } catch (err) {
+      setMetricError(err instanceof ApiError ? err.detail : "채우지 못했어요.");
+    } finally {
+      setSavingMetric(false);
+    }
   };
 
   // 접점 없음(3.1-c)은 "번역이 왔고 related가 false"일 때만이다. 번역 실패는 다른
@@ -205,6 +248,87 @@ export function CardResultSheet({
               문장 고치기
             </span>
           </button>
+        )}
+
+        {/* "3.1-n 결과 · 수치 없음" (Figma `299:12512`, 9/18 신규).
+            현재 직무 관점에서, 문장에 숫자가 하나도 없을 때만. 번역 문장은 저장되는
+            값이 아니라서 여기에 수치를 채울 대상이 아니다. */}
+        {!activeTarget && !hasNumber(sentence) && (
+          <div
+            style={{ borderColor: t.action }}
+            className="mt-[20px] flex flex-col gap-[10px] rounded-[8px] border px-[16px] py-[14px]"
+          >
+            <div className="flex items-center gap-2">
+              <span
+                style={{ color: t.action }}
+                className="text-[12px] font-medium leading-[20px]"
+              >
+                수치 없음
+              </span>
+              <span className="flex-1" />
+              {!fillingMetric && (
+                <button
+                  type="button"
+                  onClick={() => setFillingMetric(true)}
+                  style={{ color: t.action }}
+                  className="text-[12px] font-medium leading-[20px] transition-opacity active:opacity-60"
+                >
+                  지금 채우기 ›
+                </button>
+              )}
+            </div>
+
+            {fillingMetric ? (
+              <div className="flex flex-col gap-2">
+                <label
+                  htmlFor="metric-fill"
+                  style={{ color: t.textSoft }}
+                  className="text-[12px] leading-[20px]"
+                >
+                  {skippedMetricQuestion || "얼마나 달라졌는지 숫자로 적어 주세요"}
+                </label>
+                <input
+                  id="metric-fill"
+                  value={metricDraft}
+                  onChange={(e) => setMetricDraft(e.target.value)}
+                  placeholder="예: 3.2%p, 12% → 15.2%"
+                  maxLength={1000}
+                  autoFocus
+                  style={{ backgroundColor: t.cardBg, color: t.text }}
+                  className="rounded-[8px] px-3 py-2.5 text-[14px] leading-[24px] placeholder:text-[#918c84] focus:outline-none"
+                />
+                {metricError && <p className="text-[12px] text-red-400">{metricError}</p>}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={handleFillMetric}
+                    disabled={savingMetric || !metricDraft.trim()}
+                    style={{ backgroundColor: "var(--accent)", color: "var(--accent-foreground)" }}
+                    className="flex-1 rounded-[8px] py-2.5 text-[12px] font-bold transition-opacity active:opacity-80 disabled:opacity-40"
+                  >
+                    {savingMetric ? "채우는 중…" : "채우고 다시 만들기"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFillingMetric(false);
+                      setMetricError(null);
+                    }}
+                    style={{ borderColor: t.border, color: t.text }}
+                    className="flex-1 rounded-[8px] border py-2.5 text-[12px] font-medium transition-opacity active:opacity-70"
+                  >
+                    나중에
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p style={{ color: t.textSoft }} className="text-[12px] leading-[20px]">
+                {skippedMetricQuestion
+                  ? `${skippedMetricQuestion} 답을 더하면 면접에서 쓸 수 있는 문장이 돼요.`
+                  : "숫자를 더하면 면접에서 쓸 수 있는 문장이 돼요."}
+              </p>
+            )}
+          </div>
         )}
 
         {/* 원문 보기 (Figma 286:7242) — 번역 문장이 원래 무엇에서 나왔는지 바로

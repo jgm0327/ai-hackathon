@@ -26,6 +26,15 @@ export const stackTheme = {
   /** 강조 숫자("기록 24개", 1위 역량 개수)와 링크성 텍스트. 버튼 배경(#ff5d00)보다
    * 한 단계 밝아서 어두운 배경 위 글자로 읽기 좋다. */
   accentText: "#ff9a3d",
+  /** 홈(3.0)만 쓰는 순검정 배경. 크림색 패널과의 대비를 최대로 가져가려는 선택이라
+   * 다른 화면의 `screenBg`(#1a1917)와 다르다 — Figma에서도 이 화면만 `bg/black`이다. */
+  homeBg: "#000000",
+  /** 홈의 밝은 패널 — 누적 요약(light/1)과 최근 기록(light/2), 그 위 글자(on-light)와
+   * 구분선(light/rule). 앱 전체에서 유일한 라이트 영역이다. */
+  light1: "#ebebeb",
+  light2: "#bdb7ae",
+  lightRule: "#a19b92",
+  onLight: "#331300",
 } as const;
 
 /**

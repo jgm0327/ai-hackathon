@@ -4,7 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const TABS = [
-  { href: "/", label: "일지 기록" },
+  // 9/18 — 라벨이 "일지 기록" → "기록"으로 줄었다(Figma 303:15902).
+  { href: "/", label: "기록" },
   { href: "/stack", label: "커리어 스택" },
 ] as const;
 
@@ -25,12 +26,22 @@ export function TabBar() {
   // 온보딩(9/18)도 마찬가지로 끝까지 진행하는 전체 화면 흐름이라 탭을 숨긴다 —
   // Figma "00 · 온보딩"의 네 화면 어디에도 하단 탭바가 없다.
   if (pathname === "/login" || pathname === "/onboarding") return null;
+  // 9/18 — 전체 화면으로 몰입해서 쓰는 화면들도 탭을 숨긴다. 목업에도 하단 탭이
+  // 없고(3.3 기록하기는 키보드가 올라온 상태, 4.1-i 분류 수정은 확정 버튼이 하단
+  // 고정), 탭이 있으면 주 액션 버튼과 자리를 다툰다.
+  if (pathname === "/record" || pathname === "/stack/classify") return null;
 
   return (
     <nav className="sticky bottom-0 z-40 border-t border-[#2a2a2a] bg-[#141210]/95 backdrop-blur">
       <ul className="flex pb-[env(safe-area-inset-bottom)]">
         {TABS.map((tab) => {
-          const active = pathname === tab.href;
+          // 하위 화면(예: /records, /stack/skill/...)에서도 소속 탭이 켜져 보여야
+          // 지금 어디 있는지 알 수 있다. 홈만 정확히 일치로 본다(모든 경로가 "/"로
+          // 시작하기 때문).
+          const active =
+            tab.href === "/"
+              ? pathname === "/" || pathname === "/records"
+              : pathname === tab.href || pathname.startsWith(`${tab.href}/`);
           return (
             <li key={tab.href} className="flex-1">
               <Link

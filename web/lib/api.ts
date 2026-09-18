@@ -329,6 +329,20 @@ export function updateCard(
   });
 }
 
+/**
+ * "3.1-n 결과 · 수치 없음"의 [지금 채우기] (9/18 신규).
+ *
+ * 3.1-q가 변환 **전에** 묻는 경로라면 이건 변환 **후에** 채우는 경로다. 답한 값은
+ * 서버가 `raw_text` 뒤에 한 줄로 붙이고 문장을 다시 만든다 — 별도 컬럼에 두면 나중에
+ * "다시 만들기"로 재파싱할 때 그 숫자만 조용히 빠진다.
+ */
+export function addMetricAnswer(id: number, answer: string): Promise<Card> {
+  return request<Card>(`/cards/${id}/metric-answer`, {
+    method: "POST",
+    body: JSON.stringify({ answer }),
+  });
+}
+
 /** 카드를 다시 AI로 정리한다 (9/15 폴백 복구용으로 신설, 9/18 "다시 만들기"로 확장).
  *
  * 사람이 직접 고친 문장은 덮어쓰지 않는다 — 서버가 새 문장을 `ai_sentence`에만
@@ -525,10 +539,65 @@ export interface ResumeDraft {
   updated_at: string | null;
 }
 
-/** 저장된 초안 개수 (9/18 신규, Figma 4.1-h "내 경력기술서  3개").
- * 프로젝트별 초안 + 마스터 초안 합계 — 화면에 띄울 숫자를 짐작하지 않기 위한 값이다. */
+/** 저장본 개수 (9/18 신규, Figma 4.1-h "내 경력기술서  3개").
+ * 화면에 띄울 숫자를 짐작하지 않기 위한 값이다 — 4.3 목록이 세는 것과 같은 수다. */
 export function getResumeDraftCount(): Promise<number> {
   return request<{ count: number }>("/resume/draft-count").then((res) => res.count);
+}
+
+/**
+ * "4.3 내 경력기술서 (저장본)" (9/18 신규).
+ *
+ * `ResumeDraft`(작업 중 초안, 프로젝트당 1개 덮어쓰기)와 **별개다** — 저장본은 이름을
+ * 달고 여러 개 남길 수 있고, 지우기 전엔 사라지지 않는다. 화면도 4.2 빌더 / 4.3 목록으로
+ * 나뉜다.
+ *
+ * `item_count`/`card_count`/`jd_based`는 목록에 그대로 찍히는 값이라 **저장할 때 실제로
+ * 센 값을 실어 보낸다** — 나중에 본문에서 역산하면 저장 당시와 달라질 수 있다(2.2).
+ */
+export interface SavedResume {
+  id: number;
+  title: string;
+  item_count: number;
+  card_count: number;
+  jd_based: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SavedResumeDetail extends SavedResume {
+  content: string;
+}
+
+export function listSavedResumes(): Promise<SavedResume[]> {
+  return request<{ resumes: SavedResume[] }>("/resume/saved").then((res) => res.resumes);
+}
+
+export function getSavedResume(id: number): Promise<SavedResumeDetail> {
+  return request<SavedResumeDetail>(`/resume/saved/${id}`);
+}
+
+export function createSavedResume(payload: {
+  title: string;
+  content: string;
+  itemCount: number;
+  cardCount: number;
+  jdBased: boolean;
+}): Promise<SavedResumeDetail> {
+  return request<SavedResumeDetail>("/resume/saved", {
+    method: "POST",
+    body: JSON.stringify({
+      title: payload.title,
+      content: payload.content,
+      item_count: payload.itemCount,
+      card_count: payload.cardCount,
+      jd_based: payload.jdBased,
+    }),
+  });
+}
+
+export function deleteSavedResume(id: number): Promise<void> {
+  return request<void>(`/resume/saved/${id}`, { method: "DELETE" });
 }
 
 /** `projectId`가 null이면 마스터 초안(유저당 1개)을 조회한다 (9/18). */
