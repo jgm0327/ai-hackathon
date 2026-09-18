@@ -66,6 +66,14 @@ def update_profile(
     years_segment = payload.years_segment
     if companies is not None:
         years_segment = to_years_segment(total_months([(c.started_at, c.ended_at) for c in companies]))
+    elif years_segment is None:
+        # **회사도 연차도 안 보낸 요청은 연차를 손대지 않는다** (9/18 수정).
+        # `save_profile()`은 넘긴 값으로 전부 덮어쓰기 때문에, 예전엔 여기서 None이
+        # 그대로 내려가 저장된 연차가 NULL이 됐다. 옛 온보딩(4구간 직접 선택)으로
+        # 연차만 있고 회사 목록은 없는 계정이 **직무만** 고치고 저장하면, 건드리지도
+        # 않은 연차가 조용히 사라졌다(실측 확인). `companies=None`을 "손대지 않는다"로
+        # 다루는 것과 같은 규칙을 연차에도 적용한다.
+        years_segment = db.get_profile(current_user.id).years_segment
 
     db.save_profile(
         current_user.id,

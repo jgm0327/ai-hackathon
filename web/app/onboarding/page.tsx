@@ -29,8 +29,12 @@ import { usePushSubscription } from "@/lib/usePushSubscription";
  * 지시해서 진행했다(2026-09-18). 저장되는 값은 **여전히 그 4개 구간**이고(서버가 회사
  * 기간에서 계산), 사람에게 묻는 방식만 바뀐 것이다.
  *
- * 설정 변경 목적으로 다시 들어온 경우(이미 프로필이 있음)엔 저장 후 `/`로 튕기지 않고
- * 화면에 남는다 — 9/15 피드백("퇴근 시각만 바꾸려는데 메인으로 나가버린다").
+ * **설정에서 값을 고치러 들어오는 두 모드**(`?only=job` / `?only=notify`)는 필요한 단계만
+ * 띄우고 저장하면 `/settings`로 돌아간다. 원래는 두 경우 다 4단계를 처음부터 끝까지
+ * 거쳐야 했고(알림 하나 바꾸려고 직무·회사를 다시 고르는 식), 저장 후에는 화면에 남아
+ * 작은 메시지만 띄웠다 — 버튼이 화면 하단에 붙어 있어 그 메시지가 안 보여서 "눌러도
+ * 무반응"으로 읽혔다(사용자 신고 9/18). 9/15 피드백("퇴근 시각만 바꾸려는데 메인으로
+ * 나가버린다")은 여전히 지킨다 — 홈이 아니라 **온 곳인 설정**으로 돌려보낸다.
  */
 
 type Step = 1 | 2 | 3 | 4;
@@ -66,11 +70,24 @@ function OnboardingPageInner() {
    */
   const notifyOnly = searchParams.get("only") === "notify";
 
+  /**
+   * 설정 → 직무 설정에서 들어온 "직무만 고치기" 모드 (9/18 신규).
+   *
+   * `only=notify`와 같은 이유로 생겼다. 직무를 고치러 들어왔는데 최초 가입과 똑같이
+   * 1/4부터 시작해서 **알림 설정까지 전부 다시 거쳐야** 끝이 났고, 나가는 길도 없었다
+   * (헤더는 `notifyOnly`일 때만 그려지고, "나중에 설정하기"는 프로필이 없을 때만
+   * 뜬다). 사용자 신고(9/18).
+   *
+   * 이 모드에서는 알림 단계를 아예 건너뛴다 — 알림은 설정에 자기 행이 따로 있다.
+   */
+  const jobOnly = searchParams.get("only") === "job";
+  /** 설정에서 값을 고치러 들어온 방문(최초 온보딩이 아님). 헤더와 되돌아갈 곳이 생긴다. */
+  const fromSettings = notifyOnly || jobOnly;
+
   const [step, setStep] = useState<Step>(notifyOnly ? 4 : 1);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [savedMessage, setSavedMessage] = useState<string | null>(null);
 
   const [currentJob, setCurrentJob] = useState<string[]>([]);
   const [targetJobs, setTargetJobs] = useState<string[]>([]);
@@ -79,6 +96,8 @@ function OnboardingPageInner() {
   // 설정 변경 방문인지 최초 온보딩인지. 로드 시점 스냅샷으로 한 번만 정한다 —
   // 폼을 만지는 동안 라벨이 흔들리지 않게(9/15).
   const [hasExistingProfile, setHasExistingProfile] = useState(false);
+  /** 들어올 때 저장돼 있던 회사 개수 — 아래 persist()에서 "지울 게 있었나"를 판단한다. */
+  const [loadedCompanyCount, setLoadedCompanyCount] = useState(0);
 
   const push = usePushSubscription();
   const [customTime, setCustomTime] = useState(false);
@@ -93,6 +112,7 @@ function OnboardingPageInner() {
         setCurrentJob(profile.job_detail ? keepKnownJobs([profile.job_detail]) : []);
         setTargetJobs(keepKnownJobs(profile.target_jobs));
         setCompanies(profile.companies);
+        setLoadedCompanyCount(profile.companies.length);
         setHasExistingProfile(profile.job_field !== null);
       })
       .catch(() => {
@@ -106,8 +126,14 @@ function OnboardingPageInner() {
     };
   }, []);
 
-  /** 프로필을 저장한다. 4단계 끝에서 한 번만 부르고, 그 전 단계는 화면 상태로만 든다. */
-  const persist = async (): Promise<boolean> => {
+  /**
+   * 프로필을 저장한다. 마지막 단계에서 한 번만 부르고, 그 전 단계는 화면 상태로만 든다.
+   *
+   * `companiesOverride`는 "회사 정보 없이" 경로용이다 — 거기서 `setCompanies([])`를
+   * 부른 직후에 저장하면 이 함수가 **아직 갱신 전인** `companies`를 읽는다(setState는
+   * 다음 렌더에 반영된다). 지울 목록을 인자로 직접 받아서 그 경합을 없앤다.
+   */
+  const persist = async (companiesOverride?: Company[]): Promise<boolean> => {
     const job = currentJob[0];
     const category = job ? categoryOfJob(job) : null;
     if (!category) {
@@ -115,6 +141,9 @@ function OnboardingPageInner() {
       setStep(1);
       return false;
     }
+    const cleanedCompanies = (companiesOverride ?? companies).filter(
+      (c) => c.name.trim() && c.started_at,
+    );
     setSaving(true);
     setError(null);
     try {
@@ -122,9 +151,16 @@ function OnboardingPageInner() {
         jobField: category as JobField,
         jobDetail: job,
         targetJobs,
-        // 빈 배열도 그대로 보낸다 — "회사 정보 없이 시작할게요"로 넘어온 경우
-        // 예전에 넣어둔 목록을 지우는 게 맞다.
-        companies: companies.filter((c) => c.name.trim() && c.started_at),
+        // 빈 배열도 그대로 보낸다 — 넣어뒀던 회사를 다 지운 경우엔 지우는 게 맞다.
+        //
+        // 단 **원래도 비어 있었으면 아예 안 보낸다** (9/18). 서버는 `companies`가 오면
+        // 연차를 그 목록에서 다시 계산하는데(`routers/profile.py`), 빈 목록이면 연차가
+        // null이 된다. 옛 온보딩(4구간 직접 선택)으로 연차만 저장돼 있고 회사 목록은
+        // 없는 계정이 직무만 고치러 들어왔다 저장하면, 손대지도 않은 연차가 조용히
+        // 지워졌다 — 실측으로 확인해서 막았다.
+        ...(cleanedCompanies.length === 0 && loadedCompanyCount === 0
+          ? {}
+          : { companies: cleanedCompanies }),
       });
       return true;
     } catch (err) {
@@ -135,26 +171,24 @@ function OnboardingPageInner() {
     }
   };
 
-  /** 마지막 단계 — 저장하고 (원하면) 알림까지 켠 뒤 홈으로. */
-  const finish = async (withPush: boolean) => {
+  /**
+   * 저장하고 (원하면) 알림까지 켠 뒤 나간다.
+   *
+   * **저장 후엔 반드시 화면을 옮긴다** — 예전엔 프로필이 이미 있으면 이 화면에 머물면서
+   * 작은 "저장했습니다." 메시지만 띄웠는데, 버튼이 화면 하단에 붙어 있어서 그 메시지가
+   * 보이지 않았고 결과가 "시작하기를 눌러도 무반응"이었다(사용자 신고, 9/18).
+   */
+  const finish = async (withPush: boolean, companiesOverride?: Company[]) => {
     if (withPush) {
       // 권한 요청은 반드시 이 클릭 핸들러 안에서 시작해야 한다(lib/usePushSubscription.ts).
       // 거부돼도 온보딩 자체는 계속 진행한다 — 알림은 필수가 아니다.
       await push.subscribe();
     }
-    const ok = await persist();
+    const ok = await persist(companiesOverride);
     if (!ok) return;
-    if (notifyOnly) {
-      // 알림만 고치러 온 경우 — 저장하면 온 곳(설정)으로 돌려보낸다. 화면에 머물면서
-      // 작은 메시지만 띄우면 "아무 반응이 없다"로 읽힌다(사용자 신고, 9/18).
-      router.push("/settings");
-      return;
-    }
-    if (hasExistingProfile) {
-      setSavedMessage("저장했습니다.");
-      return;
-    }
-    router.push("/");
+    // 설정에서 값을 고치러 온 경우(또는 이미 프로필이 있는 재방문)엔 온 곳으로
+    // 돌려보낸다. 최초 온보딩만 홈으로 간다.
+    router.push(fromSettings || hasExistingProfile ? "/settings" : "/");
   };
 
   if (loading) {
@@ -165,8 +199,11 @@ function OnboardingPageInner() {
     );
   }
 
-  // 알림만 고치러 온 경우엔 "4 / 4"가 의미 없다 — 단계가 하나뿐이다.
-  const stepLabel = notifyOnly ? "알림" : `${step} / 4`;
+  // 단계 수가 모드마다 다르다 — 알림만 고치면 단계가 하나뿐이고, 직무만 고치면
+  // 알림 단계가 빠져서 3단계다. 최초 온보딩만 4단계 전체를 거친다.
+  const stepLabel = notifyOnly ? "알림" : jobOnly ? `${step} / 3` : `${step} / 4`;
+  /** 직무만 고치는 모드에서는 3단계가 마지막이다 — 거기서 저장하고 설정으로 나간다. */
+  const lastJobStep = jobOnly && step === 3;
 
   return (
     // 화면 높이를 확보해야 `flex-1` 스페이서가 버튼을 바닥으로 밀어낸다 — Figma의
@@ -176,8 +213,11 @@ function OnboardingPageInner() {
     // 접히면 커져서 버튼이 아래로 밀리고, 레이아웃의 pb-6이 남으면 문서가 뷰포트보다
     // 24px 길어져 그 스크롤이 주소창 접힘을 유발한다.
     <div className="-mb-6 flex min-h-[100svh] flex-col px-5 pb-6 pt-2 text-[#f2f2f2]">
-      {/* 헤더 — 4단계엔 Figma에도 헤더가 없다(뒤로 갈 곳이 아니라 끝내는 화면). */}
-      {notifyOnly && (
+      {/* 헤더 — 최초 온보딩의 4단계엔 Figma에도 헤더가 없다(뒤로 갈 곳이 아니라 끝내는
+          화면). 설정에서 값을 고치러 들어온 경우엔 **나가는 길이 반드시 있어야 한다** —
+          예전엔 직무 설정으로 들어오면 헤더도 "나중에 설정하기"도 없어서 4단계를 끝까지
+          가는 것 말고는 빠져나갈 방법이 없었다(9/18 수정). */}
+      {fromSettings && (
         <div className="flex items-center gap-2 pt-2">
           <button
             type="button"
@@ -187,7 +227,9 @@ function OnboardingPageInner() {
           >
             ←
           </button>
-          <p className="text-[15px] font-semibold text-[#f2f2f2]">알림 설정</p>
+          <p className="text-[15px] font-semibold text-[#f2f2f2]">
+            {notifyOnly ? "알림 설정" : "직무 설정"}
+          </p>
         </div>
       )}
 
@@ -272,22 +314,29 @@ function OnboardingPageInner() {
 
           <div className="flex-1" />
 
+          {/* 직무만 고치러 온 경우 여기가 마지막이다 — 알림 단계로 넘기지 않고
+              바로 저장하고 설정으로 돌아간다(9/18). */}
           <button
             type="button"
-            onClick={() => setStep(4)}
-            className="mt-6 w-full rounded-[12px] bg-accent py-4 text-[15px] font-semibold text-accent-foreground transition-colors hover:bg-[#ff7a2e]"
+            onClick={() => (lastJobStep ? finish(false) : setStep(4))}
+            disabled={saving}
+            className="mt-6 w-full rounded-[12px] bg-accent py-4 text-[15px] font-semibold text-accent-foreground transition-colors hover:bg-[#ff7a2e] disabled:opacity-40"
           >
-            다음
+            {lastJobStep ? (saving ? "저장하는 중…" : "저장") : "다음"}
           </button>
           <button
             type="button"
             onClick={() => {
               setCompanies([]);
-              setStep(4);
+              // 지울 목록을 인자로 넘긴다 — setCompanies는 다음 렌더에 반영되므로
+              // 바로 저장하면 예전 목록이 그대로 올라간다(persist 주석 참고).
+              if (lastJobStep) finish(false, []);
+              else setStep(4);
             }}
-            className="pt-3 text-center text-[13px] text-[#828282] underline underline-offset-2"
+            disabled={saving}
+            className="pt-3 text-center text-[13px] text-[#828282] underline underline-offset-2 disabled:opacity-40"
           >
-            회사 정보 없이 시작할게요
+            {lastJobStep ? "회사 정보 없이 저장" : "회사 정보 없이 시작할게요"}
           </button>
         </>
       )}
@@ -397,12 +446,6 @@ function OnboardingPageInner() {
               {error}
             </p>
           )}
-          {savedMessage && (
-            <p className="mt-4 rounded-lg bg-[#16241c] px-3 py-2 text-[13px] text-emerald-400">
-              {savedMessage}
-            </p>
-          )}
-
           <div className="flex-1" />
 
           <button
@@ -413,7 +456,7 @@ function OnboardingPageInner() {
           >
             {saving || push.status === "subscribing"
               ? "설정하는 중…"
-              : notifyOnly
+              : notifyOnly || hasExistingProfile
                 ? "저장"
                 : "시작하기"}
           </button>
@@ -423,7 +466,11 @@ function OnboardingPageInner() {
             disabled={saving}
             className="pt-3 text-center text-[13px] text-[#828282] underline underline-offset-2 disabled:opacity-40"
           >
-            {notifyOnly ? "알림 끄고 저장" : "알림 없이 시작하기"}
+            {notifyOnly
+              ? "알림 끄고 저장"
+              : hasExistingProfile
+                ? "알림 없이 저장"
+                : "알림 없이 시작하기"}
           </button>
         </>
       )}

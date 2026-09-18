@@ -228,8 +228,11 @@ export default function SettingsPage() {
       </div>
 
       <div className="flex flex-col overflow-hidden rounded-[14px] border border-[#2e2e2e] bg-[#1e1e1e]">
+        {/* 직무만 고치는 모드로 보낸다 — 그 전엔 최초 가입과 똑같이 1/4부터 시작해서
+            알림 설정까지 다 거쳐야 끝났고, 중간에 나갈 길도 없었다(사용자 신고, 9/18).
+            알림은 아래 자기 행이 따로 있다. */}
         <Link
-          href="/onboarding"
+          href="/onboarding?only=job"
           className="flex items-center gap-2 px-4 py-[13px] transition-colors hover:bg-[#242424]"
         >
           <span className="text-[14px] text-[#f2f2f2]">직무 설정</span>

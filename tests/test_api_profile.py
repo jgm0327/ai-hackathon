@@ -215,3 +215,44 @@ def test_legacy_job_field_still_readable(client, current_user_id):
     response = client.get("/api/profile")
     assert response.status_code == 200
     assert response.json()["job_field"] == "데이터"
+
+
+def test_years_segment_survives_a_job_only_update(client, current_user_id):
+    """직무만 고치러 들어온 요청이 저장된 연차를 지우면 안 된다 (9/18 신고).
+
+    옛 온보딩은 연차를 4구간으로 직접 받았다 — 그 계정들은 `years_segment`만 있고
+    회사 목록은 비어 있다. 설정 → 직무 설정에서 직무만 바꿔 저장하면 요청에 회사도
+    연차도 안 실리는데, 예전엔 그때 연차가 NULL로 덮여 사라졌다.
+    """
+    client.put("/api/profile", json={"job_field": "개발", "years_segment": "4-6"})
+
+    client.put("/api/profile", json={"job_field": "디자인", "job_detail": "UX 디자이너"})
+
+    body = client.get("/api/profile").json()
+    assert body["job_detail"] == "UX 디자이너"
+    assert body["years_segment"] == "4-6"
+    assert body["companies"] == []
+
+
+def test_years_segment_can_still_be_changed_explicitly(client, current_user_id):
+    """"손대지 않는다"가 "못 바꾼다"가 되면 안 된다 — 값을 보내면 그 값으로 바뀐다."""
+    client.put("/api/profile", json={"job_field": "개발", "years_segment": "4-6"})
+    client.put("/api/profile", json={"job_field": "개발", "years_segment": "10+"})
+
+    assert client.get("/api/profile").json()["years_segment"] == "10+"
+
+
+def test_emptying_companies_still_clears_years_segment(client, current_user_id):
+    """회사를 다 지우는 건 명시적인 행동이라 연차도 같이 비워야 한다 — 위 규칙의 경계."""
+    client.put(
+        "/api/profile",
+        json={
+            "job_field": "개발",
+            "companies": [{"name": "A은행", "started_at": "2020-01", "ended_at": None}],
+        },
+    )
+    assert client.get("/api/profile").json()["years_segment"] is not None
+
+    client.put("/api/profile", json={"job_field": "개발", "companies": []})
+
+    assert client.get("/api/profile").json()["years_segment"] is None
