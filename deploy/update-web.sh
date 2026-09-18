@@ -43,6 +43,16 @@ if [ "${1:-}" = "--rollback" ]; then
   exit 0
 fi
 
+# 산출물에 플랫폼별 네이티브 바이너리가 들어 있다(@img/sharp-linux-x64 등).
+# 워크플로가 ubuntu-latest(x86_64)에서 굽기 때문에 VM도 x86_64여야 한다.
+# OCI Ampere(ARM) 쉐이프로 옮기면 러너를 ubuntu-24.04-arm으로 바꿔야 한다.
+ARCH="$(uname -m)"
+if [ "$ARCH" != "x86_64" ]; then
+  echo "이 산출물은 x86_64용인데 이 머신은 $ARCH 입니다." >&2
+  echo ".github/workflows/build-web.yml의 runs-on을 맞는 아키텍처로 바꾸세요." >&2
+  exit 1
+fi
+
 log "빌드 산출물 내려받는 중"
 TMP_TGZ="$(mktemp /tmp/web-build.XXXXXX.tar.gz)"
 trap 'rm -f "$TMP_TGZ"' EXIT
