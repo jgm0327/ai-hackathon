@@ -196,7 +196,7 @@ def _with_photo_counts(user_id: int, cards: list[db.Card]) -> list[CardResponse]
 
 @router.get("/cards/skill-summary", response_model=SkillSummaryResponse)
 def get_skill_summary(
-    project_id: int, top_n: int = 4, current_user: db.User = Depends(get_current_user)
+    project_id: int | None = None, top_n: int = 4, current_user: db.User = Depends(get_current_user)
 ) -> SkillSummaryResponse:
     """홈 화면(Figma 100:692) "무엇이 쌓였나요" 버블 차트 (9/16 신규).
 
@@ -205,6 +205,12 @@ def get_skill_summary(
     50)을 넘겨서 사실상 전부 펼쳐 받는다 — `db.get_skill_category_counts()`가
     이미 카드를 대표 태그 기준으로 집계해서 반환하므로 여기서는 그대로 스키마에
     얹기만 한다.
+
+    **`project_id`는 9/18부터 생략 가능하다** — 생략하면 프로젝트에 관계없이 그 유저의
+    카드 전부를 집계한다(`GET /cards`가 이미 그렇게 동작한다). 프로젝트를 한 번도
+    만들지 않은 계정은 카드가 전부 `project_id = NULL`로 쌓이는데, 그 상태에서 홈이
+    집계를 못 받아 "기록 0 / 역량 0"을 보여주고 있었다(9/18 사용자 신고 —
+    `/stack`은 필터 없이 불러서 같은 카드가 거기서만 보였다).
     """
     cards = db.list_cards(current_user.id, project_id)
     categories = db.get_skill_category_counts(current_user.id, project_id, top_n=top_n)

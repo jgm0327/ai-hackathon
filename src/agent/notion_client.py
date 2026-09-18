@@ -146,17 +146,98 @@ def _extract_title(page: dict) -> str:
     return "(제목 없음)"
 
 
+# 블록 하나에 하위 블록이 있으면 그 하위를 또 요청해야 한다 — 페이지가 깊거나 넓으면
+# 요청 수가 곱셈으로 는다. 상한을 둬서 "가져오기"가 몇십 초 걸리는 일을 막는다(넘으면
+# 그 지점까지만 가져오고 `_TRUNCATED_MARK`를 붙여서 잘렸다는 걸 사용자가 보게 한다).
+_MAX_BLOCK_REQUESTS = 40
+# 들여쓰기 3단이면 사람이 읽기에 충분하고, 그보다 깊은 건 대개 부록이다.
+_MAX_DEPTH = 3
+# 입력창 상한(schemas.MAX_RAW_TEXT = 2,000)보다 넉넉히 둔다 — 실제로 자르는 판단은
+# 프론트가 한다. 서버가 미리 2,000으로 자르면 "뒤가 잘렸다"는 걸 알릴 방법이 없다.
+_MAX_CONTENT_CHARS = 8_000
+_TRUNCATED_MARK = "…(이하 생략)"
+
+# 하위 블록을 따라 들어가지 않는 타입.
+#   child_page / child_database: **다른 페이지**다. "사용자가 고른 페이지 하나만
+#     가져온다"는 이 모듈의 전제(맨 위 docstring)가 깨지므로 본문을 읽지 않는다.
+#   table: 행(table_row)은 표 모양으로 묶어야 해서 `_render_table()`이 따로 다룬다.
+_NO_RECURSE = frozenset({"child_page", "child_database", "table"})
+
+# 자체 텍스트 없이 다른 블록을 담기만 하는 타입 — 하위만 펼치고 자기 줄은 만들지 않는다.
+_CONTAINER_ONLY = frozenset({"column_list", "column", "synced_block"})
+
+# 사용자가 쓴 글이 아니라 노션이 자동으로 그려주는 것들 — 텍스트로 옮기면 잡음만 된다.
+_SKIP = frozenset({"breadcrumb", "table_of_contents", "unsupported"})
+
+_MEDIA_LABELS = {
+    "image": "(이미지)",
+    "video": "(영상)",
+    "audio": "(오디오)",
+    "file": "(파일)",
+    "pdf": "(PDF)",
+    "bookmark": "(링크)",
+    "embed": "(임베드)",
+    "link_preview": "(링크)",
+}
+
+
+class _Budget:
+    """블록 조회 요청 수를 세는 카운터 — 재귀 전체가 하나를 공유한다."""
+
+    def __init__(self, limit: int) -> None:
+        self.left = limit
+        self.exhausted = False
+
+    def take(self) -> bool:
+        if self.left <= 0:
+            self.exhausted = True
+            return False
+        self.left -= 1
+        return True
+
+
 def _extract_page_content(page_id: str, headers: dict) -> str:
-    """페이지 본문 블록을 순서대로 텍스트로 펼친다 (중첩 블록은 다루지 않음, MVP)."""
-    lines = []
+    """페이지 본문 블록을 **서식을 살려** 텍스트로 펼친다.
+
+    **9/18 개정 — 왜 서식을 살리나**: 그 전까지 이 함수는 블록마다 `rich_text`의
+    plain_text만 뽑아 전부 `\\n`으로 이었다. 제목·불릿·체크박스·인용·코드가 모두
+    구분 없는 평문 줄이 돼서 입력창에 들어간 본문이 "우다닥 붙은" 덩어리로 보였다
+    (9/18 사용자 신고). 이제 마크다운에 가까운 형태로 옮긴다 — 사람이 읽기 좋고,
+    이 텍스트를 이어 읽는 `parse_note()`에도 구조가 그대로 전달된다.
+
+    같이 고친 것:
+      - **하위 블록을 따라 들어간다.** 예전엔 통째로 누락됐다 — 토글이나 불릿 안에
+        적은 내용이 조용히 사라졌다. 깊이(`_MAX_DEPTH`)와 요청 수(`_MAX_BLOCK_REQUESTS`)
+        상한이 있다.
+      - **표**를 `| a | b |` 행으로 옮긴다.
+      - 사진/파일은 `(이미지)` 같은 한 마디와 캡션만 남긴다 — 본문에 뭔가 있었다는
+        사실은 알려주되 URL은 옮기지 않는다(만료되는 서명 URL이라 옮겨도 쓸모없다).
+
+    **하위 페이지(child_page)는 읽지 않는다.** 그건 사용자가 고른 그 페이지가 아니다 —
+    맨 위 docstring의 전제이자 유출 신고의 원인이었던 지점이다.
+    """
+    budget = _Budget(_MAX_BLOCK_REQUESTS)
+    text = _clean_lines(_render_blocks(page_id, headers, depth=0, budget=budget))
+
+    if len(text) > _MAX_CONTENT_CHARS:
+        return text[:_MAX_CONTENT_CHARS].rstrip() + f"\n{_TRUNCATED_MARK}"
+    if budget.exhausted and text:
+        return f"{text}\n{_TRUNCATED_MARK}"
+    return text
+
+
+def _iter_children(block_id: str, headers: dict, budget: _Budget):
+    """블록 하위를 페이지네이션까지 따라가며 순서대로 내놓는다."""
     cursor = None
     while True:
+        if not budget.take():
+            return
         params = {"page_size": 100}
         if cursor:
             params["start_cursor"] = cursor
 
         response = requests.get(
-            f"{_NOTION_API_BASE}/blocks/{page_id}/children",
+            f"{_NOTION_API_BASE}/blocks/{block_id}/children",
             headers=headers,
             params=params,
             timeout=15,
@@ -164,21 +245,168 @@ def _extract_page_content(page_id: str, headers: dict) -> str:
         _raise_for_notion_error(response)
         data = response.json()
 
-        for block in data.get("results", []):
-            text = _extract_block_text(block)
-            if text:
-                lines.append(text)
+        yield from data.get("results", [])
 
         if not data.get("has_more"):
-            break
+            return
         cursor = data.get("next_cursor")
 
-    return "\n".join(lines)
+
+def _render_blocks(block_id: str, headers: dict, depth: int, budget: _Budget) -> list[str]:
+    out: list[str] = []
+    indent = "  " * depth
+    number = 0  # 번호 목록 연번 — 형제 사이에서만 이어지고 다른 블록이 끼면 끊긴다
+
+    for block in _iter_children(block_id, headers, budget):
+        block_type = block.get("type", "")
+
+        number = number + 1 if block_type == "numbered_list_item" else 0
+
+        if block_type in _SKIP:
+            continue
+
+        if block_type in _CONTAINER_ONLY:
+            # 단(column)은 화면 배치일 뿐이라 들여쓰기를 더하지 않는다.
+            out.extend(_render_blocks(block["id"], headers, depth, budget))
+            continue
+
+        if block_type == "table":
+            _append(out, True, _render_table(block, headers, depth, budget, indent))
+            continue
+
+        blank_before, lines = _render_block(block, block_type, number, indent)
+        _append(out, blank_before, lines)
+
+        if block.get("has_children") and block_type not in _NO_RECURSE and depth < _MAX_DEPTH:
+            out.extend(_render_blocks(block["id"], headers, depth + 1, budget))
+
+    return out
+
+
+def _append(out: list[str], blank_before: bool, lines: list[str]) -> None:
+    if not lines:
+        return
+    if blank_before and out and out[-1] != "":
+        out.append("")
+    out.extend(lines)
+
+
+def _render_block(
+    block: dict, block_type: str, number: int, indent: str
+) -> tuple[bool, list[str]]:
+    """블록 하나 → (앞에 빈 줄이 필요한가, 줄 목록).
+
+    빈 줄은 덩어리를 나누는 블록(제목·문단·인용·코드·구분선) 앞에만 넣는다. 목록
+    항목끼리는 붙어 있어야 목록으로 보인다.
+    """
+    text = _extract_block_text(block)
+    payload = block.get(block_type) or {}
+
+    if block_type in ("heading_1", "heading_2", "heading_3"):
+        if not text:
+            return False, []
+        hashes = "#" * int(block_type[-1])
+        return True, [f"{indent}{hashes} {text}"]
+
+    if block_type == "paragraph":
+        # 빈 문단은 노션에서 여백을 주려고 넣은 것 — 빈 줄 하나로 옮긴다.
+        return (True, [f"{indent}{text}"]) if text else (False, [""])
+
+    if block_type == "bulleted_list_item":
+        return False, [f"{indent}- {text}"]
+    if block_type == "numbered_list_item":
+        return False, [f"{indent}{number}. {text}"]
+    if block_type == "to_do":
+        box = "[x]" if payload.get("checked") else "[ ]"
+        return False, [f"{indent}- {box} {text}"]
+    if block_type == "toggle":
+        # 토글은 접힌 제목 + 하위 블록이다 — 하위는 호출부가 한 단 들여쓰며 붙인다.
+        return False, [f"{indent}- {text}"]
+
+    if block_type == "quote":
+        return True, [f"{indent}> {text}"]
+    if block_type == "callout":
+        icon = (payload.get("icon") or {}).get("emoji", "")
+        return True, [f"{indent}> {f'{icon} ' if icon else ''}{text}"]
+
+    if block_type == "code":
+        language = payload.get("language") or ""
+        body = [f"{indent}{line}" for line in text.split("\n")]
+        return True, [f"{indent}```{language}", *body, f"{indent}```"]
+
+    if block_type == "divider":
+        return True, [f"{indent}---"]
+
+    if block_type == "equation":
+        expression = payload.get("expression", "")
+        return (True, [f"{indent}{expression}"]) if expression else (False, [])
+
+    if block_type in _MEDIA_LABELS:
+        # 캡션이 있으면 그게 그 블록에서 사용자가 쓴 유일한 글이다 — 그것만 살린다.
+        caption = "".join(t.get("plain_text", "") for t in payload.get("caption", []))
+        return False, [f"{indent}{_MEDIA_LABELS[block_type]} {caption}".rstrip()]
+
+    if block_type in ("child_page", "child_database"):
+        # 제목조차 옮기지 않는다 — 사용자가 고른 페이지가 아니다(맨 위 docstring).
+        return False, [f"{indent}(하위 페이지는 가져오지 않았어요)"]
+
+    # 모르는 타입이라도 rich_text가 있으면 글은 살린다(개정 전 동작).
+    return (False, [f"{indent}{text}"]) if text else (False, [])
+
+
+def _render_table(
+    block: dict, headers: dict, depth: int, budget: _Budget, indent: str
+) -> list[str]:
+    """`table` 블록을 마크다운 표로 옮긴다.
+
+    셀 텍스트는 `table_row.cells`(셀마다 rich_text 배열)에 있어서 다른 블록과 구조가
+    달라 `_render_block()`이 아니라 여기서 따로 다룬다.
+    """
+    if depth >= _MAX_DEPTH:
+        return []
+
+    rows: list[list[str]] = []
+    for child in _iter_children(block["id"], headers, budget):
+        if child.get("type") != "table_row":
+            continue
+        cells = child.get("table_row", {}).get("cells") or []
+        rows.append(
+            [
+                "".join(t.get("plain_text", "") for t in cell).replace("|", "\\|").strip()
+                for cell in cells
+            ]
+        )
+
+    if not rows:
+        return []
+
+    lines = [f"{indent}| " + " | ".join(row) + " |" for row in rows]
+    if (block.get("table") or {}).get("has_column_header") and len(rows) > 1:
+        lines.insert(1, f"{indent}| " + " | ".join("---" for _ in rows[0]) + " |")
+    return lines
+
+
+def _clean_lines(lines: list[str]) -> str:
+    """빈 줄 중복, 바로 이어지는 같은 줄, 앞뒤 여백을 정리한다.
+
+    같은 줄 중복 제거는 `(이미지)`나 `(하위 페이지는 가져오지 않았어요)`가 수십 개
+    이어지는 페이지에서 본문이 그 한 마디로 도배되는 걸 막는다(괄호로 시작하는 줄,
+    즉 우리가 붙인 표시에만 적용한다 — 사용자가 쓴 글은 같아도 지우지 않는다).
+    """
+    cleaned: list[str] = []
+    for raw in lines:
+        line = raw.rstrip()
+        if line == "" and (not cleaned or cleaned[-1] == ""):
+            continue
+        if cleaned and line == cleaned[-1] and line.lstrip().startswith("("):
+            continue
+        cleaned.append(line)
+    return "\n".join(cleaned).strip()
 
 
 def _extract_block_text(block: dict) -> str:
     block_type = block.get("type", "")
-    rich_text = block.get(block_type, {}).get("rich_text", [])
+    rich_text = (block.get(block_type) or {}).get("rich_text", [])
     return "".join(t.get("plain_text", "") for t in rich_text)
 
 

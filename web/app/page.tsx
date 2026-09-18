@@ -62,15 +62,22 @@ export default function HomePage() {
   const cachedPid = currentProject?.id;
   // 탭을 옮겨 다시 들어올 때 빈 화면부터 다시 그리지 않도록 캐시에서 시작한다.
   const [summary, setSummary] = useState<SkillSummary | null>(
-    () => (cachedPid ? getCached<SkillSummary>(navKey.skillSummary(cachedPid, SUMMARY_TOP_N)) ?? null : null),
+    () => getCached<SkillSummary>(navKey.skillSummary(cachedPid, SUMMARY_TOP_N)) ?? null,
   );
   const [cards, setCards] = useState<Card[] | null>(
-    () => (cachedPid ? getCached<Card[]>(navKey.cards(cachedPid)) ?? null : null),
+    () => getCached<Card[]>(navKey.cards(cachedPid)) ?? null,
   );
 
   useEffect(() => {
-    if (projectsLoading || !currentProject) return;
-    const projectId = currentProject.id;
+    if (projectsLoading) return;
+    // **프로젝트가 없어도 기다리지 않는다** (9/18 수정). 프로젝트를 한 번도 만들지
+    // 않은 계정은 카드가 전부 `project_id = NULL`로 쌓이는데, 예전엔 여기서
+    // `!currentProject`로 그냥 return해서 카드를 아예 불러오지 않았다 — 기록이 쌓여
+    // 있는데도 홈이 "기록 0 / 최근 기록 없음"이었다. `/stack`은 같은 상황에서 필터
+    // 없이 불러오기 때문에 같은 카드가 거기서만 보였고, 그게 9/18 사용자 신고
+    // ("커리어 스택엔 있는데 기록 화면엔 안 뜬다")의 원인이다.
+    // projectId가 undefined면 서버가 "그 유저의 카드 전부"를 준다.
+    const projectId = currentProject?.id;
     let cancelled = false;
 
     getSkillSummary(projectId, SUMMARY_TOP_N)

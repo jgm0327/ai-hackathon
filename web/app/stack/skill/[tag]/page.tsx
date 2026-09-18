@@ -16,7 +16,7 @@ import {
   getProfile,
   listCards,
   photoUrl,
-  singleProjectScope,
+  currentProjectScope,
 } from "@/lib/api";
 import { COMPETENCY_EXAMPLES } from "@/lib/coreCompetencies";
 import { getCached, navKey, setCached } from "@/lib/navCache";
@@ -66,7 +66,7 @@ export default function SkillDetailPage() {
 
   const cachedPid = currentProject?.id;
   const [cards, setCards] = useState<Card[] | null>(
-    () => (cachedPid ? getCached<Card[]>(navKey.cards(cachedPid)) ?? null : null),
+    () => getCached<Card[]>(navKey.cards(cachedPid)) ?? null,
   );
   const [profile, setProfile] = useState<Profile | null>(
     () => getCached<Profile>(navKey.profile()) ?? null,
@@ -80,11 +80,14 @@ export default function SkillDetailPage() {
   const [toast, showToast] = useToast();
 
   useEffect(() => {
-    if (projectsLoading || !currentProject) return;
+    if (projectsLoading) return;
+    // 프로젝트가 없으면 미분류 카드를 포함해 전부 받는다 (9/18 수정 —
+    // `app/page.tsx`의 같은 자리 주석 참고).
+    const projectId = currentProject?.id;
     let cancelled = false;
-    listCards(currentProject.id)
+    listCards(projectId)
       .then((list) => {
-        setCached(navKey.cards(currentProject.id), list);
+        setCached(navKey.cards(projectId), list);
         if (!cancelled) setCards(list);
       })
       .catch(() => {
@@ -107,11 +110,12 @@ export default function SkillDetailPage() {
   const matched = useMemo(() => cardsWithTag(cards ?? [], tag), [cards, tag]);
 
   const handleBuild = async () => {
-    if (!currentProject) return;
     setBuilding(true);
     setBuildError(null);
     try {
-      setItems(await buildResume(singleProjectScope(currentProject.id), undefined, tag));
+      // 프로젝트가 없으면 미분류 기록 범위로 만든다 — 예전엔 여기서 return해서
+      // 버튼이 아무 반응 없이 끝났다(9/18 수정).
+      setItems(await buildResume(currentProjectScope(currentProject?.id), undefined, tag));
     } catch (err) {
       setBuildError(err instanceof ApiError ? err.detail : "문장을 만들지 못했어요.");
     } finally {

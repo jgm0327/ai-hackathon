@@ -72,13 +72,16 @@ export default function RecordsPage() {
 
   const cachedPid = currentProject?.id;
   const [cards, setCards] = useState<Card[] | null>(
-    () => (cachedPid ? getCached<Card[]>(navKey.cards(cachedPid)) ?? null : null),
+    () => getCached<Card[]>(navKey.cards(cachedPid)) ?? null,
   );
   const [filter, setFilter] = useState<Filter>("all");
 
   useEffect(() => {
-    if (projectsLoading || !currentProject) return;
-    const projectId = currentProject.id;
+    if (projectsLoading) return;
+    // 프로젝트가 없으면(= 한 번도 만들지 않은 계정) 미분류 카드를 포함해 전부 받는다 —
+    // 예전엔 여기서 return해서 기록이 쌓여 있는데도 이 화면이 비어 있었다(홈과 같은
+    // 버그, 9/18 수정. `app/page.tsx`의 같은 자리 주석 참고).
+    const projectId = currentProject?.id;
     let cancelled = false;
     listCards(projectId)
       .then((list) => {

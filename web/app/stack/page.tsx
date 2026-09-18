@@ -22,7 +22,7 @@ import {
   getSkillSummary,
   getUnclassifiedSuggestions,
   listCards,
-  singleProjectScope,
+  currentProjectScope,
   updateCard,
 } from "@/lib/api";
 import { missingCoreCompetencies } from "@/lib/coreCompetencies";
@@ -151,7 +151,7 @@ function StackPageContent() {
   const { projects, currentProject, loading: projectsLoading } = projectsState;
   // 9/18 — 탭을 옮겨 다시 들어올 때 빈 목록부터 다시 그리지 않도록 캐시에서 시작한다
   // (`lib/navCache.ts`). 첫 방문엔 캐시가 비어 있어 예전과 동일하게 로딩부터 간다.
-  const cachedCards = currentProject ? getCached<Card[]>(navKey.cards(currentProject.id)) : undefined;
+  const cachedCards = getCached<Card[]>(navKey.cards(currentProject?.id));
   const [cards, setCards] = useState<Card[]>(cachedCards ?? []);
   const [loading, setLoading] = useState(cachedCards === undefined);
   const [error, setError] = useState<string | null>(null);
@@ -161,7 +161,7 @@ function StackPageContent() {
   // 9/18 — 캐시에서 시작한다. 이 블록도 목록 위에 삽입돼서 뒤늦게 나타나면 아래를
   // 밀어낸다(홈의 타깃 트랙 칩과 같은 문제).
   const [skillSummary, setSkillSummary] = useState<SkillSummary | null>(
-    () => (currentProject ? getCached<SkillSummary>(navKey.skillSummary(currentProject.id, STACK_TOP_N)) ?? null : null),
+    () => getCached<SkillSummary>(navKey.skillSummary(currentProject?.id, STACK_TOP_N)) ?? null,
   );
   // 주간 기록 스트릭 점 클릭 필터 (9/15 신규) — 태그 필터와 동시에 걸면 "그날 +
   // 그 태그"처럼 조건이 겹쳐 헷갈리므로, 점을 누르면 태그 필터는 끄고 그 반대도
@@ -413,7 +413,6 @@ function StackPageContent() {
       setGroupedView(false);
       return;
     }
-    if (!currentProject) return;
     setActiveTag(null); // 그룹 뷰에서는 태그/날짜 필터를 끈다 — 그룹이 쪼개지는 걸 방지
     setActiveStreakDate(null);
     setGroupedView(true);
@@ -421,7 +420,9 @@ function StackPageContent() {
     setGroupsLoading(true);
     setGroupsError(null);
     try {
-      const items = await buildResumeCached(singleProjectScope(currentProject.id), { cards });
+      // 프로젝트가 없으면 미분류 기록 범위로 묶는다 — 예전엔 위에서 return해서
+      // 그룹 보기가 켜지지도 않았다(9/18 수정).
+      const items = await buildResumeCached(currentProjectScope(currentProject?.id), { cards });
       setStarGroups(items);
     } catch (err) {
       setGroupsError(err instanceof ApiError ? err.detail : "인과관계 분석에 실패했습니다.");
@@ -474,14 +475,20 @@ function StackPageContent() {
   // 역량 리스트(Figma 100:692 "4.1-h")는 프로젝트 하나를 볼 때만 의미가 있다
   // (CLAUDE.md 3장 — 프로젝트가 다르면 같은 이름 작업이라도 안 섞여야 한다) —
   // "전체 프로젝트 보기" 중엔 집계하지 않고 아래에서 그 블록 자체를 숨긴다.
+  //
+  // **프로젝트가 아예 없는 계정은 예외다** (9/18). 그 경우 카드가 전부 미분류라서
+  // 전부 집계해도 프로젝트끼리 섞일 게 없다 — 예전엔 여기서도 return해서 기록이
+  // 쌓여 있는데 역량 리스트가 통째로 안 보였다. 반대로 "프로젝트는 있는데 현재
+  // 프로젝트가 없는" 상태에서는 섞일 수 있으니 집계하지 않는다.
   useEffect(() => {
-    if (!currentProject || showAllProjects) {
+    const aggregateAll = !currentProject && projects.length === 0;
+    if (showAllProjects || (!currentProject && !aggregateAll)) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setSkillSummary(null);
       return;
     }
     let cancelled = false;
-    const projectId = currentProject.id;
+    const projectId = currentProject?.id;
     getSkillSummary(projectId, STACK_TOP_N)
       .then((summary) => {
         setCached(navKey.skillSummary(projectId, STACK_TOP_N), summary);
@@ -491,7 +498,7 @@ function StackPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [currentProject, showAllProjects, cards.length, reloadToken]);
+  }, [currentProject, projects.length, showAllProjects, cards.length, reloadToken]);
 
   // 역량 공백 경고 (Figma 4.1-h `294:10323`, 9/18) — 이 직군에서 자주 묻는 역량 중
   // 아직 한 건도 기록하지 않은 것들. 목록은 우리가 구성한 것이고 원티드 공식 자료가
@@ -969,8 +976,10 @@ function StackPageContent() {
           </button>
         )}
         {/* 인과관계 그룹 보기 (9/14 신규) — 프로젝트 하나를 볼 때만 의미가 있어서
-            "전체 프로젝트 보기" 중엔 숨긴다 */}
-        {currentProject && !showAllProjects && (
+            "전체 프로젝트 보기" 중엔 숨긴다. 프로젝트가 아예 없는 계정(카드가 전부
+            미분류)에서도 보여준다 — 섞일 프로젝트가 없으니 같은 이유가 적용되지
+            않는다(9/18, 위 역량 집계와 같은 판단). */}
+        {(currentProject || projects.length === 0) && !showAllProjects && (
           <button
             type="button"
             onClick={toggleGroupedView}

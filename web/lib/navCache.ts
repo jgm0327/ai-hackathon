@@ -34,13 +34,18 @@ export function setCached<T>(key: string, value: T): void {
   cache.set(key, value);
 }
 
-/** 캐시 키 — 오타로 서로 다른 칸을 쓰지 않게 한곳에 모아둔다. */
+/** 캐시 키 — 오타로 서로 다른 칸을 쓰지 않게 한곳에 모아둔다.
+ *
+ * `projectId`가 없는 경우(= 프로젝트를 한 번도 만들지 않은 계정. 카드가 전부 미분류로
+ * 쌓인다)는 `all`로 따로 둔다. 특정 프로젝트의 카드 목록과 전체 목록은 다른 값이라
+ * 같은 칸을 쓰면 안 된다. */
 export const navKey = {
   projects: () => "projects",
-  cards: (projectId: number) => `cards:${projectId}`,
+  cards: (projectId?: number) => `cards:${projectId ?? "all"}`,
   // 홈은 상위 4개, /stack 역량 리스트는 50개를 받는다 — 같은 칸을 쓰면 서로의 값을
   // 덮어써서 버블 개수가 뒤바뀐다. topN을 키에 넣어 분리한다.
-  skillSummary: (projectId: number, topN: number) => `skill-summary:${projectId}:${topN}`,
+  skillSummary: (projectId: number | undefined, topN: number) =>
+    `skill-summary:${projectId ?? "all"}:${topN}`,
   profile: () => "profile",
   suggestions: () => "unclassified-suggestions",
 };

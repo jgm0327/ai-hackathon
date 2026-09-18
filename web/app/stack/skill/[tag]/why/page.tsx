@@ -60,7 +60,7 @@ export default function SkillWhyPage() {
   const cachedPid = currentProject?.id;
 
   const [cards, setCards] = useState<Card[] | null>(
-    () => (cachedPid ? getCached<Card[]>(navKey.cards(cachedPid)) ?? null : null),
+    () => getCached<Card[]>(navKey.cards(cachedPid)) ?? null,
   );
   const [profile, setProfile] = useState<Profile | null>(
     () => getCached<Profile>(navKey.profile()) ?? null,
@@ -68,8 +68,10 @@ export default function SkillWhyPage() {
   const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
-    if (projectsLoading || !currentProject) return;
-    const projectId = currentProject.id;
+    if (projectsLoading) return;
+    // 프로젝트가 없으면 미분류 카드를 포함해 전부 받는다 (9/18 수정 —
+    // `app/page.tsx`의 같은 자리 주석 참고).
+    const projectId = currentProject?.id;
     let cancelled = false;
     listCards(projectId)
       .then((list) => {

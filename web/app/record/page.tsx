@@ -31,9 +31,33 @@ import { useProjects } from "@/lib/useProjects";
 /** 홈 대시보드와 같은 키 — 어느 쪽에서 쓰다 말았든 이어서 쓸 수 있어야 한다. */
 const DRAFT_KEY = "career-log:draft-raw-text";
 
+/** 서버 상한과 같은 값 (`src/api/schemas.py` MAX_RAW_TEXT). textarea의 `maxLength`는
+ * **사람이 타이핑할 때만** 걸리므로, 노션에서 가져온 본문처럼 코드가 채우는 값은
+ * 여기서 직접 잘라야 한다 — 안 자르면 [문장으로 바꾸기]에서 422로 튕긴다. */
+const MAX_RAW_TEXT = 2000;
+
+/** 입력창이 내용에 따라 늘어나는 상한(px). 이보다 길면 입력창 안에서 스크롤한다. */
+const TEXTAREA_MAX_PX = 320;
+/** `rows={4}` × line-height 24px — 비어 있을 때의 최소 높이. */
+const TEXTAREA_MIN_PX = 96;
+
+/**
+ * 상한에 맞춰 자르되 **줄 경계에서** 자른다 (9/18 신규).
+ *
+ * 노션 본문을 그대로 넣으면 상한을 넘기 쉬운데, 글자 수로 뚝 자르면 마지막 줄이
+ * 문장 중간에서 끊긴다. 줄 단위로 자르면 "여기까지 가져왔다"가 눈에 보인다.
+ * 첫 줄부터 상한을 넘는 경우(표 한 줄이 아주 긴 등)엔 어쩔 수 없이 글자로 자른다.
+ */
+function clampToLineBoundary(text: string, limit: number): string {
+  if (text.length <= limit) return text;
+  const head = text.slice(0, limit);
+  const lastBreak = head.lastIndexOf("\n");
+  return lastBreak > 0 ? head.slice(0, lastBreak).trimEnd() : head.trimEnd();
+}
+
 function formatTodayLabel(): string {
   const d = new Date();
-  return `${d.getMonth() + 1}월 ${d.getDate()}일 · 오늘`;
+  return `${d.getMonth() + 1}월 ${d.getDate()}일 · TODAY`;
 }
 
 /** "YYYY-MM-DD" 오늘 (로컬 기준) — `card.created_at`과 같은 포맷이라 문자열 비교로 쓴다. */
@@ -124,6 +148,16 @@ function RecordPageInner() {
     setTopic(searchParams.get("topic"));
   }, [searchParams]);
 
+  // 입력창 높이를 내용에 맞춘다 (9/18). 노션에서 가져온 본문이 4줄 창에 갇혀서
+  // 스크롤해야만 읽히는 게 "우다닥 붙어서 보기 힘들다"의 절반이었다 — 한눈에
+  // 들어오게 늘리고, 화면을 다 먹지 않게 상한에서 멈춘다.
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(Math.max(el.scrollHeight, TEXTAREA_MIN_PX), TEXTAREA_MAX_PX)}px`;
+  }, [rawText]);
+
   useEffect(() => {
     getProfile()
       .then((p) => {
@@ -134,8 +168,11 @@ function RecordPageInner() {
   }, []);
 
   useEffect(() => {
-    if (projectsLoading || !currentProject) return;
-    const projectId = currentProject.id;
+    if (projectsLoading) return;
+    // 프로젝트가 없으면(= 한 번도 만들지 않은 계정) 미분류 카드를 포함해 전부 받는다 —
+    // 예전엔 여기서 return해서 이어 쓰기 배너와 오늘 주제가 아예 안 떴다
+    // (9/18 수정, `app/page.tsx`의 같은 자리 주석 참고).
+    const projectId = currentProject?.id;
     let cancelled = false;
     listCards(projectId)
       .then((list) => {
@@ -648,11 +685,21 @@ function RecordPageInner() {
         open={notionOpen}
         onClose={() => setNotionOpen(false)}
         onPicked={(content, title) => {
+          // 제목은 본문과 같은 서식(마크다운 제목)으로 얹고 빈 줄로 띄운다 — 서버가
+          // 본문을 `## 제목` / `- 항목` 형태로 넘겨주므로(9/18, notion_client.py)
+          // 여기서도 같은 규칙을 쓰는 게 입력창에서 덩어리로 보이지 않는다.
+          const incoming = title ? `# ${title}\n\n${content}` : content;
           // 이미 쓰던 내용이 있으면 지우지 않고 아래에 이어 붙인다 — 실수로 날리면
           // 되돌릴 방법이 없다.
-          const incoming = title ? `[${title}]\n${content}` : content;
-          updateRawText(rawText.trim() ? `${rawText}\n\n${incoming}` : incoming);
-          showToast("노션 본문을 가져왔어요");
+          const merged = rawText.trim() ? `${rawText.trimEnd()}\n\n${incoming}` : incoming;
+          const clamped = clampToLineBoundary(merged, MAX_RAW_TEXT);
+          updateRawText(clamped);
+          // 잘렸으면 반드시 말해준다 — 조용히 버리면 사용자는 다 들어온 줄 안다.
+          showToast(
+            clamped.length < merged.length
+              ? `본문이 길어서 앞부분만 가져왔어요 (${MAX_RAW_TEXT}자 제한)`
+              : "노션 본문을 가져왔어요",
+          );
         }}
       />
 

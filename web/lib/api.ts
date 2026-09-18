@@ -301,10 +301,17 @@ export interface SkillSummary {
 }
 
 /** `topN` 생략 시 서버 기본값(4, 홈 화면 버블용). `/stack` "역량 리스트"(Figma
- * 100:692 "4.1-h")처럼 개수 제한 없이 사실상 전부 받고 싶으면 큰 값을 넘긴다. */
-export function getSkillSummary(projectId: number, topN?: number): Promise<SkillSummary> {
-  const topNQuery = typeof topN === "number" ? `&top_n=${topN}` : "";
-  return request<SkillSummary>(`/cards/skill-summary?project_id=${projectId}${topNQuery}`);
+ * 100:692 "4.1-h")처럼 개수 제한 없이 사실상 전부 받고 싶으면 큰 값을 넘긴다.
+ *
+ * `projectId`를 생략하면 프로젝트에 관계없이 전부 집계한다 — `listCards()`와 같은
+ * 규칙이다. 프로젝트를 한 번도 만들지 않은 계정은 카드가 전부 미분류로 쌓이는데,
+ * 그때 홈이 집계를 못 받아 "기록 0"을 보여주고 있었다(9/18 수정). */
+export function getSkillSummary(projectId?: number, topN?: number): Promise<SkillSummary> {
+  const params = new URLSearchParams();
+  if (typeof projectId === "number") params.set("project_id", `${projectId}`);
+  if (typeof topN === "number") params.set("top_n", `${topN}`);
+  const query = params.toString();
+  return request<SkillSummary>(`/cards/skill-summary${query ? `?${query}` : ""}`);
 }
 
 /**
@@ -481,6 +488,20 @@ export interface ResumeScope {
 /** 프로젝트 하나짜리 범위 — 기존 "현재 프로젝트만" 동작을 그대로 표현한다. */
 export function singleProjectScope(projectId: number): ResumeScope {
   return { projectIds: [projectId], includeUnassigned: false };
+}
+
+/**
+ * "지금 보고 있는 것"의 범위 (9/18 신규).
+ *
+ * 프로젝트가 있으면 그 프로젝트 하나, **프로젝트를 한 번도 만들지 않았으면 미분류
+ * 기록**이다. 후자를 빼먹으면 그 계정에선 문장 만들기 버튼이 아무것도 안 하고
+ * 끝난다 — 카드가 전부 `project_id = NULL`이라 고를 프로젝트가 없기 때문이다
+ * (`/resume`가 원래 이 처리를 하고 있었고, 나머지 화면이 안 하고 있었다).
+ */
+export function currentProjectScope(projectId?: number): ResumeScope {
+  return projectId === undefined
+    ? { projectIds: [], includeUnassigned: true }
+    : singleProjectScope(projectId);
 }
 
 export function isScopeEmpty(scope: ResumeScope): boolean {

@@ -490,7 +490,9 @@ def list_cards(user_id: int, project_id: int | None = None) -> list[Card]:
     return [_row_to_card(row) for row in rows]
 
 
-def get_skill_category_counts(user_id: int, project_id: int, top_n: int = 4) -> list[tuple[str, int]]:
+def get_skill_category_counts(
+    user_id: int, project_id: int | None = None, top_n: int = 4
+) -> list[tuple[str, int]]:
     """카드를 대표 태그(skill_tags[0]) 기준으로 묶어 몇 장씩 있는지 센다 (9/16 신규,
     Figma 100:692 홈 화면 "무엇이 쌓였나요" 버블 차트).
 
@@ -499,6 +501,8 @@ def get_skill_category_counts(user_id: int, project_id: int, top_n: int = 4) -> 
     "미분류" 하나로 합친다(태그가 아예 없는 카드도 여기 포함). 반환값의 count 합계는
     항상 해당 프로젝트의 전체 카드 수와 같다 — 카드 한 장은 정확히 한 카테고리에만
     속한다(태그를 여러 개 가진 카드도 대표 태그 하나로만 집계 — 중복 집계 방지).
+
+    `project_id`를 생략하면 `list_cards()`와 같은 의미로 그 유저의 카드 전부를 센다.
     """
     cards = list_cards(user_id, project_id)
     counts: dict[str, int] = {}
