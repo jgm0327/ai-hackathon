@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { BottomSheet } from "@/components/BottomSheet";
+import { setNotionToken as rememberNotionToken } from "@/lib/notionToken";
 import { Toast, useToast } from "@/components/Toast";
 import {
   ApiError,
@@ -14,7 +15,7 @@ import {
   getResumeDraft,
   importBackup,
   logout,
-  syncNotion,
+  listNotionPages,
 } from "@/lib/api";
 import { useProjects } from "@/lib/useProjects";
 
@@ -112,28 +113,37 @@ export default function SettingsPage() {
     };
   }, [currentProject]);
 
-  const handleNotionSync = async () => {
+  /**
+   * 노션 연결 확인 (9/18 재작성).
+   *
+   * 예전엔 여기서 **대량 가져오기**(`syncNotion`)를 했다 — 통합이 접근 가능한 모든
+   * 페이지를 긁어 전부 LLM에 태워 카드로 저장했고, 노션의 권한 상속 때문에 사용자가
+   * 의도하지 않은 문서까지 외부로 나갔다(사용자 신고, 9/18).
+   *
+   * 이제 여기서는 **토큰이 유효한지만 확인**한다. 실제 가져오기는 기록 화면의
+   * [노션에서 가져오기] → 페이지 선택(3.0-b)에서, 사용자가 고른 한 페이지만 일어난다.
+   */
+  const handleNotionConnect = async () => {
     const trimmed = notionToken.trim();
     if (!trimmed || notionSubmitting) return;
     setNotionSubmitting(true);
     setNotionError(null);
     setNotionSuccess(null);
     try {
-      const res = await syncNotion(trimmed);
+      const pages = await listNotionPages(trimmed);
+      // 세션 저장소에 넣어야 기록 화면의 페이지 선택이 토큰을 다시 묻지 않는다.
+      rememberNotionToken(trimmed);
       setNotionSuccess(
-        res.skipped > 0
-          ? `${res.imported}개를 가져왔어요. ${res.skipped}개가 남았으니 다시 눌러 주세요.`
-          : `${res.imported}개 페이지를 가져왔어요.`,
+        `연결됐어요. 가져올 수 있는 페이지 ${pages.length}건 — 기록 화면에서 골라 주세요.`,
       );
-      setNotionToken("");
       setNotionConnected(true);
       try {
         localStorage.setItem(NOTION_CONNECTED_STORAGE_KEY, "1");
       } catch {
-        // 로컬 기억 실패해도 동기화 자체는 이미 성공
+        // 로컬 기억 실패해도 연결 자체는 이미 확인됐다
       }
     } catch (err) {
-      setNotionError(err instanceof ApiError ? err.detail : "노션 동기화에 실패했습니다.");
+      setNotionError(err instanceof ApiError ? err.detail : "노션 연결에 실패했습니다.");
     } finally {
       setNotionSubmitting(false);
     }
@@ -342,10 +352,13 @@ export default function SettingsPage() {
         panelClassName="relative w-full max-w-md rounded-tl-[24px] rounded-tr-[24px] bg-[#1e1e1e] px-5 pt-4 pb-[30px] shadow-xl"
       >
         <div className="flex flex-col gap-3">
-          <p className="text-[14px] font-semibold text-[#f2f2f2]">노션에서 가져오기</p>
+          <p className="text-[14px] font-semibold text-[#f2f2f2]">노션 연결</p>
           <p className="text-xs text-[#a0a0a0]">
-            노션 통합(integration) 토큰을 입력하면 접근 가능한 페이지를 가져와 카드로
-            저장해요. 페이지가 많으면 다소 걸릴 수 있어요.
+            토큰이 유효한지만 확인해요. 실제로 가져오는 건 기록 화면에서 <b>페이지를 하나
+            고를 때</b>뿐이고, 여기서 노션 내용을 저장하지는 않습니다.
+          </p>
+          <p className="text-xs text-[#5e5e5e]">
+            토큰은 이 브라우저 탭에만 잠시 보관되고 서버에 저장하지 않아요.
           </p>
           <input
             type="password"
@@ -361,11 +374,11 @@ export default function SettingsPage() {
           {notionSuccess && <p className="text-xs text-emerald-400">{notionSuccess}</p>}
           <button
             type="button"
-            onClick={handleNotionSync}
+            onClick={handleNotionConnect}
             disabled={notionSubmitting || !notionToken.trim()}
             className="w-full rounded-[999px] bg-accent py-2.5 text-sm font-semibold text-accent-foreground transition-colors hover:bg-[#ff7a2e] disabled:opacity-40"
           >
-            {notionSubmitting ? "가져오는 중…" : "동기화"}
+            {notionSubmitting ? "확인하는 중…" : "연결 확인"}
           </button>
         </div>
       </BottomSheet>

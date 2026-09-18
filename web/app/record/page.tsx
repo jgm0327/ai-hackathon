@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { CardResultSheet } from "@/components/CardResultSheet";
 import { MetricQuestionScreen } from "@/components/MetricQuestionScreen";
+import { NotionPagePicker } from "@/components/NotionPagePicker";
 import { SentenceEditSheet } from "@/components/SentenceEditSheet";
 import { CardResultSkeleton } from "@/components/Skeleton";
 import { stackTheme as t } from "@/components/stackTheme";
@@ -77,6 +78,10 @@ function RecordPageInner() {
     placeholder: string;
   } | null>(null);
   const [skippedQuestion, setSkippedQuestion] = useState<string | null>(null);
+
+  // "3.0-i 노션 미인증"의 [노션 연동하기] (Figma `299:12209`) — 누르면 페이지 선택
+  // 화면이 뜨고, 고른 페이지 본문이 이 입력창에 들어온다. 대량 가져오기는 없다.
+  const [notionOpen, setNotionOpen] = useState(false);
 
   const [profile, setProfile] = useState<Profile | null>(
     () => getCached<Profile>(navKey.profile()) ?? null,
@@ -417,6 +422,21 @@ function RecordPageInner() {
           </div>
         )}
 
+        {/* 노션 연동 행 (Figma 3.0-i `299:12208`) — 주 액션 바로 위. */}
+        <div className="mt-[12px] flex items-center gap-[9px]">
+          <button
+            type="button"
+            onClick={() => setNotionOpen(true)}
+            style={{ backgroundColor: t.cardBg, borderColor: t.border, color: t.text }}
+            className="shrink-0 rounded-[8px] border px-[13px] py-[14px] text-[14px] font-medium leading-[24px] transition-opacity active:opacity-70"
+          >
+            노션에서 가져오기
+          </button>
+          <p style={{ color: t.textMuted }} className="text-[12px] leading-[20px]">
+            페이지 하나를 골라 본문만 가져와요
+          </p>
+        </div>
+
         <button
           type="button"
           onClick={handleConvert}
@@ -525,6 +545,19 @@ function RecordPageInner() {
           }}
         />
       )}
+
+      {/* 3.0-b 노션 페이지 선택 — 고른 페이지 본문이 입력창에 삽입된다. */}
+      <NotionPagePicker
+        open={notionOpen}
+        onClose={() => setNotionOpen(false)}
+        onPicked={(content, title) => {
+          // 이미 쓰던 내용이 있으면 지우지 않고 아래에 이어 붙인다 — 실수로 날리면
+          // 되돌릴 방법이 없다.
+          const incoming = title ? `[${title}]\n${content}` : content;
+          updateRawText(rawText.trim() ? `${rawText}\n\n${incoming}` : incoming);
+          showToast("노션 본문을 가져왔어요");
+        }}
+      />
 
       <Toast toast={toast} />
     </div>

@@ -1,28 +1,28 @@
-"""노션 업무 일지 연동 — Track B 담당.
+"""노션 연동 — 페이지 목록 조회 + 고른 페이지 하나의 본문 조회 (Track B).
 
-투트랙 전략 (docs/03-risk-fallback.md 리스크 1 참고):
-  1차(필수): fetch_notion_entries() — 공식 REST API
-  2차(선택, 타임박스 하루): fetch_notion_entries_via_mcp() — 오픈소스 MCP 서버
-두 함수는 반드시 동일한 반환 타입(list[NotionEntry])을 지켜서
-프론트엔드(Track C)가 어느 쪽을 쓰든 영향받지 않게 한다.
+**9/18 전면 재작성.** 그 전까지 이 모듈은 `/v1/search`를 필터 없이 불러 **이 통합이
+접근 가능한 모든 페이지**를 끝까지 긁고, 그 본문을 전부 LLM에 태워 카드로 저장했다
+(`fetch_notion_entries()` + `POST /api/notion/sync`). 노션은 부모 페이지를 통합에
+공유하면 **하위 트리 전체**에 권한을 주기 때문에, 사용자가 의도하지 않은 문서까지
+외부(우리 서버 → Anthropic)로 나갔다. 실제로 그 신고를 받아 걷어냈다.
 
-멀티유저 설계(tasks/track-b-agent-pipeline.md 9/10 결정 참고): user_token은
-호출자(app.py)가 항상 명시적으로 넘긴다. settings.notion_token 폴백은 로컬
-단독 테스트용일 뿐이니, 이 모듈 내부에서 토큰별 클라이언트를 전역 캐싱하지 않는다.
+지금 구조는 Figma "01 · 기록 · Tab A"의 3.0-b "노션 페이지 선택" 그대로다:
+  1. `list_notion_pages()` — 최근 수정 순 **제목과 시각만**. 본문도, LLM도 없다.
+  2. 사용자가 목록에서 **하나를 고른다**.
+  3. `fetch_notion_page_content()` — 그 페이지 하나의 본문만 가져와 **입력창에 채운다**.
+  4. 사용자가 읽고 고친 뒤 [문장으로 바꾸기]를 눌러야 비로소 변환된다.
 
-구현 노트 (9/14, MCP 경로): "오픈소스 Notion MCP 서버"가 정확히 어떤 도구
-이름/스키마를 노출하는지는 CLAUDE.md/tasks 어디에도 명시돼 있지 않고, 이 세션엔
-실제로 띄워서 검증해볼 MCP 서버가 없다 — 그래서 특정 서버 하나에 맞춰 도구 이름을
-하드코딩하지 않고, `list_tools()` 결과에서 이름에 "search"가 들어간 도구와
-"fetch"/"retrieve"/"get_page"가 들어간 도구를 각각 찾아 쓰는 **적응형** 방식으로
-구현했다. 표준적인 MCP Notion 서버라면 대부분 이 명명 규칙을 따르지만, 100%
-보장은 못 한다 — 못 찾으면 `NotionMcpUnsupportedError`로 명확히 실패하고
-`fetch_notion_entries()`(REST)로 폴백하도록 설계했다(호출부, `src/api/routers/notion.py`
-참고). **실제 MCP 서버로 end-to-end 검증은 안 됐다** — 유닛 테스트는 `ClientSession`을
-모킹해서 이 적응형 로직 자체만 검증한다.
+무엇이 외부로 나가는지를 사용자가 매번 눈으로 보고 정한다는 게 이 설계의 핵심이다.
+대량 가져오기 경로는 다시 만들지 말 것.
+
+**같이 지운 것**: MCP 경로(`fetch_notion_entries_via_mcp()` 등)도 제거했다. 같은
+무필터 검색을 쓰면서 오직 위 sync 엔드포인트만 호출하던 코드라, sync가 사라지면
+어디서도 안 불리는 데다 같은 유출 형태를 그대로 갖고 있었다. 실제 MCP 서버로
+end-to-end 검증도 된 적이 없다(9/14 노트). 필요하면 git 히스토리에서 되살릴 것.
+
+멀티유저 설계: `user_token`은 호출자가 항상 명시적으로 넘긴다. `settings.notion_token`
+폴백은 로컬 단독 테스트용일 뿐이라 토큰별 클라이언트를 전역 캐싱하지 않는다.
 """
-import asyncio
-import json
 from dataclasses import dataclass
 
 import requests
@@ -33,10 +33,6 @@ _NOTION_API_BASE = "https://api.notion.com/v1"
 _NOTION_VERSION = "2022-06-28"
 
 
-class NotionMcpUnsupportedError(Exception):
-    """연결한 MCP 서버에서 검색/조회용 도구를 찾지 못했을 때."""
-
-
 @dataclass
 class NotionEntry:
     page_id: str
@@ -45,162 +41,88 @@ class NotionEntry:
     created_time: str
 
 
-def fetch_notion_entries(user_token: str = None) -> list[NotionEntry]:
-    """[필수/기본] Notion 공식 REST API로 개인 업무 일지 페이지를 긁어온다.
+@dataclass
+class NotionPageSummary:
+    """페이지 선택 화면(Figma 3.0-b)에 뿌릴 **메타데이터만**.
 
-    /v1/search로 이 토큰(통합)과 공유된 페이지 전체를 찾고, 각 페이지의 블록
-    내용을 텍스트로 펼쳐서 NotionEntry 리스트로 반환한다.
+    본문(`content`)이 없는 게 핵심이다 — 목록을 그리는 데 본문이 필요 없고, 본문을
+    받아오려면 페이지마다 블록 API를 또 불러야 한다. 고른 페이지 하나만 나중에
+    `fetch_notion_page_content()`로 가져온다.
+    """
+
+    page_id: str
+    title: str
+    last_edited_time: str
+
+
+# 페이지 선택 화면에 한 번에 보여줄 최대 개수 (Figma 3.0-b는 "최근 수정한 페이지 3건").
+# 목록이 길어봐야 고르기만 어려워지고, 최근 것부터 정렬돼 있으면 대부분 앞쪽에서 끝난다.
+MAX_PAGE_CANDIDATES = 20
+
+
+def list_notion_pages(user_token: str = None, limit: int = MAX_PAGE_CANDIDATES) -> list[NotionPageSummary]:
+    """[9/18 신규] 고를 수 있는 페이지 **목록만** 가져온다 (Figma 3.0-b).
+
+    **이 함수는 본문을 읽지 않고, 카드를 만들지 않고, LLM을 부르지 않는다.**
+    노션 워크스페이스의 내용이 우리 서버나 Anthropic으로 나가는 지점이 아니다 —
+    제목과 수정 시각만 받아서 화면에 뿌린다.
+
+    **왜 이렇게 바꿨나 (9/18)**: 예전 `fetch_notion_entries()`는 `/v1/search`를 필터
+    없이 불러서 **이 통합이 접근 가능한 모든 페이지**를 끝까지 긁고, 그 본문을 전부
+    LLM에 태워 카드로 저장했다. 노션은 부모 페이지를 공유하면 하위 트리 전체에 권한을
+    주기 때문에, 사용자가 의도하지 않은 문서까지 외부로 나갔다(사용자 신고, 9/18).
+    이제 **무엇을 보낼지는 사용자가 목록에서 하나 골라야** 정해진다.
+
+    최근 수정 순으로 정렬해서 `limit`개까지만 받는다 — 페이지네이션으로 전부 긁지
+    않는다. 워크스페이스가 큰 계정에서 목록 한 번 여는 데 수십 번 왕복할 이유가 없다.
     """
     token = user_token or settings.notion_token
     if not token:
         raise ValueError("NOTION_TOKEN이 설정되어 있지 않습니다 (.env 확인)")
 
     headers = _build_headers(token)
-    pages = _search_pages(headers)
-    return [_page_to_entry(page, headers) for page in pages]
+    body = {
+        "filter": {"value": "page", "property": "object"},
+        # Figma 3.0-b가 "최근 수정한 페이지"라고 명시한다. 정렬을 서버(노션)에 맡겨야
+        # limit으로 잘라도 "최근 것"이 남는다 — 안 그러면 어떤 N개가 올지 알 수 없다.
+        "sort": {"direction": "descending", "timestamp": "last_edited_time"},
+        "page_size": min(limit, 100),
+    }
+    response = requests.post(f"{_NOTION_API_BASE}/search", headers=headers, json=body, timeout=15)
+    _raise_for_notion_error(response)
+
+    return [
+        NotionPageSummary(
+            page_id=page["id"],
+            title=_extract_title(page),
+            last_edited_time=page.get("last_edited_time", ""),
+        )
+        for page in response.json().get("results", [])
+    ][:limit]
 
 
-def fetch_notion_entries_via_mcp(user_token: str = None) -> list[NotionEntry]:
-    """[선택] 오픈소스 Notion MCP 서버 연동.
+def fetch_notion_page_content(page_id: str, user_token: str = None) -> NotionEntry:
+    """[9/18 신규] **사용자가 고른 페이지 하나**의 본문을 가져온다 (Figma 3.0-b).
 
-    `NOTION_MCP_SERVER_URL`에 접속해 검색 도구로 페이지를 찾고, 조회 도구로 각
-    페이지 내용을 가져온다 (모듈 docstring의 "적응형" 설명 참고). 동기 함수라서
-    내부적으로 asyncio 이벤트 루프를 새로 만들어 돌린다 — 호출부(FastAPI 라우터
-    등)가 이미 async 이벤트 루프 안에 있다면 이 함수를 직접 쓰지 말고
-    `_fetch_notion_entries_via_mcp_async()`를 await할 것.
-
-    주의: 타임박스 하루(24시간) 초과 시 즉시 중단하고 fetch_notion_entries()로
-    폴백할 것. 중단 시 docs/03-risk-fallback.md에 진행 상황을 기록한다.
+    가져온 본문은 입력창에 채워질 뿐, 이 함수는 카드를 만들지도 LLM을 부르지도
+    않는다 — 사용자가 화면에서 읽고 고친 뒤 [문장으로 바꾸기]를 눌러야 변환된다.
+    "무엇이 외부로 나가는지"를 사용자가 눈으로 보고 정하게 하는 게 이 설계의 핵심이다.
     """
-    server_url = settings.notion_mcp_server_url
-    if not server_url:
-        raise ValueError("NOTION_MCP_SERVER_URL이 설정되어 있지 않습니다")
     token = user_token or settings.notion_token
     if not token:
-        raise ValueError("Notion 토큰이 없습니다 (user_token 또는 .env의 NOTION_TOKEN)")
+        raise ValueError("NOTION_TOKEN이 설정되어 있지 않습니다 (.env 확인)")
 
-    return asyncio.run(_fetch_notion_entries_via_mcp_async(server_url, token))
+    headers = _build_headers(token)
+    response = requests.get(f"{_NOTION_API_BASE}/pages/{page_id}", headers=headers, timeout=15)
+    _raise_for_notion_error(response)
+    page = response.json()
 
-
-async def _fetch_notion_entries_via_mcp_async(server_url: str, token: str) -> list[NotionEntry]:
-    # 지연 import — mcp 패키지는 이 경로(선택 기능)를 안 쓰면 불필요한 무게라
-    # 모듈 최상단에서 항상 import하지 않는다.
-    from mcp import ClientSession
-    from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
-
-    http_client = create_mcp_http_client(headers={"Authorization": f"Bearer {token}"})
-    async with streamable_http_client(server_url, http_client=http_client) as (read_stream, write_stream):
-        async with ClientSession(read_stream, write_stream) as session:
-            await session.initialize()
-            tools = (await session.list_tools()).tools
-
-            search_tool = _find_tool(tools, "search")
-            fetch_tool = _find_tool(tools, "fetch", "retrieve", "get_page", "read_page")
-            if not search_tool or not fetch_tool:
-                names = [t.name for t in tools]
-                raise NotionMcpUnsupportedError(
-                    f"이 MCP 서버에서 검색/조회용 도구를 찾지 못했습니다 (사용 가능한 도구: {names})"
-                )
-
-            search_args = _build_search_args(search_tool)
-            search_result = await session.call_tool(search_tool.name, search_args)
-            pages = _extract_pages(search_result)
-
-            entries = []
-            for page in pages:
-                page_id = page.get("id") or page.get("page_id") or page.get("url")
-                if not page_id:
-                    continue
-                fetch_args = _build_fetch_args(fetch_tool, str(page_id))
-                fetch_result = await session.call_tool(fetch_tool.name, fetch_args)
-                entries.append(
-                    NotionEntry(
-                        page_id=str(page_id),
-                        title=page.get("title") or "(제목 없음)",
-                        content=_extract_text(fetch_result),
-                        created_time=page.get("created_time", ""),
-                    )
-                )
-            return entries
-
-
-def _find_tool(tools: list, *keywords: str):
-    """도구 이름에 keywords 중 하나라도 포함된 첫 도구를 반환한다 (대소문자 무시)."""
-    for tool in tools:
-        name_lower = tool.name.lower()
-        if any(keyword in name_lower for keyword in keywords):
-            return tool
-    return None
-
-
-def _schema_properties(tool) -> dict:
-    schema = getattr(tool, "input_schema", None) or {}
-    return schema.get("properties", {}) if isinstance(schema, dict) else {}
-
-
-def _build_search_args(search_tool) -> dict:
-    """검색 도구의 입력 스키마를 보고 질의어 파라미터 이름을 추정해 채운다.
-
-    표준 이름을 못 찾으면 빈 dict로 호출한다 — 대부분의 검색 도구는 질의어 없이
-    호출하면 최근/전체 문서를 반환하도록 만들어져 있다.
-    """
-    properties = _schema_properties(search_tool)
-    for candidate in ("query", "q", "search", "text"):
-        if candidate in properties:
-            return {candidate: ""}
-    return {}
-
-
-def _build_fetch_args(fetch_tool, page_id: str) -> dict:
-    properties = _schema_properties(fetch_tool)
-    for candidate in ("id", "page_id", "pageId", "url"):
-        if candidate in properties:
-            return {candidate: page_id}
-    return {"id": page_id}
-
-
-def _extract_pages(call_result) -> list[dict]:
-    """검색 결과에서 페이지 목록을 뽑아낸다. 서버마다 응답 모양이 달라 최대한 관대하게 파싱한다."""
-    structured = getattr(call_result, "structured_content", None)
-    if isinstance(structured, dict):
-        for key in ("results", "pages", "items"):
-            if isinstance(structured.get(key), list):
-                return [p for p in structured[key] if isinstance(p, dict)]
-        if isinstance(structured, list):
-            return [p for p in structured if isinstance(p, dict)]
-
-    # structured_content가 없으면 텍스트 콘텐츠 블록을 JSON으로 파싱 시도.
-    for block in getattr(call_result, "content", []) or []:
-        text = getattr(block, "text", None)
-        if not text:
-            continue
-        try:
-            data = json.loads(text)
-        except (ValueError, TypeError):
-            continue
-        if isinstance(data, list):
-            return [p for p in data if isinstance(p, dict)]
-        if isinstance(data, dict):
-            for key in ("results", "pages", "items"):
-                if isinstance(data.get(key), list):
-                    return [p for p in data[key] if isinstance(p, dict)]
-    return []
-
-
-def _extract_text(call_result) -> str:
-    """조회 결과에서 본문 텍스트를 뽑아낸다."""
-    structured = getattr(call_result, "structured_content", None)
-    if isinstance(structured, dict):
-        for key in ("content", "text", "body"):
-            if isinstance(structured.get(key), str):
-                return structured[key]
-
-    lines = []
-    for block in getattr(call_result, "content", []) or []:
-        text = getattr(block, "text", None)
-        if text:
-            lines.append(text)
-    return "\n".join(lines)
+    return NotionEntry(
+        page_id=page_id,
+        title=_extract_title(page),
+        content=_extract_page_content(page_id, headers),
+        created_time=page.get("created_time", ""),
+    )
 
 
 def _build_headers(token: str) -> dict:
@@ -209,39 +131,6 @@ def _build_headers(token: str) -> dict:
         "Notion-Version": _NOTION_VERSION,
         "Content-Type": "application/json",
     }
-
-
-def _search_pages(headers: dict) -> list[dict]:
-    """이 통합과 공유된 페이지 전체를 (페이지네이션 처리하며) 조회한다."""
-    pages = []
-    cursor = None
-    while True:
-        body = {
-            "filter": {"value": "page", "property": "object"},
-            "page_size": 100,
-        }
-        if cursor:
-            body["start_cursor"] = cursor
-
-        response = requests.post(f"{_NOTION_API_BASE}/search", headers=headers, json=body, timeout=15)
-        _raise_for_notion_error(response)
-        data = response.json()
-
-        pages.extend(data.get("results", []))
-        if not data.get("has_more"):
-            break
-        cursor = data.get("next_cursor")
-
-    return pages
-
-
-def _page_to_entry(page: dict, headers: dict) -> NotionEntry:
-    return NotionEntry(
-        page_id=page["id"],
-        title=_extract_title(page),
-        content=_extract_page_content(page["id"], headers),
-        created_time=page.get("created_time", ""),
-    )
 
 
 def _extract_title(page: dict) -> str:

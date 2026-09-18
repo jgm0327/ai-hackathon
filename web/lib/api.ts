@@ -740,27 +740,43 @@ export async function exportResumeDocx(content: string): Promise<void> {
 // 5. 노션 (읽기 전용) — docs/05-api-contract.md §5
 // ---------------------------------------------------------------------------
 
-export interface NotionSyncResult {
-  imported: number;
-  /** 9/17 신규 — 한 번에 처리할 페이지 수 상한을 넘겨 이번에 못 가져온 개수.
-   * 0이면 전부 가져온 것이고, 0보다 크면 다시 눌러 이어서 가져갈 수 있다. */
-  skipped: number;
-  cards: Card[];
+/**
+ * 노션 — 페이지 목록 (Figma 3.0-b "노션 페이지 선택", 9/18 재작성).
+ *
+ * **옛 `syncNotion()`(대량 가져오기)을 대체한다.** 그쪽은 통합이 접근 가능한 **모든**
+ * 페이지를 긁어 전부 LLM에 태워 카드로 저장했고, 노션의 권한 상속(부모를 공유하면
+ * 하위 트리 전체에 권한) 때문에 사용자가 의도하지 않은 문서까지 외부로 나갔다.
+ *
+ * 이 두 함수는 **카드를 만들지 않고 LLM을 부르지 않는다.** 목록에서 하나를 고르면
+ * 본문이 입력창에 채워질 뿐이고, 변환은 사용자가 [문장으로 바꾸기]를 눌러야 일어난다.
+ */
+export interface NotionPageSummary {
+  page_id: string;
+  title: string;
+  last_edited_time: string;
 }
 
-/**
- * 노션 페이지를 가져와 카드로 저장한다. 매일 쓰는 경로가 아니라(연 1회 수준의
- * 설정에 가까움) 로딩이 길어도 무방하다 — 임포트되는 페이지 전부를 그때그때
- * 파싱하므로 느릴 수 있다 (`docs/05-api-contract.md` §5). `page_id`는 선택 —
- * 페이지 선택 UI는 만들지 않는다 (CLAUDE.md 2.4).
- */
-export function syncNotion(userToken: string, pageId?: string): Promise<NotionSyncResult> {
-  return request<NotionSyncResult>("/notion/sync", {
+export function listNotionPages(userToken: string): Promise<NotionPageSummary[]> {
+  return request<{ pages: NotionPageSummary[] }>("/notion/pages", {
     method: "POST",
-    body: JSON.stringify({
-      user_token: userToken,
-      ...(pageId ? { page_id: pageId } : {}),
-    }),
+    body: JSON.stringify({ user_token: userToken }),
+  }).then((res) => res.pages);
+}
+
+export interface NotionPageContent {
+  page_id: string;
+  title: string;
+  content: string;
+}
+
+/** 고른 페이지 하나의 본문. 저장하지 않고 그대로 돌려준다. */
+export function getNotionPageContent(
+  pageId: string,
+  userToken: string,
+): Promise<NotionPageContent> {
+  return request<NotionPageContent>(`/notion/pages/${pageId}/content`, {
+    method: "POST",
+    body: JSON.stringify({ user_token: userToken }),
   });
 }
 

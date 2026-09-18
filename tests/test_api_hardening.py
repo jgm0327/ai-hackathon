@@ -15,7 +15,6 @@ from fastapi.testclient import TestClient
 
 from src.api import rate_limit
 from src.api.main import MAX_REQUEST_BYTES, app
-from src.api.routers.notion import MAX_NOTION_PAGES_PER_SYNC
 from src.api.schemas import MAX_JD_TEXT, MAX_RAW_TEXT
 from src.storage import db
 
@@ -104,32 +103,12 @@ def test_star_item_payload_rejects_overlong_field(client, current_user_id):
     mock_llm.assert_not_called()
 
 
-# --- 2. 노션 배치 상한 (routers/notion.py) ---
-
-
-def test_notion_sync_caps_pages_and_reports_skipped(client, current_user_id):
-    """페이지가 상한을 넘으면 앞에서부터 잘라 처리하고, 남은 개수를 알려준다.
-
-    페이지 하나당 parse_note()가 LLM을 한 번 부르므로 이 상한이 곧 '한 번 눌렀을 때
-    최대 LLM 호출 수'다.
-    """
-    from src.agent.notion_client import NotionEntry
-
-    over = MAX_NOTION_PAGES_PER_SYNC + 7
-    entries = [
-        NotionEntry(page_id=f"p{i}", title=f"페이지 {i}", content=f"내용 {i}", created_time="2026-09-13")
-        for i in range(over)
-    ]
-
-    with patch("src.api.routers.notion.fetch_notion_entries", return_value=entries):
-        with patch("src.api.routers.notion.run_pipeline_batch", return_value=[]) as mock_batch:
-            response = client.post("/api/notion/sync", json={"user_token": "secret_abc"})
-
-    assert response.status_code == 200
-    assert response.json()["skipped"] == 7
-    # 상한 개수만 파이프라인으로 넘어갔는지 — 여기가 실제 비용이 결정되는 지점이다.
-    passed_contents = mock_batch.call_args[0][1]
-    assert len(passed_contents) == MAX_NOTION_PAGES_PER_SYNC
+# --- 2. 노션 (routers/notion.py) ---
+#
+# 9/18 — "배치 상한" 테스트는 대량 가져오기(`POST /api/notion/sync`)와 함께 사라졌다.
+# 상한이 필요했던 이유가 "한 번 눌렀을 때 LLM을 수십 번 부른다"였는데, 이제 노션
+# 경로는 LLM을 아예 부르지 않는다(목록 조회 + 페이지 하나 본문 조회뿐). 남은 검증은
+# `tests/test_api_notion.py`에 있다.
 
 
 # --- 3. 레이트 리밋 (rate_limit.py) ---

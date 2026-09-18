@@ -1,80 +1,98 @@
-"""POST /api/notion/sync — 노션 업무 일지를 가져와 한 번에 파싱하고 저장한다.
+"""노션 연동 — 페이지 목록 + 고른 페이지 하나의 본문 (Figma 3.0-b "노션 페이지 선택").
 
-(P1, docs/05-api-contract.md 5장). `user_token`은 필수다 — `settings.notion_token`
-(로컬 개발용 폴백)에 암묵적으로 의존하면 다른 사용자가 개발자 본인 노션 데이터를
-끌어오는 사고로 이어진다(docs/03-risk-fallback.md 리스크 6, notion_client.py 모듈
-docstring 참고). 빈 문자열도 "값 없음"으로 취급해 거부한다 — Pydantic의 `str` 타입은
-빈 문자열도 통과시키므로 이 검증은 스키마만으로는 못 막는다.
+**9/18 전면 재작성.** `POST /api/notion/sync`(대량 가져오기)를 제거하고 두 개로 나눴다.
 
-투트랙(docs/03-risk-fallback.md 리스크 1과 별개, notion_client.py 모듈 docstring 참고):
-`NOTION_MCP_SERVER_URL`이 설정돼 있으면 먼저 MCP 경로를 시도하고, 실패하면 조용히
-REST로 폴백한다 — 어느 경로든 이 라우터의 응답 스키마는 동일하다.
+옛 엔드포인트는 `/v1/search`를 필터 없이 불러 **이 통합이 접근 가능한 모든 페이지**를
+끝까지 긁고, 그 본문을 전부 `run_pipeline_batch()`로 LLM에 태워 카드로 저장했다.
+노션은 부모 페이지를 공유하면 하위 트리 전체에 권한을 주기 때문에, 사용자가 의도하지
+않은 문서까지 외부로 나갔다(사용자 신고, 9/18). 게다가 상한 50개는 정렬 보장 없이
+앞에서부터 잘라서, **어떤 50개가 나갈지 예측할 수도 없었다.**
 
-**구현 노트 (9/14, 카카오 로그인 Phase B)**: 노션에서 가져온 카드도 가져온 로그인
-유저 소유가 된다 — `user_token`(노션 쪽 신원)과 `current_user`(이 앱의 로그인 유저)는
-서로 다른 축이라 둘 다 필요하다.
+지금은 이렇게 동작한다:
+  - `POST /api/notion/pages` — 제목과 수정 시각만. **본문도, LLM도, 저장도 없다.**
+  - `POST /api/notion/pages/{id}/content` — 고른 **한 페이지**의 본문만. 역시 저장하지 않는다.
+
+변환은 프론트가 그 본문을 입력창에 채운 뒤, 사용자가 [문장으로 바꾸기]를 눌러
+기존 `POST /api/cards`를 타는 것으로 일어난다. 이 라우터는 카드를 만들지 않는다.
+
+**토큰은 저장하지 않는다.** 요청마다 `user_token`을 받는다 — 서드파티 자격증명을
+서버 DB에 평문으로 눕히지 않기 위해서다. 프론트가 세션 동안만 들고 있는다
+(`web/lib/notionToken.ts`). `user_token`(노션 신원)과 `current_user`(이 앱의 로그인
+유저)는 서로 다른 축이라 둘 다 필요하다.
 """
 from fastapi import APIRouter, Depends, HTTPException
 
-from src.agent.notion_client import fetch_notion_entries, fetch_notion_entries_via_mcp
-from src.agent.pipeline import run_pipeline_batch
-from src.api.schemas import CardResponse, NotionSyncRequest, NotionSyncResponse
-from src.api.rate_limit import limit_batch
+from src.agent.notion_client import fetch_notion_page_content, list_notion_pages
+from src.api.rate_limit import limit_light
+from src.api.schemas import (
+    NotionPageContentResponse,
+    NotionPageListResponse,
+    NotionPageRequest,
+    NotionPageSummaryResponse,
+)
 from src.auth.deps import get_current_user
-from src.config import settings
 from src.storage import db
 
 router = APIRouter(tags=["notion"])
 
-# 한 요청에서 LLM으로 넘길 노션 페이지 수 상한 (9/17). 페이지당 parse_note() 1회라
-# 이 값이 곧 "한 번 눌렀을 때 최대 LLM 호출 수"다.
-MAX_NOTION_PAGES_PER_SYNC = 50
 
+def _require_token(user_token: str) -> str:
+    """빈 문자열도 "값 없음"으로 거부한다.
 
-def _fetch_entries(user_token: str):
-    """MCP가 설정돼 있으면 먼저 시도하고, 실패하면 REST로 폴백한다.
-
-    MCP 쪽 실패는 서버 미가동/도구 이름 불일치 등 "이 서버 설정 문제"일 뿐 유저
-    잘못이 아니므로 404/503으로 사용자에게 노출하지 않고 조용히 REST로 넘어간다.
-    REST마저 실패하면(토큰 문제 등) 그 예외가 그대로 위로 전파된다.
+    Pydantic의 `str`은 빈 문자열을 통과시키므로 스키마만으로는 못 막는다. 토큰이
+    없으면 `notion_client`가 `settings.notion_token`(로컬 개발용 폴백)으로 넘어가는데,
+    그러면 **다른 사용자가 개발자 본인의 노션 데이터를 끌어오는** 사고가 된다
+    (docs/03-risk-fallback.md 리스크 6).
     """
-    if settings.notion_mcp_server_url:
-        try:
-            return fetch_notion_entries_via_mcp(user_token=user_token)
-        except Exception:  # noqa: BLE001 — MCP 실패(서버 다운, 도구 이름 불일치 등)는 폴백 사유일 뿐
-            pass
-    return fetch_notion_entries(user_token=user_token)
-
-
-@router.post("/notion/sync", response_model=NotionSyncResponse, dependencies=[Depends(limit_batch)])
-def sync_notion(
-    payload: NotionSyncRequest, current_user: db.User = Depends(get_current_user)
-) -> NotionSyncResponse:
-    if not payload.user_token.strip():
+    token = user_token.strip()
+    if not token:
         raise HTTPException(status_code=422, detail="user_token은 필수입니다.")
+    return token
 
+
+@router.post("/notion/pages", response_model=NotionPageListResponse, dependencies=[Depends(limit_light)])
+def list_pages(
+    payload: NotionPageRequest, current_user: db.User = Depends(get_current_user)
+) -> NotionPageListResponse:
+    """고를 수 있는 페이지 목록 (Figma 3.0-b "최근 수정한 페이지 N건").
+
+    **제목과 수정 시각만 돌려준다.** 본문을 읽지 않고, 카드를 만들지 않고, LLM을
+    부르지 않는다 — 노션 내용이 밖으로 나가는 지점이 아니다.
+    """
+    token = _require_token(payload.user_token)
     try:
-        entries = _fetch_entries(payload.user_token)
+        pages = list_notion_pages(user_token=token)
     except ValueError as e:
-        # REST 경로의 토큰 오류 (notion_client._raise_for_notion_error 참고)
+        # 토큰 오류 (notion_client._raise_for_notion_error 참고)
         raise HTTPException(status_code=401, detail=str(e)) from e
 
-    # 내용이 빈 페이지는 parse_note()에 넘길 근거가 없으니 건너뛴다.
-    contents = [entry.content for entry in entries if entry.content.strip()]
+    return NotionPageListResponse(
+        pages=[NotionPageSummaryResponse.model_validate(p) for p in pages]
+    )
 
-    # 한 번에 처리할 페이지 수 상한 (9/17 신규). 페이지 하나당 parse_note()가 LLM을
-    # 한 번씩 부르므로, 상한이 없으면 노션 워크스페이스가 큰 유저 한 명이 한 요청으로
-    # 수백 회 호출을 발생시킨다(비용도 문제지만 요청이 수 분씩 걸려 서버도 붙잡힌다).
-    # 넘치면 거절하지 않고 앞에서부터 잘라 처리한 뒤, 몇 개를 못 가져왔는지 알려준다 —
-    # 다시 누르면 이어서 가져갈 수 있다.
-    skipped = max(0, len(contents) - MAX_NOTION_PAGES_PER_SYNC)
-    contents = contents[:MAX_NOTION_PAGES_PER_SYNC]
 
-    results = run_pipeline_batch(current_user.id, contents)
-    cards = [db.get_card(current_user.id, r["card_id"]) for r in results]
+@router.post(
+    "/notion/pages/{page_id}/content",
+    response_model=NotionPageContentResponse,
+    dependencies=[Depends(limit_light)],
+)
+def get_page_content(
+    page_id: str,
+    payload: NotionPageRequest,
+    current_user: db.User = Depends(get_current_user),
+) -> NotionPageContentResponse:
+    """**사용자가 고른 페이지 하나**의 본문 (Figma 3.0-b "선택한 페이지 본문이 입력창에 삽입됩니다").
 
-    return NotionSyncResponse(
-        imported=len(cards),
-        skipped=skipped,
-        cards=[CardResponse.model_validate(c) for c in cards],
+    저장하지 않고 그대로 돌려준다. 프론트가 입력창에 채우고, 사용자가 읽고 고친 뒤
+    [문장으로 바꾸기]를 눌러야 변환된다 — 무엇이 LLM으로 나가는지 사용자가 보고
+    정하게 하는 게 이 구조의 요점이다.
+    """
+    token = _require_token(payload.user_token)
+    try:
+        entry = fetch_notion_page_content(page_id, user_token=token)
+    except ValueError as e:
+        raise HTTPException(status_code=401, detail=str(e)) from e
+
+    return NotionPageContentResponse(
+        page_id=entry.page_id, title=entry.title, content=entry.content
     )

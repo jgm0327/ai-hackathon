@@ -1,323 +1,164 @@
-"""Track B 담당: fetch_notion_entries()에 대한 테스트.
+"""`notion_client` 단위 테스트 — 9/18 재작성.
 
-실제 Notion API를 호출하지 않도록 requests.post/get을 모킹한다.
+옛 `fetch_notion_entries()`(무필터 전체 검색 + 전 페이지 본문 수집)는 제거됐다.
+그 함수가 통합에 공유된 **모든** 페이지를 끝까지 긁어서, 사용자가 의도하지 않은
+노션 문서까지 LLM으로 나갔다(사용자 신고, 9/18). 지금은 목록과 본문이 분리되고
+본문은 사용자가 고른 하나만 가져온다.
+
+여기서 못 박는 것:
+  - 목록 조회가 **최근 수정 순으로 정렬**을 서버(노션)에 맡기고 **limit으로 자른다**
+    — 페이지네이션으로 전부 긁지 않는다.
+  - 목록 조회가 **본문 블록 API를 부르지 않는다**.
+  - 본문 조회가 **지정한 페이지 하나만** 부른다.
 """
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.agent.notion_client import NotionEntry, fetch_notion_entries
+from src.agent.notion_client import (
+    NotionPageSummary,
+    fetch_notion_page_content,
+    list_notion_pages,
+)
 
 
-def _mock_response(status_code=200, json_data=None):
-    resp = MagicMock()
-    resp.status_code = status_code
-    resp.json.return_value = json_data or {}
-    resp.raise_for_status.return_value = None
-    return resp
+def _response(payload: dict, status: int = 200) -> MagicMock:
+    mock = MagicMock()
+    mock.status_code = status
+    mock.json.return_value = payload
+    return mock
 
 
-def test_fetch_notion_entries_raises_without_token():
-    with pytest.raises(ValueError):
-        fetch_notion_entries(user_token=None)
-
-
-def test_fetch_notion_entries_raises_clear_error_on_invalid_token():
-    search_resp = _mock_response(status_code=401, json_data={})
-    with patch("src.agent.notion_client.requests.post", return_value=search_resp):
-        with pytest.raises(ValueError, match="유효하지 않습니다"):
-            fetch_notion_entries(user_token="bad-token")
-
-
-def test_fetch_notion_entries_parses_title_and_content():
-    search_resp = _mock_response(
-        json_data={
-            "has_more": False,
-            "next_cursor": None,
-            "results": [
-                {
-                    "id": "page-1",
-                    "created_time": "2026-09-11T00:00:00.000Z",
-                    "properties": {
-                        "title": {
-                            "type": "title",
-                            "title": [{"plain_text": "9/11 업무 일지"}],
-                        }
-                    },
-                }
-            ],
-        }
-    )
-    blocks_resp = _mock_response(
-        json_data={
-            "has_more": False,
-            "next_cursor": None,
-            "results": [
-                {"type": "paragraph", "paragraph": {"rich_text": [{"plain_text": "결제 버그 고침"}]}},
-                {"type": "bulleted_list_item", "bulleted_list_item": {"rich_text": [{"plain_text": "코드리뷰함"}]}},
-            ],
-        }
-    )
-
-    with patch("src.agent.notion_client.requests.post", return_value=search_resp), patch(
-        "src.agent.notion_client.requests.get", return_value=blocks_resp
-    ):
-        entries = fetch_notion_entries(user_token="valid-token")
-
-    assert len(entries) == 1
-    entry = entries[0]
-    assert isinstance(entry, NotionEntry)
-    assert entry.page_id == "page-1"
-    assert entry.title == "9/11 업무 일지"
-    assert entry.content == "결제 버그 고침\n코드리뷰함"
-    assert entry.created_time == "2026-09-11T00:00:00.000Z"
-
-
-def test_fetch_notion_entries_finds_title_property_by_type_not_name():
-    """데이터베이스 행이면 title 속성 키 이름이 임의(예: '이름')일 수 있다."""
-    search_resp = _mock_response(
-        json_data={
-            "has_more": False,
-            "results": [
-                {
-                    "id": "page-2",
-                    "created_time": "2026-09-11T00:00:00.000Z",
-                    "properties": {
-                        "이름": {"type": "title", "title": [{"plain_text": "DB 행 제목"}]},
-                        "상태": {"type": "select", "select": {"name": "완료"}},
-                    },
-                }
-            ],
-        }
-    )
-    blocks_resp = _mock_response(json_data={"has_more": False, "results": []})
-
-    with patch("src.agent.notion_client.requests.post", return_value=search_resp), patch(
-        "src.agent.notion_client.requests.get", return_value=blocks_resp
-    ):
-        entries = fetch_notion_entries(user_token="valid-token")
-
-    assert entries[0].title == "DB 행 제목"
-    assert entries[0].content == ""
-
-
-def test_fetch_notion_entries_paginates_search_results():
-    page1 = _mock_response(
-        json_data={
-            "has_more": True,
-            "next_cursor": "cursor-1",
-            "results": [
-                {"id": "a", "created_time": "t", "properties": {"title": {"type": "title", "title": []}}}
-            ],
-        }
-    )
-    page2 = _mock_response(
-        json_data={
-            "has_more": False,
-            "results": [
-                {"id": "b", "created_time": "t", "properties": {"title": {"type": "title", "title": []}}}
-            ],
-        }
-    )
-    blocks_resp = _mock_response(json_data={"has_more": False, "results": []})
-
-    with patch(
-        "src.agent.notion_client.requests.post", side_effect=[page1, page2]
-    ) as mock_post, patch("src.agent.notion_client.requests.get", return_value=blocks_resp):
-        entries = fetch_notion_entries(user_token="valid-token")
-
-    assert [e.page_id for e in entries] == ["a", "b"]
-    assert mock_post.call_count == 2
-    # 두 번째 호출엔 커서가 실려야 한다.
-    second_call_body = mock_post.call_args_list[1].kwargs["json"]
-    assert second_call_body["start_cursor"] == "cursor-1"
-
-
-# ---------------------------------------------------------------------------
-# fetch_notion_entries_via_mcp() — 9/14 신규 (선택 기능, P2).
-#
-# "오픈소스 Notion MCP 서버"의 정확한 도구 이름/스키마가 스펙에 명시돼 있지 않고
-# 이 세션엔 실제로 띄워볼 서버가 없어서(notion_client.py 모듈 docstring 참고),
-# mcp.ClientSession/streamable_http_client를 모킹해서 "적응형" 도구 탐색·호출
-# 로직 자체만 검증한다. 실제 서버로의 end-to-end 검증은 안 됐다.
-# ---------------------------------------------------------------------------
-import pytest
-
-from src.agent.notion_client import NotionMcpUnsupportedError, fetch_notion_entries_via_mcp
-
-
-def _fake_settings(**overrides):
-    """settings는 frozen dataclass라 속성별로 monkeypatch할 수 없다 — 객체 통째로 바꿔치기한다
-    (tests/test_db.py 등 다른 테스트 파일과 동일한 패턴)."""
-
-    class _S:
-        notion_mcp_server_url = "http://fake-mcp"
-        notion_token = ""
-
-    s = _S()
-    for key, value in overrides.items():
-        setattr(s, key, value)
-    return s
-
-
-class _FakeTool:
-    def __init__(self, name, input_schema=None):
-        self.name = name
-        self.input_schema = input_schema or {}
-
-
-class _FakeToolsResult:
-    def __init__(self, tools):
-        self.tools = tools
-
-
-class _FakeTextBlock:
-    def __init__(self, text):
-        self.text = text
-
-
-class _FakeCallResult:
-    def __init__(self, structured_content=None, content=None):
-        self.structured_content = structured_content
-        self.content = content or []
-
-
-class _FakeSession:
-    """mcp.ClientSession 대역. async with로 쓰이고, initialize/list_tools/call_tool만 흉내낸다."""
-
-    def __init__(self, *_args, **_kwargs):
-        self.calls = []
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *_exc):
-        return False
-
-    async def initialize(self):
-        return None
-
-    async def list_tools(self):
-        return _FakeToolsResult(_FakeSession.tools_to_return)
-
-    async def call_tool(self, name, args):
-        self.calls.append((name, args))
-        return _FakeSession.call_results[name]
-
-
-class _FakeStreamCtx:
-    async def __aenter__(self):
-        return ("read-stream", "write-stream")
-
-    async def __aexit__(self, *_exc):
-        return False
-
-
-@pytest.fixture(autouse=True)
-def _patch_mcp(monkeypatch):
-    """mcp.ClientSession과 streamable_http_client를 가짜로 교체한다.
-
-    notion_client.py는 함수 안에서 지연 import(`from mcp import ClientSession`)하므로,
-    소스 모듈(mcp, mcp.client.streamable_http)의 이름을 바꿔치기하면 그대로 먹힌다.
-    """
-    import mcp
-    import mcp.client.streamable_http as streamable_http_module
-
-    monkeypatch.setattr(mcp, "ClientSession", _FakeSession)
-    monkeypatch.setattr(streamable_http_module, "streamable_http_client", lambda *a, **k: _FakeStreamCtx())
-    monkeypatch.setattr(streamable_http_module, "create_mcp_http_client", lambda **k: object())
-    yield
-
-
-def test_fetch_via_mcp_raises_without_server_url(monkeypatch):
-    import src.agent.notion_client as notion_client
-
-    monkeypatch.setattr(notion_client, "settings", _fake_settings(notion_mcp_server_url=""))
-    with pytest.raises(ValueError, match="NOTION_MCP_SERVER_URL"):
-        fetch_notion_entries_via_mcp(user_token="tok")
-
-
-def test_fetch_via_mcp_raises_without_token(monkeypatch):
-    import src.agent.notion_client as notion_client
-
-    monkeypatch.setattr(notion_client, "settings", _fake_settings(notion_token=""))
-    with pytest.raises(ValueError, match="토큰"):
-        fetch_notion_entries_via_mcp(user_token=None)
-
-
-def test_fetch_via_mcp_raises_clear_error_when_no_matching_tools(monkeypatch):
-    import src.agent.notion_client as notion_client
-
-    monkeypatch.setattr(notion_client, "settings", _fake_settings())
-    _FakeSession.tools_to_return = [_FakeTool("unrelated_tool")]
-    _FakeSession.call_results = {}
-
-    with pytest.raises(NotionMcpUnsupportedError):
-        fetch_notion_entries_via_mcp(user_token="tok")
-
-
-def test_fetch_via_mcp_finds_tools_by_name_and_maps_entries(monkeypatch):
-    import src.agent.notion_client as notion_client
-
-    monkeypatch.setattr(notion_client, "settings", _fake_settings())
-    _FakeSession.tools_to_return = [
-        _FakeTool("notion-search", input_schema={"properties": {"query": {"type": "string"}}}),
-        _FakeTool("notion-fetch", input_schema={"properties": {"id": {"type": "string"}}}),
-    ]
-    _FakeSession.call_results = {
-        "notion-search": _FakeCallResult(
-            structured_content={
-                "results": [
-                    {"id": "page-1", "title": "9/14 업무 일지", "created_time": "2026-09-14"}
-                ]
+def _search_payload(count: int) -> dict:
+    return {
+        "results": [
+            {
+                "id": f"page-{i}",
+                "last_edited_time": f"2026-09-{18 - i:02d}T10:00:00Z",
+                "properties": {"title": {"type": "title", "title": [{"plain_text": f"페이지 {i}"}]}},
             }
-        ),
-        "notion-fetch": _FakeCallResult(content=[_FakeTextBlock("결제 버그 고침")]),
+            for i in range(count)
+        ],
+        "has_more": False,
     }
 
-    entries = fetch_notion_entries_via_mcp(user_token="tok")
 
-    assert len(entries) == 1
-    assert entries[0].page_id == "page-1"
-    assert entries[0].title == "9/14 업무 일지"
-    assert entries[0].content == "결제 버그 고침"
-    assert entries[0].created_time == "2026-09-14"
+# ---------------------------------------------------------------------------
+# list_notion_pages
+# ---------------------------------------------------------------------------
 
 
-def test_fetch_via_mcp_search_uses_schema_query_param_name(monkeypatch):
-    import src.agent.notion_client as notion_client
+def test_list_pages_raises_without_token():
+    with patch("src.agent.notion_client.settings") as mock_settings:
+        mock_settings.notion_token = ""
+        with pytest.raises(ValueError):
+            list_notion_pages(user_token=None)
 
-    monkeypatch.setattr(notion_client, "settings", _fake_settings())
-    _FakeSession.tools_to_return = [
-        _FakeTool("search_pages", input_schema={"properties": {"q": {"type": "string"}}}),
-        _FakeTool("fetch_page", input_schema={"properties": {"page_id": {"type": "string"}}}),
-    ]
-    _FakeSession.call_results = {
-        "search_pages": _FakeCallResult(structured_content={"results": []}),
-        "fetch_page": _FakeCallResult(content=[]),
+
+def test_list_pages_sorts_by_last_edited_and_caps_page_size():
+    """정렬을 노션에 맡겨야 limit으로 잘라도 '최근 것'이 남는다."""
+    with patch("src.agent.notion_client.requests.post", return_value=_response(_search_payload(3))) as mock_post:
+        list_notion_pages(user_token="tok", limit=5)
+
+    body = mock_post.call_args.kwargs["json"]
+    assert body["sort"] == {"direction": "descending", "timestamp": "last_edited_time"}
+    assert body["page_size"] == 5
+    assert body["filter"] == {"value": "page", "property": "object"}
+
+
+def test_list_pages_does_not_paginate():
+    """옛 코드는 has_more를 따라가며 전부 긁었다 — 한 번만 부르는지 확인한다."""
+    payload = _search_payload(3)
+    payload["has_more"] = True
+    payload["next_cursor"] = "cursor-1"
+
+    with patch("src.agent.notion_client.requests.post", return_value=_response(payload)) as mock_post:
+        pages = list_notion_pages(user_token="tok")
+
+    assert mock_post.call_count == 1
+    assert len(pages) == 3
+
+
+def test_list_pages_does_not_fetch_block_content():
+    """목록은 제목과 시각만 — 본문 블록 API(GET)를 부르면 안 된다."""
+    with patch("src.agent.notion_client.requests.post", return_value=_response(_search_payload(2))):
+        with patch("src.agent.notion_client.requests.get") as mock_get:
+            pages = list_notion_pages(user_token="tok")
+
+    mock_get.assert_not_called()
+    assert all(isinstance(p, NotionPageSummary) for p in pages)
+
+
+def test_list_pages_truncates_to_limit():
+    with patch("src.agent.notion_client.requests.post", return_value=_response(_search_payload(10))):
+        pages = list_notion_pages(user_token="tok", limit=3)
+
+    assert len(pages) == 3
+
+
+def test_list_pages_raises_clear_error_on_invalid_token():
+    with patch("src.agent.notion_client.requests.post", return_value=_response({}, status=401)):
+        with pytest.raises(ValueError):
+            list_notion_pages(user_token="bad-token")
+
+
+# ---------------------------------------------------------------------------
+# fetch_notion_page_content
+# ---------------------------------------------------------------------------
+
+
+def test_fetch_page_content_reads_only_the_given_page():
+    page_payload = {
+        "id": "page-1",
+        "created_time": "2026-09-18T00:00:00Z",
+        "properties": {"title": {"type": "title", "title": [{"plain_text": "업무 일지"}]}},
+    }
+    blocks_payload = {
+        "results": [
+            {
+                "type": "paragraph",
+                "paragraph": {"rich_text": [{"plain_text": "결제 API 느려서 레디스 캐시 붙임"}]},
+            }
+        ],
+        "has_more": False,
     }
 
-    fetch_notion_entries_via_mcp(user_token="tok")
+    def fake_get(url, **kwargs):
+        if "/blocks/" in url:
+            return _response(blocks_payload)
+        return _response(page_payload)
+
+    with patch("src.agent.notion_client.requests.get", side_effect=fake_get) as mock_get:
+        entry = fetch_notion_page_content("page-1", user_token="tok")
+
+    assert entry.title == "업무 일지"
+    assert "레디스 캐시" in entry.content
+    # 페이지 조회 + 그 페이지의 블록 조회, 딱 두 번. 다른 페이지를 건드리면 안 된다.
+    urls = [call.args[0] for call in mock_get.call_args_list]
+    assert all("page-1" in url for url in urls)
 
 
-def test_fetch_via_mcp_parses_text_content_json_fallback(monkeypatch):
-    """structured_content가 없는 서버 대비: 텍스트 블록이 JSON 문자열인 경우도 파싱한다."""
-    import src.agent.notion_client as notion_client
+def test_fetch_page_content_raises_without_token():
+    with patch("src.agent.notion_client.settings") as mock_settings:
+        mock_settings.notion_token = ""
+        with pytest.raises(ValueError):
+            fetch_notion_page_content("page-1", user_token=None)
 
-    monkeypatch.setattr(notion_client, "settings", _fake_settings())
-    _FakeSession.tools_to_return = [
-        _FakeTool("search"),
-        _FakeTool("fetch"),
-    ]
-    _FakeSession.call_results = {
-        "search": _FakeCallResult(
-            content=[_FakeTextBlock('{"results": [{"id": "p1", "title": "제목"}]}')]
-        ),
-        "fetch": _FakeCallResult(content=[_FakeTextBlock("본문 내용")]),
+
+def test_fetch_page_content_finds_title_property_by_type_not_name():
+    """데이터베이스 행이면 title 프로퍼티 키 이름이 "이름"/"Name" 등 임의일 수 있다."""
+    page_payload = {
+        "id": "page-1",
+        "created_time": "",
+        "properties": {"이름": {"type": "title", "title": [{"plain_text": "행 제목"}]}},
     }
 
-    entries = fetch_notion_entries_via_mcp(user_token="tok")
+    def fake_get(url, **kwargs):
+        if "/blocks/" in url:
+            return _response({"results": [], "has_more": False})
+        return _response(page_payload)
 
-    assert len(entries) == 1
-    assert entries[0].page_id == "p1"
-    assert entries[0].content == "본문 내용"
+    with patch("src.agent.notion_client.requests.get", side_effect=fake_get):
+        entry = fetch_notion_page_content("page-1", user_token="tok")
+
+    assert entry.title == "행 제목"

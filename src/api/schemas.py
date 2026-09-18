@@ -433,26 +433,40 @@ class JDMatchResponse(BaseModel):
     matches: list[JDMatchItem]
 
 
-class NotionSyncRequest(BaseModel):
-    """docs/05-api-contract.md 5장. user_token은 필수 — settings.notion_token으로
-    암묵 폴백하지 않는다(다른 사용자가 개발자 본인 노션 데이터를 끌어오는 사고 방지).
+class NotionPageRequest(BaseModel):
+    """노션 요청 공통 — 토큰만 받는다 (9/18 재작성).
 
-    주의(구현 노트): 계약 문서는 page_id를 함께 받지만, 현재
-    `notion_client.fetch_notion_entries()`는 특정 페이지 하나만 골라오는 기능이 없고
-    이 토큰과 공유된 페이지 전체를 가져온다. page_id는 그래서 받되 아직 사용하지
-    않는다 — 특정 페이지만 고르는 기능이 필요해지면 notion_client 쪽부터 확장해야 한다.
+    `user_token`은 필수다. `settings.notion_token`(로컬 개발용 폴백)으로 암묵 폴백하면
+    **다른 사용자가 개발자 본인의 노션 데이터를 끌어오는** 사고가 된다
+    (docs/03-risk-fallback.md 리스크 6). 빈 문자열 거부는 라우터가 한다 — Pydantic의
+    `str`은 빈 문자열을 통과시킨다.
+
+    **토큰을 서버에 저장하지 않는다.** 서드파티 자격증명을 DB에 평문으로 눕히지 않으려고
+    요청마다 받는다.
     """
 
     user_token: str = Field(max_length=MAX_TOKEN)
-    page_id: str | None = Field(default=None, max_length=MAX_TOKEN)
 
 
-class NotionSyncResponse(BaseModel):
-    imported: int
-    # 9/17 신규 — 한 번에 처리할 페이지 수 상한(MAX_NOTION_PAGES_PER_SYNC)을 넘겨
-    # 이번에 못 가져온 개수. 0이면 전부 가져온 것. 다시 누르면 이어서 가져간다.
-    skipped: int = 0
-    cards: list[CardResponse]
+class NotionPageSummaryResponse(_FromAttributes):
+    """페이지 선택 목록 한 줄 (Figma 3.0-b). **본문이 없다** — 목록엔 필요 없고,
+    본문을 받으려면 페이지마다 블록 API를 또 불러야 한다."""
+
+    page_id: str
+    title: str
+    last_edited_time: str
+
+
+class NotionPageListResponse(BaseModel):
+    pages: list[NotionPageSummaryResponse]
+
+
+class NotionPageContentResponse(BaseModel):
+    """고른 페이지 하나의 본문. 저장하지 않고 그대로 프론트 입력창으로 간다."""
+
+    page_id: str
+    title: str
+    content: str
 
 
 class PushKeys(BaseModel):
