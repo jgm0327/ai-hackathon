@@ -117,19 +117,20 @@ export function SentenceEditSheet({
           />
         </div>
 
-        {/* 헤더 — 취소 / 제목 / 저장 (Figma 286:7156) */}
-        <div className="flex items-center">
+        {/* 헤더 — 취소 / 제목 / 저장 (Figma `299:12374`).
+            9/18 대조: 세 라벨 모두 14px/24다(16px/28로 크게 잡혀 있었다). */}
+        <div className="flex items-center gap-[10px]">
           <button
             type="button"
             onClick={onCancel}
             style={{ color: t.textSoft }}
-            className="text-[16px] font-medium leading-[28px] transition-opacity active:opacity-60"
+            className="text-[14px] font-medium leading-[24px] transition-opacity active:opacity-60"
           >
             취소
           </button>
           <p
             style={{ color: t.text }}
-            className="flex-1 text-center text-[16px] font-medium leading-[28px]"
+            className="flex-1 text-center text-[14px] font-medium leading-[24px]"
           >
             문장 수정
           </p>
@@ -138,7 +139,7 @@ export function SentenceEditSheet({
             onClick={handleSave}
             disabled={!canSave}
             style={{ color: t.action }}
-            className="text-[16px] font-medium leading-[28px] transition-opacity active:opacity-60 disabled:opacity-35"
+            className="text-[14px] font-medium leading-[24px] transition-opacity active:opacity-60 disabled:opacity-35"
           >
             저장
           </button>

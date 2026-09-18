@@ -398,7 +398,7 @@ export function CardResultSheet({
               width={15}
               height={15}
               aria-hidden
-              className="mt-[5px] shrink-0"
+              className="shrink-0"
             />
             <p style={{ color: t.textSoft }} className="flex-1 text-[14px] leading-[24px]">
               {translation.suggestion}

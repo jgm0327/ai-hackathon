@@ -92,7 +92,8 @@ export function MetricQuestionScreen({
         </p>
         <p
           style={{ color: t.text }}
-          className="mt-[12px] text-[28px] font-bold leading-[36px]"
+          // 목업은 28px/40이다(299:12531) — 36으로 잡혀 있어 두 줄이 좁게 붙어 있었다.
+          className="mt-[12px] text-[28px] font-bold leading-[40px]"
         >
           숫자가 있으면
           <br />
@@ -121,7 +122,8 @@ export function MetricQuestionScreen({
         <label
           htmlFor="metric-answer"
           style={{ color: t.text }}
-          className="mt-[28px] text-[20px] font-bold leading-[28px]"
+          // 목업 20px/32 (299:12539)
+          className="mt-[28px] text-[20px] font-bold leading-[32px]"
         >
           {question}
         </label>
