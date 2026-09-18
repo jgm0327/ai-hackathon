@@ -1,23 +1,35 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { BottomSheet } from "@/components/BottomSheet";
 import { ProjectSwitcher } from "@/components/ProjectSwitcher";
 import { CardResultSkeleton } from "@/components/Skeleton";
+import { Toast, useToast } from "@/components/Toast";
 import { VoiceInput } from "@/components/VoiceInput";
 import {
   ApiError,
   Card,
+  Profile,
   SkillSummary,
   createCard,
+  getProfile,
   getSkillSummary,
   listCards,
   refineCard,
+  updateCard,
 } from "@/lib/api";
 import { useProjects } from "@/lib/useProjects";
 
 const DRAFT_KEY = "career-log:draft-raw-text";
+
+/** 타깃 트랙 칩(Figma 41:116 "시니어 백엔드 ›")에 쓸 한 줄 라벨. 프로필에 실제로
+ * 있는 값만 이어 붙인다 — 없는 직무/연차를 지어내지 않는다(CLAUDE.md 2.2). */
+function targetTrackLabel(profile: Profile | null): string | null {
+  if (!profile?.job_field) return null;
+  return profile.job_detail ?? profile.job_field;
+}
 
 // 버블 색상(Figma 100:692 "흔적 버블 클러스터") — 순서대로 4개 카테고리, "미분류"는
 // 항상 마지막 어두운 톤. 카테고리 이름을 색에 매핑하지 않고 순위(등장 순서)로만
@@ -54,7 +66,7 @@ function formatTodayLabel(): string {
  * 표기)와 실제 이 화면 코드가 서로 달랐는데, 사용자가 "화면 코드가 맞다"고
  * 확인해줘서 다크로 구현했다(9/16).
  */
-export default function HomePage() {
+function HomePageInner() {
   const [rawText, setRawText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<Card | null>(null);
@@ -82,6 +94,39 @@ export default function HomePage() {
   // 텍스트박스 내용은 submitting에 실패해도 지우지 않으므로(아래 submitText),
   // 오프라인이면 애초에 제출 자체를 막아 원문이 화면에 그대로 남게 한다.
   const [isOffline, setIsOffline] = useState(false);
+
+  // 타깃 트랙 칩 (Figma 41:116) — 지금 어떤 직무 기준으로 문장이 다듬어지는지 보여주고,
+  // 누르면 설정으로 간다. 표시 전용이라 실패해도 칩만 안 뜬다.
+  const [profile, setProfile] = useState<Profile | null>(null);
+
+  // "이어 쓰기" (Figma 41:119 배너 / 89:519 "이 주제에 이어 쓰기", 9/18 신규).
+  // 지금 쓰는 메모를 어느 주제(대표 태그)에 이어 붙일지. 값이 있으면 저장 직후
+  // 그 태그를 카드에 확실히 얹어서, 다음에 같은 주제로 다시 찾아올 수 있게 한다.
+  const [continueTag, setContinueTag] = useState<string | null>(null);
+  // 배너에 쓸 "어제 하던 [X]" — 오늘 이전에 마지막으로 기록한 카드의 대표 태그.
+  const [lastTopic, setLastTopic] = useState<string | null>(null);
+
+  const [toast, showToast] = useToast();
+  const searchParams = useSearchParams();
+
+  // 기록 상세(`/stack/<id>`)의 "이 주제에 이어 쓰기"가 `/?topic=...`으로 보낸다.
+  useEffect(() => {
+    const topic = searchParams.get("topic");
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (topic) setContinueTag(topic);
+  }, [searchParams]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getProfile()
+      .then((p) => {
+        if (!cancelled) setProfile(p);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -128,6 +173,14 @@ export default function HomePage() {
       .then((list) => {
         const today = todayDateString();
         setTodayCards(list.filter((c) => c.created_at === today));
+
+        // 이어 쓰기 배너(Figma 41:119)용 — 오늘 이전 기록 중 가장 최근 것의 대표
+        // 태그. 태그가 없는 카드는 이어 쓸 "주제"가 없으므로 건너뛴다. 목록은
+        // 오래된 순이라 뒤에서부터 찾는다.
+        const previous = [...list]
+          .reverse()
+          .find((c) => c.created_at < today && c.skill_tags.length > 0);
+        setLastTopic(previous ? previous.skill_tags[0] : null);
       })
       .catch(() => {});
   };
@@ -145,9 +198,23 @@ export default function HomePage() {
     setRefineError(null);
     try {
       // 응답이 3~10초 걸린다 (docs/05-api-contract.md §1) — 스켈레톤으로 대기 표시.
-      const card = await createCard(text);
+      let card = await createCard(text);
+
+      // "이어 쓰기"로 들어온 메모는 그 주제에 확실히 붙여준다 (9/18). LLM이 뽑은
+      // 태그에 그 주제가 없을 수 있는데(같은 일을 다른 말로 적으면 어휘가 안 겹친다
+      // — CLAUDE.md 2.3이 말하는 임베딩의 한계와 같은 문제), 여기서는 **유저가
+      // 직접 고른 주제**라 추측이 아니다. 문장을 건드리지 않고 태그만 앞에 얹는다.
+      if (continueTag && !card.skill_tags.includes(continueTag)) {
+        try {
+          card = await updateCard(card.id, { skillTags: [continueTag, ...card.skill_tags] });
+        } catch {
+          // 태그 얹기에 실패해도 카드 자체는 이미 저장됐다 — 결과는 그대로 보여준다.
+        }
+      }
+
       setResult(card);
       setRawText("");
+      setContinueTag(null);
       refreshHomeData(); // 방금 쌓인 카드를 버블/오늘 목록에 바로 반영
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : "저장에 실패했습니다. 다시 시도해 주세요.");
@@ -175,6 +242,7 @@ export default function HomePage() {
     try {
       await navigator.clipboard.writeText(result.refined_sentence);
       setCopiedResult(true);
+      showToast("클립보드에 복사했어요"); // Figma 41:880
       setTimeout(() => setCopiedResult(false), 1500);
     } catch {
       // 클립보드 접근 실패 — 조용히 무시
@@ -222,6 +290,43 @@ export default function HomePage() {
             오프라인 · 원문은 저장됐어요. 연결되면 자동으로 변환할게요
           </p>
         </div>
+      )}
+
+      {/* 타깃 트랙 (Figma 41:116) — 어떤 직무 기준으로 다듬어지는지. 탭하면 설정으로.
+          프로필이 비어 있으면 아예 안 띄운다(빈 칩은 정보가 아니라 잡음이다). */}
+      {targetTrackLabel(profile) && (
+        <Link
+          href="/settings"
+          className="flex items-center gap-2 rounded-[12px] bg-[#1e1e1e] px-3 py-2.5 transition-colors hover:bg-[#242424]"
+        >
+          <span className="text-[11px] text-[#828282]">타깃 트랙</span>
+          <span className="flex-1 truncate text-[12px] font-medium text-[#f2f2f2]">
+            {targetTrackLabel(profile)}
+          </span>
+          <span aria-hidden className="text-[12px] text-[#5e5e5e]">
+            ›
+          </span>
+        </Link>
+      )}
+
+      {/* 이어 쓰기 배너 (Figma 41:119) — "어제 하던 [X] 이어 쓰기". 이미 이어 쓰는
+          중이거나 그 주제를 오늘 이미 건드렸으면 띄우지 않는다. */}
+      {lastTopic && !continueTag && !todayCards.some((c) => c.skill_tags.includes(lastTopic)) && (
+        <button
+          type="button"
+          onClick={() => {
+            setContinueTag(lastTopic);
+            textareaRef.current?.focus();
+          }}
+          className="flex items-center gap-2 rounded-[12px] bg-[#1e1e1e] px-3 py-2.5 text-left transition-colors hover:bg-[#242424]"
+        >
+          <span className="flex-1 truncate text-[12px] text-[#f2f2f2]">
+            지난번 하던 <span className="font-semibold">[{lastTopic}]</span> 이어 쓰기
+          </span>
+          <span aria-hidden className="text-[12px] text-[#5e5e5e]">
+            ›
+          </span>
+        </button>
       )}
 
       {/* 무엇이 쌓였나요 */}
@@ -295,6 +400,23 @@ export default function HomePage() {
           <p className="text-[11px] font-medium text-[#828282]">기록 {todayCards.length}</p>
         </div>
         <div className="flex flex-col gap-2 rounded-[14px] bg-[#1e1e1e] px-[15px] py-[11px]">
+          {/* 이어 쓰기 중임을 입력창 안에서 계속 보여준다 — 배너를 누르고 나면
+              무엇에 이어 쓰는 중인지 알 방법이 없어진다. ✕로 언제든 해제. */}
+          {continueTag && (
+            <div className="flex items-center gap-1.5">
+              <span className="rounded-full bg-[#2a2a2a] px-2.5 py-1 text-[11px] text-[#c8c8c8]">
+                이어 쓰는 중 · {continueTag}
+              </span>
+              <button
+                type="button"
+                onClick={() => setContinueTag(null)}
+                aria-label="이어 쓰기 해제"
+                className="text-[11px] text-[#828282] transition-colors hover:text-[#f2f2f2]"
+              >
+                ✕
+              </button>
+            </div>
+          )}
           {/* maxLength는 서버(schemas.py MAX_RAW_TEXT)와 같은 값으로 맞춘다 — 여기서
               먼저 끊어야 유저가 길게 쓴 뒤에야 422를 보는 일이 없다. */}
           <textarea
@@ -321,6 +443,14 @@ export default function HomePage() {
             )}
           </div>
         </div>
+        {/* "노션에서 가져오기" (Figma 41:128) — 실제 연동 화면은 설정에 있다.
+            매일 쓰는 경로에 선택지를 늘리지 않으려고 버튼이 아닌 작은 링크로 둔다. */}
+        <Link
+          href="/settings"
+          className="self-end text-[11px] text-[#828282] underline underline-offset-2 transition-colors hover:text-[#a0a0a0]"
+        >
+          노션에서 가져오기
+        </Link>
       </form>
 
       {submitting && <CardResultSkeleton />}
@@ -428,7 +558,21 @@ export default function HomePage() {
           </div>
         )}
       </BottomSheet>
+
+      <Toast toast={toast} />
     </div>
+  );
+}
+
+/**
+ * `useSearchParams()`(기록 상세에서 넘어오는 `?topic=`)를 쓰기 때문에 Next.js가
+ * 정적 렌더링에서 제외하려면 `<Suspense>` 경계가 필요하다 — `/stack`과 같은 구조다.
+ */
+export default function HomePage() {
+  return (
+    <Suspense fallback={null}>
+      <HomePageInner />
+    </Suspense>
   );
 }
 

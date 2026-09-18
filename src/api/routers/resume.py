@@ -53,7 +53,13 @@ def _now_iso() -> str:
 def create_resume(
     payload: ResumeRequest, current_user: db.User = Depends(get_current_user)
 ) -> ResumeResponse:
-    items = build_career_doc(current_user.id, payload.project_id, jd_text=payload.jd_text)
+    items = build_career_doc(
+        current_user.id,
+        payload.project_id,
+        jd_text=payload.jd_text,
+        project_ids=payload.project_ids,
+        include_unassigned=payload.include_unassigned,
+    )
     return ResumeResponse(items=[StarItemResponse.model_validate(item) for item in items])
 
 
@@ -61,7 +67,13 @@ def create_resume(
 def enhance_resume_endpoint(
     payload: ResumeEnhanceRequest, current_user: db.User = Depends(get_current_user)
 ) -> ResumeEnhanceResponse:
-    items = enhance_existing_resume(current_user.id, payload.project_id, payload.existing_items)
+    items = enhance_existing_resume(
+        current_user.id,
+        payload.project_id,
+        payload.existing_items,
+        project_ids=payload.project_ids,
+        include_unassigned=payload.include_unassigned,
+    )
     return ResumeEnhanceResponse(items=[EnhancedItemResponse.model_validate(item) for item in items])
 
 
@@ -69,7 +81,13 @@ def enhance_resume_endpoint(
 def jd_requirements_endpoint(
     payload: JdRequirementsRequest, current_user: db.User = Depends(get_current_user)
 ) -> JdRequirementsResponse:
-    result = get_jd_requirements(current_user.id, payload.project_id, payload.jd_text)
+    result = get_jd_requirements(
+        current_user.id,
+        payload.project_id,
+        payload.jd_text,
+        project_ids=payload.project_ids,
+        include_unassigned=payload.include_unassigned,
+    )
     return JdRequirementsResponse(
         job_title=result.job_title,
         company=result.company,
@@ -116,8 +134,16 @@ def export_resume_docx(
 
 @router.get("/resume/draft", response_model=ResumeDraftResponse)
 def get_resume_draft_endpoint(
-    project_id: int, current_user: db.User = Depends(get_current_user)
+    project_id: int | None = None, current_user: db.User = Depends(get_current_user)
 ) -> ResumeDraftResponse:
+    """`project_id`를 생략하면 마스터 초안(여러 프로젝트를 한 문서로)을 조회한다 (9/18)."""
+    if project_id is None:
+        master = db.get_master_resume_draft(current_user.id)
+        if master is None:
+            return ResumeDraftResponse(project_id=None, content=None, updated_at=None)
+        return ResumeDraftResponse(
+            project_id=None, content=master.content, updated_at=master.updated_at
+        )
     draft = db.get_resume_draft(current_user.id, project_id)
     if draft is None:
         return ResumeDraftResponse(project_id=project_id, content=None, updated_at=None)
@@ -128,6 +154,11 @@ def get_resume_draft_endpoint(
 def save_resume_draft_endpoint(
     payload: ResumeDraftSaveRequest, current_user: db.User = Depends(get_current_user)
 ) -> ResumeDraftResponse:
+    if payload.project_id is None:
+        master = db.save_master_resume_draft(current_user.id, payload.content, _now_iso())
+        return ResumeDraftResponse(
+            project_id=None, content=master.content, updated_at=master.updated_at
+        )
     draft = db.save_resume_draft(current_user.id, payload.project_id, payload.content, _now_iso())
     if draft is None:
         raise HTTPException(status_code=404, detail="프로젝트를 찾을 수 없습니다")

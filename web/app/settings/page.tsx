@@ -2,10 +2,39 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BottomSheet } from "@/components/BottomSheet";
-import { ApiError, Profile, getProfile, getResumeDraft, logout, syncNotion } from "@/lib/api";
+import { Toast, useToast } from "@/components/Toast";
+import {
+  ApiError,
+  BackupFile,
+  Profile,
+  exportBackup,
+  getProfile,
+  getResumeDraft,
+  importBackup,
+  logout,
+  syncNotion,
+} from "@/lib/api";
 import { useProjects } from "@/lib/useProjects";
+
+/** 내려받을 파일 이름 — "career-log-backup-2026-09-18.json". */
+function backupFileName(): string {
+  const d = new Date();
+  const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return `career-log-backup-${date}.json`;
+}
+
+/** 불러온 파일이 우리 백업 파일이 맞는지 최소한만 확인한다. 엄격하게 스키마 전체를
+ * 검사하지는 않는다 — 서버가 어차피 Pydantic으로 다시 거르고, 여기서 막고 싶은 건
+ * "완전히 엉뚱한 JSON을 통째로 업로드하는 것"뿐이다. */
+function parseBackupFile(text: string): Pick<BackupFile, "projects" | "cards"> {
+  const parsed = JSON.parse(text) as Partial<BackupFile>;
+  if (!Array.isArray(parsed.projects) || !Array.isArray(parsed.cards)) {
+    throw new Error("형식이 다릅니다");
+  }
+  return { projects: parsed.projects, cards: parsed.cards };
+}
 
 const LEAVE_TIME_STORAGE_KEY = "careerlog:leaveTime";
 const NOTION_CONNECTED_STORAGE_KEY = "careerlog:notionConnected";
@@ -42,6 +71,15 @@ export default function SettingsPage() {
   const [appInfoOpen, setAppInfoOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
 
+  // 백업 내보내기 / 불러오기 (Figma 41:333 / 41:338, 9/18 신규)
+  const [backupBusy, setBackupBusy] = useState<"export" | "import" | null>(null);
+  const [backupError, setBackupError] = useState<string | null>(null);
+  const [importConfirm, setImportConfirm] = useState<Pick<BackupFile, "projects" | "cards"> | null>(
+    null,
+  );
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [toast, showToast] = useToast();
+
   useEffect(() => {
     getProfile()
       .then(setProfile)
@@ -56,11 +94,15 @@ export default function SettingsPage() {
   }, []);
 
   useEffect(() => {
-    if (!currentProject) return;
     let cancelled = false;
-    getResumeDraft(currentProject.id)
-      .then((draft) => {
-        if (!cancelled) setResumeRegistered(Boolean(draft.content));
+    // 9/18부터 초안이 두 군데 있을 수 있다 — 프로젝트 단위 초안과 마스터 초안
+    // (여러 프로젝트를 한 문서로). 둘 중 하나라도 있으면 "등록됨"이다.
+    Promise.all([
+      currentProject ? getResumeDraft(currentProject.id) : Promise.resolve(null),
+      getResumeDraft(null),
+    ])
+      .then((drafts) => {
+        if (!cancelled) setResumeRegistered(drafts.some((d) => Boolean(d?.content)));
       })
       .catch(() => {
         if (!cancelled) setResumeRegistered(false);
@@ -102,6 +144,53 @@ export default function SettingsPage() {
     setNotionToken("");
     setNotionError(null);
     setNotionSuccess(null);
+  };
+
+  const handleExportBackup = async () => {
+    setBackupBusy("export");
+    setBackupError(null);
+    try {
+      const file = await exportBackup();
+      // 파일 내려받기는 브라우저 기본 동작으로 처리한다 — 서버가 JSON을 주고
+      // 여기서 Blob으로 감싸 a[download]를 한 번 클릭시킨다(exportResumeDocx와 동일 패턴).
+      const url = URL.createObjectURL(
+        new Blob([JSON.stringify(file, null, 2)], { type: "application/json" }),
+      );
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = backupFileName();
+      anchor.click();
+      URL.revokeObjectURL(url);
+      showToast(`기록 ${file.cards.length}개를 내보냈어요`);
+    } catch (err) {
+      setBackupError(err instanceof ApiError ? err.detail : "내보내기에 실패했습니다.");
+    } finally {
+      setBackupBusy(null);
+    }
+  };
+
+  const handlePickBackupFile = async (file: File) => {
+    setBackupError(null);
+    try {
+      setImportConfirm(parseBackupFile(await file.text()));
+    } catch {
+      setBackupError("백업 파일을 읽지 못했어요. 내보내기로 받은 JSON 파일인지 확인해 주세요.");
+    }
+  };
+
+  const handleImportBackup = async () => {
+    if (!importConfirm) return;
+    setBackupBusy("import");
+    setBackupError(null);
+    try {
+      const result = await importBackup(importConfirm);
+      setImportConfirm(null);
+      showToast(`기록 ${result.imported_cards}개를 불러왔어요`);
+    } catch (err) {
+      setBackupError(err instanceof ApiError ? err.detail : "불러오기에 실패했습니다.");
+    } finally {
+      setBackupBusy(null);
+    }
   };
 
   const handleLogout = async () => {
@@ -173,6 +262,51 @@ export default function SettingsPage() {
           <span className="text-[#5e5e5e]">›</span>
         </Link>
       </div>
+
+      {/* 백업 (Figma 41:333 / 41:338) — 기록이 이 서비스 안에만 갇혀 있지 않다는 걸
+          보여주는 장치. 불러오기는 LLM을 타지 않고 저장된 문장을 그대로 되살린다. */}
+      <div className="flex flex-col overflow-hidden rounded-[14px] border border-[#2e2e2e] bg-[#1e1e1e]">
+        <button
+          type="button"
+          onClick={handleExportBackup}
+          disabled={backupBusy !== null}
+          className="flex items-center gap-2 px-4 py-[13px] text-left transition-colors hover:bg-[#242424] disabled:opacity-50"
+        >
+          <span className="text-[14px] text-[#f2f2f2]">백업 내보내기</span>
+          <div className="flex-1" />
+          <span className="text-[13px] text-[#a0a0a0]">
+            {backupBusy === "export" ? "내보내는 중…" : "JSON"}
+          </span>
+          <span className="text-[#5e5e5e]">›</span>
+        </button>
+        <div className="h-px w-full bg-[#2e2e2e]" />
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={backupBusy !== null}
+          className="flex items-center gap-2 px-4 py-[13px] text-left transition-colors hover:bg-[#242424] disabled:opacity-50"
+        >
+          <span className="text-[14px] text-[#f2f2f2]">백업 불러오기</span>
+          <div className="flex-1" />
+          <span className="text-[#5e5e5e]">›</span>
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/json,.json"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            // 같은 파일을 다시 골라도 change가 나도록 값을 비워둔다.
+            e.target.value = "";
+            if (file) handlePickBackupFile(file);
+          }}
+        />
+      </div>
+
+      {backupError && (
+        <p className="rounded-lg bg-[#2a1614] px-3 py-2 text-sm text-[#f0645c]">{backupError}</p>
+      )}
 
       <div className="flex flex-col overflow-hidden rounded-[14px] border border-[#2e2e2e] bg-[#1e1e1e]">
         <button
@@ -249,6 +383,47 @@ export default function SettingsPage() {
           </p>
         </div>
       </BottomSheet>
+
+      {/* 불러오기 확인 — "복원"이라는 말 때문에 기존 기록이 지워질 거라 오해하기
+          쉬워서, 실제 동작(덧붙이기)을 누르기 전에 분명히 말해둔다. */}
+      <BottomSheet
+        open={importConfirm !== null}
+        onClose={() => setImportConfirm(null)}
+        hideHandle
+        panelClassName="relative w-full max-w-md rounded-tl-[24px] rounded-tr-[24px] bg-[#1e1e1e] px-5 pt-4 pb-[30px] shadow-xl"
+      >
+        {importConfirm && (
+          <div className="flex flex-col gap-3">
+            <p className="text-[15px] font-semibold text-[#f2f2f2]">이 백업을 불러올까요?</p>
+            <p className="text-[13px] leading-relaxed text-[#a0a0a0]">
+              프로젝트 {importConfirm.projects.length}개, 기록 {importConfirm.cards.length}개가
+              들어옵니다.
+              <br />
+              지금 있는 기록은 <span className="text-[#f2f2f2]">그대로 두고 덧붙입니다</span> —
+              같은 파일을 두 번 넣으면 기록이 두 벌 생겨요.
+            </p>
+            <div className="flex gap-2.5">
+              <button
+                type="button"
+                onClick={handleImportBackup}
+                disabled={backupBusy === "import"}
+                className="flex flex-1 items-center justify-center rounded-[12px] bg-[#f2f2f2] py-3.5 text-[14px] font-semibold text-[#171717] disabled:opacity-40"
+              >
+                {backupBusy === "import" ? "불러오는 중…" : "불러오기"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setImportConfirm(null)}
+                className="flex flex-1 items-center justify-center rounded-[12px] border-[1.5px] border-[#333] py-3.5 text-[14px] font-semibold text-[#f2f2f2]"
+              >
+                취소
+              </button>
+            </div>
+          </div>
+        )}
+      </BottomSheet>
+
+      <Toast toast={toast} />
     </div>
   );
 }

@@ -65,6 +65,12 @@ export interface StarItem {
   result: string;
   source_dates: string[];
   source_card_ids: number[];
+  /** 9/18 신규 — 마스터 경력기술서(여러 프로젝트를 한 문서로, Figma 4.2.1 "범위 선택")
+   * 에서 이 항목이 어느 프로젝트 카드로 만들어졌는지. 프로젝트 헤드(Figma 41:254)를
+   * 그리는 데 쓴다. 미분류 기록에서 나온 항목은 `project_id`가 null이고
+   * `project_name`이 "미분류 기록"이다. */
+  project_id?: number | null;
+  project_name?: string | null;
 }
 
 export interface HealthStatus {
@@ -284,12 +290,54 @@ export function updateProject(id: number, patch: UpdateProjectPatch): Promise<Pr
 // 3. 경력기술서 — docs/05-api-contract.md §3 (제품의 핵심)
 // ---------------------------------------------------------------------------
 
-/** 프로젝트의 카드를 묶어 STAR 항목으로 변환한다. 무거운 호출 — 로딩 상태 필수. */
-export function buildResume(projectId: number, jdText?: string): Promise<StarItem[]> {
+/**
+ * 경력기술서를 만들 범위 (9/18 신규, Figma 4.2.1 "범위 선택").
+ *
+ * 프로젝트를 여러 개 고를 수 있고, 어느 프로젝트에도 안 들어간 기록(미분류)을
+ * 따로 포함시킬 수 있다. 서버는 **프로젝트 경계를 넘어 카드를 합치지 않는다** —
+ * A은행의 "결제 API 개선"과 B카드의 "결제 API 개선"은 별개 경력이기 때문
+ * (CLAUDE.md 3장, src/agent/pipeline.py의 build_career_doc 참고).
+ */
+export interface ResumeScope {
+  projectIds: number[];
+  includeUnassigned: boolean;
+}
+
+/** 프로젝트 하나짜리 범위 — 기존 "현재 프로젝트만" 동작을 그대로 표현한다. */
+export function singleProjectScope(projectId: number): ResumeScope {
+  return { projectIds: [projectId], includeUnassigned: false };
+}
+
+export function isScopeEmpty(scope: ResumeScope): boolean {
+  return scope.projectIds.length === 0 && !scope.includeUnassigned;
+}
+
+/** 범위가 프로젝트 정확히 하나면 그 id, 아니면 null (초안 저장 키 판별용). */
+export function singleProjectIdOf(scope: ResumeScope): number | null {
+  return scope.projectIds.length === 1 && !scope.includeUnassigned ? scope.projectIds[0] : null;
+}
+
+/**
+ * 범위를 로컬 저장소 키로 쓸 수 있는 짧은 문자열로 만든다 (캐시/직접수정 override 공용).
+ * 프로젝트 하나짜리 범위는 `"12"`처럼 예전(프로젝트 id만 쓰던) 키와 같은 모양이라,
+ * 9/18 이전에 저장된 값이 그대로 이어진다. 프로젝트 순서는 결과 순서에 영향을
+ * 주므로 정렬하지 않고 고른 순서 그대로 쓴다.
+ */
+export function resumeScopeKey(scope: ResumeScope): string {
+  return `${scope.projectIds.join(",")}${scope.includeUnassigned ? "+u" : ""}`;
+}
+
+function scopeBody(scope: ResumeScope): Record<string, unknown> {
+  return { project_ids: scope.projectIds, include_unassigned: scope.includeUnassigned };
+}
+
+/** 범위 안의 카드를 묶어 STAR 항목으로 변환한다. 무거운 호출 — 로딩 상태 필수.
+ * 프로젝트마다 따로 묶이므로 고른 프로젝트 수만큼 시간이 더 걸린다. */
+export function buildResume(scope: ResumeScope, jdText?: string): Promise<StarItem[]> {
   return request<{ items: StarItem[] }>("/resume", {
     method: "POST",
     body: JSON.stringify({
-      project_id: projectId,
+      ...scopeBody(scope),
       ...(jdText ? { jd_text: jdText } : {}),
     }),
   }).then((res) => res.items);
@@ -301,16 +349,19 @@ export function buildResume(projectId: number, jdText?: string): Promise<StarIte
  * 저장된 초안이 없으면 `content`/`updated_at`이 둘 다 null.
  */
 export interface ResumeDraft {
-  project_id: number;
+  /** 마스터 초안(여러 프로젝트를 한 문서로)은 프로젝트에 귀속되지 않아 null. */
+  project_id: number | null;
   content: string | null;
   updated_at: string | null;
 }
 
-export function getResumeDraft(projectId: number): Promise<ResumeDraft> {
-  return request<ResumeDraft>(`/resume/draft?project_id=${projectId}`);
+/** `projectId`가 null이면 마스터 초안(유저당 1개)을 조회한다 (9/18). */
+export function getResumeDraft(projectId: number | null): Promise<ResumeDraft> {
+  const query = projectId === null ? "" : `?project_id=${projectId}`;
+  return request<ResumeDraft>(`/resume/draft${query}`);
 }
 
-export function saveResumeDraft(projectId: number, content: string): Promise<ResumeDraft> {
+export function saveResumeDraft(projectId: number | null, content: string): Promise<ResumeDraft> {
   return request<ResumeDraft>("/resume/draft", {
     method: "PUT",
     body: JSON.stringify({ project_id: projectId, content }),
@@ -333,10 +384,13 @@ export interface EnhancedItem {
   source_card_ids: number[];
 }
 
-export function enhanceResume(projectId: number, existingItems: string[]): Promise<EnhancedItem[]> {
+export function enhanceResume(
+  scope: ResumeScope,
+  existingItems: string[],
+): Promise<EnhancedItem[]> {
   return request<{ items: EnhancedItem[] }>("/resume/enhance", {
     method: "POST",
-    body: JSON.stringify({ project_id: projectId, existing_items: existingItems }),
+    body: JSON.stringify({ ...scopeBody(scope), existing_items: existingItems }),
   }).then((res) => res.items);
 }
 
@@ -361,10 +415,13 @@ export interface JdRequirementsResult {
   requirements: JdRequirement[];
 }
 
-export function getJdRequirements(projectId: number, jdText: string): Promise<JdRequirementsResult> {
+export function getJdRequirements(
+  scope: ResumeScope,
+  jdText: string,
+): Promise<JdRequirementsResult> {
   return request<JdRequirementsResult>("/resume/jd-requirements", {
     method: "POST",
-    body: JSON.stringify({ project_id: projectId, jd_text: jdText }),
+    body: JSON.stringify({ ...scopeBody(scope), jd_text: jdText }),
   });
 }
 
@@ -554,4 +611,57 @@ export function kakaoLoginUrl(): string {
 
 export function logout(): Promise<void> {
   return request<void>("/auth/logout", { method: "POST" });
+}
+
+// ---------------------------------------------------------------------------
+// 9. 백업 내보내기 / 불러오기 — Figma "5.0 설정" 41:333 / 41:338 (9/18 신규)
+//
+// 불러오기가 서버 엔드포인트인 이유: `createCard()`는 원문을 LLM에 태워 새로
+// 정리하는 경로라 복원에 쓸 수 없다(문장이 바뀌고 카드 수만큼 비용이 든다).
+// `POST /api/backup/import`는 저장된 값을 그대로 되살리고 LLM을 타지 않는다.
+// ---------------------------------------------------------------------------
+
+export interface BackupProject {
+  id: number;
+  name: string;
+  started_at: string;
+  ended_at: string | null;
+}
+
+export interface BackupCard {
+  id: number;
+  project_id: number | null;
+  raw_text: string;
+  refined_sentence: string;
+  skill_tags: string[];
+  confidence: number;
+  created_at: string;
+  created_time: string | null;
+}
+
+export interface BackupFile {
+  version: number;
+  exported_at: string;
+  projects: BackupProject[];
+  cards: BackupCard[];
+}
+
+export function exportBackup(): Promise<BackupFile> {
+  return request<BackupFile>("/backup");
+}
+
+export interface BackupImportResult {
+  imported_projects: number;
+  imported_cards: number;
+}
+
+/** **덧붙이기다 — 기존 기록을 지우지 않는다.** 같은 파일을 두 번 넣으면 두 벌 생긴다. */
+export function importBackup(file: {
+  projects: BackupProject[];
+  cards: BackupCard[];
+}): Promise<BackupImportResult> {
+  return request<BackupImportResult>("/backup/import", {
+    method: "POST",
+    body: JSON.stringify({ projects: file.projects, cards: file.cards }),
+  });
 }

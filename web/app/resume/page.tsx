@@ -3,14 +3,17 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { ResumeCompareCarousel } from "@/components/ResumeCompareCarousel";
+import { ResumeScopePicker, formatProjectPeriod } from "@/components/ResumeScopePicker";
 import { StarItemSection, formatStarItemForClipboard } from "@/components/StarItemCard";
 import { StarItemSkeleton } from "@/components/Skeleton";
 import { StarQuestionWizard } from "@/components/StarQuestionWizard";
 import {
   ApiError,
+  Card,
   EnhancedItem,
   JdRequirementsResult,
   Profile,
+  ResumeScope,
   StarItem,
   enhanceResume,
   exportResumeDocx,
@@ -18,8 +21,12 @@ import {
   getResumeDraft,
   getProfile,
   getStarQuestions,
+  isScopeEmpty,
   listCards,
+  resumeScopeKey,
   saveResumeDraft,
+  singleProjectIdOf,
+  singleProjectScope,
 } from "@/lib/api";
 import {
   buildResumeCached,
@@ -46,16 +53,51 @@ function buildResumeHeading(profile: Profile | null, projectName: string | null)
 
 /** STAR 항목 한 건을 마크다운 섹션으로. 클립보드 복사 포맷과 동일한 본문을 재사용해
  * 두 곳에서 STAR→텍스트 변환 로직이 갈라지지 않게 한다. */
-function toMarkdownSection(item: StarItem): string {
+function toMarkdownSection(item: StarItem, level: 2 | 3 = 2): string {
   const [header, ...rest] = formatStarItemForClipboard(item).split("\n");
-  return [`## ${header}`, ...rest].join("\n");
+  return [`${"#".repeat(level)} ${header}`, ...rest].join("\n");
+}
+
+/** 항목들을 출처 프로젝트별로 끊는다 (9/18 — 마스터 경력기술서). 서버가 프로젝트
+ * 순서대로 이어 붙여 주므로 인접한 것만 비교하면 된다. */
+function groupByProject(items: StarItem[]): { name: string | null; items: StarItem[] }[] {
+  const groups: { name: string | null; items: StarItem[] }[] = [];
+  for (const item of items) {
+    const name = item.project_name ?? null;
+    const last = groups[groups.length - 1];
+    if (last && last.name === name) last.items.push(item);
+    else groups.push({ name, items: [item] });
+  }
+  return groups;
 }
 
 function buildResumeMarkdown(heading: string | null, items: StarItem[]): string {
   const parts: string[] = [];
   if (heading) parts.push(`# ${heading}`);
-  parts.push(...items.map(toMarkdownSection));
+
+  const groups = groupByProject(items);
+  // 프로젝트 구간이 하나뿐이면 헤드를 넣지 않는다 — 9/18 이전 문서 모양 그대로다.
+  // 여러 구간일 때만 프로젝트 헤드를 얹고 항목을 한 단계 내린다 (Figma 41:254).
+  if (groups.length <= 1) {
+    parts.push(...items.map((item) => toMarkdownSection(item)));
+  } else {
+    for (const group of groups) {
+      if (group.name) parts.push(`## ${group.name}`);
+      parts.push(...group.items.map((item) => toMarkdownSection(item, 3)));
+    }
+  }
   return parts.join("\n\n");
+}
+
+/** 고른 범위(Figma 4.2.1)에 실제로 들어가는 카드만 남긴다. 서버가 같은 규칙으로
+ * 카드를 모으므로(`src/agent/pipeline.py`의 `_normalize_scope`) 화면에 보이는 개수와
+ * 실제 초안에 들어가는 개수가 어긋나지 않는다. */
+function filterCardsInScope(cards: Card[], scope: ResumeScope): Card[] {
+  return cards.filter((card) =>
+    card.project_id === null
+      ? scope.includeUnassigned
+      : scope.projectIds.includes(card.project_id),
+  );
 }
 
 /** 생성 시각(ISO)을 "생성 9/14" 형태로 (Figma 41:236 "생성 2/18 · 3,420자"). */
@@ -99,7 +141,14 @@ function formatSavedAt(iso: string): string {
  * 신뢰할 수 있는 최신 버전이라서).
  */
 export default function ResumePage() {
-  const { currentProject, loading: projectsLoading } = useProjects();
+  const { projects, currentProject, loading: projectsLoading } = useProjects();
+
+  // "4.2.1 범위 선택" (9/18 신규, Figma 89:161). 기본값은 현재 프로젝트 하나 —
+  // 아무것도 안 고르고 바로 만들면 9/18 이전과 똑같이 동작한다. 범위가 정해지기
+  // 전(프로젝트 로딩 중)엔 null이고, 그동안은 초안 조회/생성 자체를 하지 않는다.
+  const [scope, setScope] = useState<ResumeScope | null>(null);
+  // 범위 선택 화면이 쓰는 전체 카드 목록(개수/기록한 날 집계용). 가벼운 조회다.
+  const [allCards, setAllCards] = useState<Card[] | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [jdText, setJdText] = useState("");
   const [items, setItems] = useState<StarItem[] | null>(null);
@@ -168,8 +217,37 @@ export default function ResumePage() {
     };
   }, []);
 
+  // 범위 선택 화면이 쓸 전체 카드 목록. LLM 호출이 아니라 가벼운 조회다.
+  useEffect(() => {
+    let cancelled = false;
+    listCards()
+      .then((cards) => {
+        if (!cancelled) setAllCards(cards);
+      })
+      .catch(() => {
+        if (!cancelled) setAllCards([]); // 집계만 못 보일 뿐 초안 생성은 막지 않는다
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // 현재 프로젝트가 정해지면 범위의 기본값으로 삼는다. 프로젝트가 하나도 없으면
+  // 미분류 기록만 있는 상태이므로 그쪽을 기본으로 켠다 — 안 그러면 고를 게 없다.
+  useEffect(() => {
+    if (projectsLoading || scope !== null) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setScope(
+      currentProject
+        ? singleProjectScope(currentProject.id)
+        : { projectIds: [], includeUnassigned: true },
+    );
+  }, [projectsLoading, currentProject, scope]);
+
   // 프로젝트를 바꾸면 이전 프로젝트 기준으로 보던 내용은 더 이상 유효하지 않다 —
-  // /stack의 프로젝트 전환 리셋과 동일한 이유(9/14).
+  // /stack의 프로젝트 전환 리셋과 동일한 이유(9/14). 범위도 새 현재 프로젝트로
+  // 되돌린다(9/18) — 스위처로 프로젝트를 옮겼는데 옛 범위가 남아있으면 화면에
+  // 보이는 프로젝트와 만들어지는 문서가 어긋난다.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setItems(null);
@@ -188,6 +266,10 @@ export default function ResumePage() {
     setRequirementsError(null);
     setWizardData(null);
     setQuestionsMessage(null);
+    if (currentProject) setScope(singleProjectScope(currentProject.id));
+    // 의존성은 id 하나로 충분하다 — currentProject 객체는 목록에서 매번 find로 다시
+    // 만들어져 참조가 계속 바뀌므로, 통째로 넣으면 리셋이 불필요하게 반복된다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentProject?.id]);
 
   // 새로고침해도 방금 만든 경력기술서가 사라진 것처럼 보이지 않게, 마운트 시점에
@@ -196,23 +278,24 @@ export default function ResumePage() {
   // 바뀌었을 수도 있는 낡은 값일 수 있는데, "다시 만들기"를 누르면 그때 정상
   // 검증된다.
   useEffect(() => {
-    if (!currentProject) return;
-    const cached = peekCachedResume(currentProject.id);
+    if (!scope) return;
+    const cached = peekCachedResume(scope);
     if (cached) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setItems(cached);
       setShowBuildForm(false);
       setBuiltJdText(undefined); // 이 캐시 조회 자체가 jdText 없이 한 것과 같은 키
-      setGeneratedAt(peekCachedResumeGeneratedAt(currentProject.id));
+      setGeneratedAt(peekCachedResumeGeneratedAt(scope));
     }
-  }, [currentProject]);
+  }, [scope]);
 
   // 서버에 저장된 초안이 있으면 위 AI 캐시 복원보다 우선해서 편집 모드로 바로
   // 들어간다 — 유저가 명시적으로 저장한 버전이 가장 신뢰할 수 있는 최신본이므로.
   useEffect(() => {
-    if (!currentProject) return;
+    if (!scope) return;
     let cancelled = false;
-    getResumeDraft(currentProject.id)
+    // 범위가 프로젝트 하나면 그 프로젝트 초안, 아니면 마스터 초안(유저당 1개).
+    getResumeDraft(singleProjectIdOf(scope))
       .then((draft) => {
         if (cancelled || !draft.content) return;
         setDraftContent(draft.content);
@@ -224,10 +307,10 @@ export default function ResumePage() {
     return () => {
       cancelled = true;
     };
-  }, [currentProject]);
+  }, [scope]);
 
   const handleBuild = async () => {
-    if (!currentProject) return;
+    if (!scope || isScopeEmpty(scope)) return;
     setLoading(true);
     setError(null);
     setErrorCardCount(null);
@@ -238,12 +321,12 @@ export default function ResumePage() {
       // 조회해서 개수는 "초안 생성 중" 문구(41:714)에 바로 쓰고, buildResumeCached에도
       // 그대로 넘겨 내부에서 다시 조회하지 않게 한다.
       const usedJdText = jdText.trim() || undefined;
-      const cards = await listCards(currentProject.id);
+      const cards = await listCards().then((all) => filterCardsInScope(all, scope));
       setLoadingCardCount(cards.length);
-      const result = await buildResumeCached(currentProject.id, { jdText: usedJdText, cards });
+      const result = await buildResumeCached(scope, { jdText: usedJdText, cards });
       setItems(result);
       setBuiltJdText(usedJdText);
-      setGeneratedAt(peekCachedResumeGeneratedAt(currentProject.id, usedJdText));
+      setGeneratedAt(peekCachedResumeGeneratedAt(scope, usedJdText));
       setShowBuildForm(false);
       setMode("ai");
     } catch (err) {
@@ -251,8 +334,8 @@ export default function ResumePage() {
       // 카드는 이미 안전하게 저장돼 있다 — 실패해도 몇 장이 남아있는지 보여줘서
       // 안심시킨다(Figma 41:737). 이 조회 자체가 실패해도 실패 화면은 그대로 보여준다.
       try {
-        const cards = await listCards(currentProject.id);
-        setErrorCardCount(cards.length);
+        const all = await listCards();
+        setErrorCardCount(filterCardsInScope(all, scope).length);
       } catch {
         // 무시 — 개수 없이도 실패 화면은 뜬다.
       }
@@ -269,11 +352,11 @@ export default function ResumePage() {
       handleBuild();
       return;
     }
-    if (!currentProject) return;
+    if (!scope || isScopeEmpty(scope)) return;
     setLoadingRequirements(true);
     setRequirementsError(null);
     try {
-      const result = await getJdRequirements(currentProject.id, trimmed);
+      const result = await getJdRequirements(scope, trimmed);
       setJdRequirements(result);
     } catch (err) {
       setRequirementsError(err instanceof ApiError ? err.detail : "공고 분석에 실패했습니다.");
@@ -282,10 +365,40 @@ export default function ResumePage() {
     }
   };
 
-  const heading = buildResumeHeading(profile, currentProject?.name ?? null);
+  // 문서 제목은 프로필 우선이고, 프로필이 없을 때만 프로젝트 이름으로 대신한다.
+  // 범위가 여러 프로젝트면 특정 프로젝트 이름을 제목에 쓸 수 없다 — 그럴 땐 제목을
+  // 비우고 프로젝트 헤드(아래)가 각 구간을 알려주게 한다.
+  const scopedProjectId = scope ? singleProjectIdOf(scope) : null;
+  const scopedProjectName =
+    scopedProjectId != null ? (projects.find((p) => p.id === scopedProjectId)?.name ?? null) : null;
+  const heading = buildResumeHeading(profile, scopedProjectName);
+
+  // 지금 어떤 범위로 보고 있는지 한 줄로. 프로젝트가 여러 개면 이름을 다 늘어놓지
+  // 않고 개수로 줄인다(모바일 390px 한 줄을 넘기지 않도록).
+  const scopeLabel = (() => {
+    if (!scope) return "";
+    if (isScopeEmpty(scope)) return "포함할 범위를 골라주세요.";
+    const names = scope.projectIds
+      .map((id) => projects.find((p) => p.id === id)?.name)
+      .filter((n): n is string => Boolean(n));
+    const parts: string[] = [];
+    if (names.length === 1) parts.push(names[0]);
+    else if (names.length > 1) parts.push(`프로젝트 ${names.length}개`);
+    if (scope.includeUnassigned) parts.push("미분류 기록");
+    return `범위: ${parts.join(" + ")}`;
+  })();
+
+  /** 프로젝트 헤드(Figma 41:257)에 붙일 기간. 미분류 구간(project_id=null)은 기간이 없다. */
+  const projectPeriodOf = (projectId: number | null | undefined): string | null => {
+    if (projectId == null) return null;
+    const project = projects.find((p) => p.id === projectId);
+    return project ? formatProjectPeriod(project) : null;
+  };
+
+  const scopedCardCount = allCards ? filterCardsInScope(allCards, scope ?? { projectIds: [], includeUnassigned: false }).length : 0;
 
   const handleEnhance = async () => {
-    if (!currentProject) return;
+    if (!scope || isScopeEmpty(scope)) return;
     const existingItems = pasteText
       .split("\n")
       .map((line) => line.trim())
@@ -295,7 +408,7 @@ export default function ResumePage() {
     setEnhancing(true);
     setEnhanceError(null);
     try {
-      const result = await enhanceResume(currentProject.id, existingItems);
+      const result = await enhanceResume(scope, existingItems);
       setCompareItems(result);
     } catch (err) {
       setEnhanceError(err instanceof ApiError ? err.detail : "보강에 실패했습니다.");
@@ -318,9 +431,9 @@ export default function ResumePage() {
     setMode("edit");
     setShowBuildForm(false);
 
-    if (!currentProject) return;
+    if (!scope) return;
     try {
-      const saved = await saveResumeDraft(currentProject.id, markdown);
+      const saved = await saveResumeDraft(singleProjectIdOf(scope), markdown);
       setDraftUpdatedAt(saved.updated_at);
     } catch (err) {
       setDraftError(err instanceof ApiError ? err.detail : "저장에 실패했습니다.");
@@ -366,7 +479,7 @@ export default function ResumePage() {
     setItems((prev) => {
       if (!prev) return prev;
       const next = prev.map((it, i) => (i === index ? { ...it, result: value } : it));
-      if (currentProject) updateCachedResumeItems(currentProject.id, next, builtJdText);
+      if (scope) updateCachedResumeItems(scope, next, builtJdText);
       return next;
     });
   };
@@ -403,7 +516,7 @@ export default function ResumePage() {
     setItems((prev) => {
       if (!prev) return prev;
       const next = prev.map((it, i) => (i === idx ? updated : it));
-      if (currentProject) updateCachedResumeItems(currentProject.id, next, builtJdText);
+      if (scope) updateCachedResumeItems(scope, next, builtJdText);
       return next;
     });
     setWizardData(null);
@@ -412,20 +525,20 @@ export default function ResumePage() {
   // 재생성해도 유지되는 표시용 배열 — items(순수 AI 원본)는 그대로 두고 override만
   // 덧씌워서, "AI 문장으로 되돌리기"가 항상 진짜 원본으로 돌아갈 수 있게 한다.
   const displayItems = useMemo(
-    () => (items && currentProject ? applyFieldOverrides(items, currentProject.id) : items),
+    () => (items && scope ? applyFieldOverrides(items, resumeScopeKey(scope)) : items),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [items, currentProject, overridesVersion],
+    [items, scope, overridesVersion],
   );
 
   const handleEditField = (index: number, field: StarField, value: string) => {
-    if (!currentProject || !items) return;
-    setFieldOverride(currentProject.id, items[index].source_card_ids, field, value);
+    if (!scope || !items) return;
+    setFieldOverride(resumeScopeKey(scope), items[index].source_card_ids, field, value);
     setOverridesVersion((v) => v + 1);
   };
 
   const handleRevertField = (index: number, field: StarField) => {
-    if (!currentProject || !items) return;
-    clearFieldOverride(currentProject.id, items[index].source_card_ids, field);
+    if (!scope || !items) return;
+    clearFieldOverride(resumeScopeKey(scope), items[index].source_card_ids, field);
     setOverridesVersion((v) => v + 1);
   };
 
@@ -435,11 +548,11 @@ export default function ResumePage() {
   };
 
   const handleSaveDraft = async () => {
-    if (!currentProject) return;
+    if (!scope) return;
     setSaving(true);
     setDraftError(null);
     try {
-      const saved = await saveResumeDraft(currentProject.id, draftContent);
+      const saved = await saveResumeDraft(singleProjectIdOf(scope), draftContent);
       setDraftUpdatedAt(saved.updated_at);
       setSaveStatus("saved");
       setTimeout(() => setSaveStatus(null), 1500);
@@ -459,11 +572,9 @@ export default function ResumePage() {
       </div>
 
       <p className="text-sm text-[#a0a0a0]">
-        {projectsLoading
+        {projectsLoading || !scope
           ? "프로젝트를 불러오는 중…"
-          : currentProject
-            ? `현재 프로젝트: ${currentProject.name}`
-            : "먼저 입력 화면에서 프로젝트를 선택해 주세요."}
+          : scopeLabel}
       </p>
 
       {mode === "edit" ? (
@@ -662,7 +773,7 @@ export default function ResumePage() {
               <button
                 type="button"
                 onClick={handleBuild}
-                disabled={!currentProject || loading}
+                disabled={!scope || isScopeEmpty(scope) || loading}
                 className="w-full rounded-[999px] bg-[#f2f2f2] py-3 text-base font-semibold text-[#171717] transition-colors hover:bg-white disabled:opacity-40"
               >
                 {loading ? "경력기술서 만드는 중… (최대 10초)" : "이 공고에 맞춰 초안 만들기"}
@@ -670,12 +781,27 @@ export default function ResumePage() {
             </div>
           )}
 
+          {/* 4.2.1 범위 선택 (Figma 89:161, 9/18 신규) — 무엇을 넣을지 먼저 고른다.
+              기본값이 현재 프로젝트 하나라, 그냥 버튼만 누르면 예전과 같은 결과다. */}
+          {(!items || showBuildForm) && !jdRequirements && scope && allCards && (
+            <ResumeScopePicker
+              projects={projects}
+              cards={allCards}
+              scope={scope}
+              onChange={setScope}
+              selectedCardCount={scopedCardCount}
+              onSubmit={handleBuild}
+              submitting={loading}
+              submitLabel={jdText.trim() ? "이 공고에 맞춰 초안 만들기" : undefined}
+            />
+          )}
+
           {(!items || showBuildForm) && !jdRequirements && (
             <div className="flex flex-col gap-3 rounded-[14px] border border-[#2e2e2e] bg-[#1e1e1e] p-4">
               <p className="text-[15px] font-bold text-[#f2f2f2]">지원할 공고가 있나요?</p>
               <p className="text-xs leading-relaxed text-[#a0a0a0]">
-                공고를 넣으면 그 공고가 요구하는 경험만 골라서 씁니다. 없으면 전체 기록으로 마스터
-                버전을 만들어요.
+                공고를 넣으면 그 공고가 요구하는 경험만 골라서 씁니다. 없으면 위에서 고른 범위
+                그대로 만들어요.
               </p>
               <textarea
                 value={jdText}
@@ -690,20 +816,22 @@ export default function ResumePage() {
                   {requirementsError}
                 </p>
               )}
-              <button
-                type="button"
-                onClick={handleAnalyzeJd}
-                disabled={!currentProject || loading || loadingRequirements}
-                className="w-full rounded-[999px] bg-[#f2f2f2] py-3 text-base font-semibold text-[#171717] transition-colors hover:bg-white disabled:opacity-40 disabled:hover:bg-[#f2f2f2]"
-              >
-                {loadingRequirements
-                  ? "공고 분석하는 중…"
-                  : loading
-                    ? "경력기술서 만드는 중… (최대 10초)"
-                    : jdText.trim()
-                      ? "공고 분석하기"
-                      : "공고 없이 마스터 버전 만들기"}
-              </button>
+              {/* 공고를 넣었을 때만 뜬다 — 안 넣었으면 위 "범위 선택"의 버튼이
+                  그대로 초안 생성 버튼 역할을 한다(만들기 버튼이 둘로 갈리지 않게). */}
+              {jdText.trim() && (
+                <button
+                  type="button"
+                  onClick={handleAnalyzeJd}
+                  disabled={!scope || isScopeEmpty(scope) || loading || loadingRequirements}
+                  className="w-full rounded-[999px] bg-[#f2f2f2] py-3 text-base font-semibold text-[#171717] transition-colors hover:bg-white disabled:opacity-40 disabled:hover:bg-[#f2f2f2]"
+                >
+                  {loadingRequirements
+                    ? "공고 분석하는 중…"
+                    : loading
+                      ? "경력기술서 만드는 중… (최대 10초)"
+                      : "공고 분석하기"}
+                </button>
+              )}
 
               <div className="h-px w-full bg-[#2e2e2e]" />
 
@@ -743,7 +871,7 @@ export default function ResumePage() {
                   <button
                     type="button"
                     onClick={handleEnhance}
-                    disabled={!pasteText.trim() || !currentProject || enhancing}
+                    disabled={!pasteText.trim() || !scope || isScopeEmpty(scope) || enhancing}
                     className="w-full rounded-[999px] bg-[#f2f2f2] py-3 text-sm font-semibold text-[#171717] transition-colors hover:bg-white disabled:opacity-40"
                   >
                     {enhancing ? "보강하는 중…" : "보강해서 비교하기"}
@@ -831,8 +959,27 @@ export default function ResumePage() {
                       <div className="my-3 h-px w-full bg-[#2e2e2e]" />
                     </>
                   )}
-                  {(displayItems ?? items).map((item, i) => (
+                  {(displayItems ?? items).map((item, i, arr) => (
                     <div key={`${item.title}-${i}`}>
+                      {/* 프로젝트 헤드 (Figma 41:254) — 구간이 바뀌는 지점에만 그린다.
+                          구간이 하나뿐이면 문서 제목과 겹치므로 생략한다. */}
+                      {item.project_name &&
+                        groupByProject(arr).length > 1 &&
+                        (i === 0 || arr[i - 1].project_name !== item.project_name) && (
+                          <div className={i === 0 ? "pb-2" : "pb-2 pt-4"}>
+                            <p className="text-[15px] font-bold text-[#f2f2f2]">
+                              {item.project_name}
+                            </p>
+                            {/* 프로젝트 기간(Figma 41:257)은 프로젝트에서 가져온다 —
+                                항목의 `period`는 그 항목 근거 카드들의 날짜 범위라
+                                프로젝트 기간과 다른 값이다. 미분류 구간은 기간이 없다. */}
+                            {projectPeriodOf(item.project_id) && (
+                              <p className="mt-0.5 text-[11px] text-[#828282]">
+                                {projectPeriodOf(item.project_id)}
+                              </p>
+                            )}
+                          </div>
+                        )}
                       <StarItemSection
                         item={item}
                         onApplyResult={(v) => handleApplyResult(i, v)}

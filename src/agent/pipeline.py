@@ -34,6 +34,7 @@ API 오류, JSON 파싱 재시도까지 실패 등)로 예외를 던지면 예�
 항상 일어난다.** `retry_refinement()`로 나중에 다시 정리를 시도할 수 있다.
 """
 import logging
+from dataclasses import replace
 
 from src.agent.tag_canonicalizer import canonicalize_tags
 from src.parsing.parser import ParsedEntry, parse_note
@@ -45,7 +46,16 @@ from src.parsing.resume import (
     enhance_resume_items,
     match_jd_requirements,
 )
-from src.storage.db import Card, get_card, get_current_project, list_cards, save_card, update_card
+from src.storage.db import (
+    Card,
+    get_card,
+    get_current_project,
+    list_cards,
+    list_projects,
+    list_unassigned_cards,
+    save_card,
+    update_card,
+)
 from src.timeutil import now_local
 
 logger = logging.getLogger(__name__)
@@ -114,33 +124,135 @@ def run_pipeline_batch(user_id: int, raw_texts: list[str]) -> list[dict]:
     return [run_pipeline(user_id, text) for text in raw_texts]
 
 
-def build_career_doc(user_id: int, project_id: int, jd_text: str | None = None) -> list[StarItem]:
-    """한 프로젝트의 누적 카드를 모아 STAR 형식 경력기술서로 변환한다 (이직 준비 시점).
+# Figma 4.2.1 "범위 선택"에서 프로젝트에 안 들어간 기록들을 담는 칸의 이름.
+# 프로젝트가 아니라 "남은 것들"을 뜻하는 라벨이라 AI가 이름을 짓지 않는다.
+UNASSIGNED_SECTION_NAME = "미분류 기록"
+
+
+def collect_scoped_cards(
+    user_id: int,
+    project_id: int | None = None,
+    *,
+    project_ids: list[int] | None = None,
+    include_unassigned: bool = False,
+) -> list[Card]:
+    """선택된 범위(프로젝트 여러 개 + 미분류)의 카드를 한 목록으로 모은다 (9/18 신규).
+
+    `build_career_doc`과 달리 프로젝트 경계를 유지하지 않는다 — JD 요구사항 매칭이나
+    기존 문장 보강처럼 "근거 카드가 어디 있든 상관없는" 경로가 쓴다.
+    """
+    cards: list[Card] = []
+    for pid in _normalize_scope(user_id, project_id, project_ids):
+        cards.extend(list_cards(user_id, pid))
+    if include_unassigned:
+        cards.extend(list_unassigned_cards(user_id))
+    # build_resume()의 프롬프트가 "날짜순"을 전제하므로(resume.py `_format_prompt`)
+    # 프로젝트별로 이어붙인 뒤 반드시 다시 정렬한다.
+    cards.sort(key=lambda c: c.created_at)
+    return cards
+
+
+def _normalize_scope(
+    user_id: int, project_id: int | None, project_ids: list[int] | None
+) -> list[int]:
+    """요청이 준 프로젝트 범위를 "이 유저가 실제로 가진 프로젝트 id 목록"으로 정리한다.
+
+    - `project_ids`가 오면 그걸 쓰고, 없으면 예전 계약인 `project_id` 하나를 쓴다
+    - 순서는 요청이 준 순서를 그대로 보존한다 (프론트가 최신 프로젝트부터 보낸다)
+    - 중복과 남의 프로젝트 id는 조용히 버린다 — 다른 유저 데이터가 새지 않게 하는
+      건 `list_cards()`가 이미 하지만, 여기서 걸러야 프로젝트 이름을 찍을 때 안전하다
+    """
+    requested = list(project_ids) if project_ids is not None else (
+        [project_id] if project_id is not None else []
+    )
+    owned = {p.id for p in list_projects(user_id)}
+    seen: set[int] = set()
+    result: list[int] = []
+    for pid in requested:
+        if pid in owned and pid not in seen:
+            seen.add(pid)
+            result.append(pid)
+    return result
+
+
+def build_career_doc(
+    user_id: int,
+    project_id: int | None = None,
+    jd_text: str | None = None,
+    *,
+    project_ids: list[int] | None = None,
+    include_unassigned: bool = False,
+) -> list[StarItem]:
+    """선택한 범위의 누적 카드를 모아 STAR 형식 경력기술서로 변환한다 (이직 준비 시점).
 
     jd_text가 주어지면 build_resume()이 해당 채용공고와 관련 있는 항목을 우선 배치한다.
+
+    **구현 노트 (9/18, 마스터 경력기술서)**: Figma 4.2.1 "범위 선택"이 프로젝트 여러
+    개 + 미분류 기록을 한 문서로 묶으라고 해서 스코프를 넓혔다. 중요한 건 **프로젝트
+    경계를 넘어 묶지 않는다**는 점이다 — CLAUDE.md 3장이 말하는 대로 A은행의 "결제 API
+    개선"과 B카드의 "결제 API 개선"은 내용이 같아도 별개 경력이라, 카드를 한 덩어리로
+    합쳐 build_resume()에 넣으면 경력이 반으로 줄어든다. 그래서 프로젝트마다 따로
+    build_resume()을 부르고(= LLM 호출도 프로젝트 수만큼), 결과에 어느 프로젝트에서
+    나왔는지를 찍어서 이어 붙인다. 프론트는 그 표시를 보고 프로젝트 헤드(Figma 41:254)를
+    그린다.
+
+    `project_id` 하나만 넘기던 기존 호출은 그대로 동작한다.
     """
-    cards = list_cards(user_id, project_id)
-    return build_resume(cards, jd_text=jd_text)
+    items: list[StarItem] = []
+    projects = {p.id: p for p in list_projects(user_id)}
+
+    for pid in _normalize_scope(user_id, project_id, project_ids):
+        # 카드가 없어도 build_resume()을 그냥 부른다 — 빈 목록이면 LLM 호출 없이 바로
+        # []를 돌려주므로(resume.py) 여기서 따로 가지치기할 이유가 없다.
+        project_name = projects[pid].name
+        for item in build_resume(list_cards(user_id, pid), jd_text=jd_text):
+            items.append(replace(item, project_id=pid, project_name=project_name))
+
+    if include_unassigned:
+        for item in build_resume(list_unassigned_cards(user_id), jd_text=jd_text):
+            items.append(replace(item, project_id=None, project_name=UNASSIGNED_SECTION_NAME))
+
+    return items
 
 
 def enhance_existing_resume(
-    user_id: int, project_id: int, existing_items: list[str]
+    user_id: int,
+    project_id: int | None,
+    existing_items: list[str],
+    *,
+    project_ids: list[int] | None = None,
+    include_unassigned: bool = False,
 ) -> list[EnhancedItem]:
     """유저가 이미 써둔 경력기술서 문장을 프로젝트 카드 근거로 보강한다 (9/15 신규).
 
     "기존 경력기술서 붙여넣기 → Before/After 대조" 기능(Figma 90:612/90:640). 다른
     유저 프로젝트를 넘겨도 `list_cards()`가 빈 목록을 반환하므로 build_career_doc()과
     동일하게 소유권이 자연히 지켜진다.
+
+    9/18부터 build_career_doc()과 같은 범위(프로젝트 여러 개 + 미분류)를 받는다. 여기선
+    프로젝트 경계를 유지할 이유가 없다 — 유저가 준 문장 하나하나의 근거를 찾는 일이라,
+    근거 카드가 어느 프로젝트에 있든 상관없다(build_career_doc()과 다른 점).
     """
-    cards = list_cards(user_id, project_id)
+    cards = collect_scoped_cards(
+        user_id, project_id, project_ids=project_ids, include_unassigned=include_unassigned
+    )
     return enhance_resume_items(existing_items, cards)
 
 
-def get_jd_requirements(user_id: int, project_id: int, jd_text: str) -> JdRequirementsResult:
+def get_jd_requirements(
+    user_id: int,
+    project_id: int | None,
+    jd_text: str,
+    *,
+    project_ids: list[int] | None = None,
+    include_unassigned: bool = False,
+) -> JdRequirementsResult:
     """채용 공고 요구사항과 프로젝트 카드를 매칭한다 (9/16 신규 — Figma "4.2-j2").
 
     build_career_doc()/enhance_existing_resume()과 동일하게 list_cards()가 소유권을
     자동으로 걸러주므로 별도 검증이 필요 없다.
     """
-    cards = list_cards(user_id, project_id)
+    cards = collect_scoped_cards(
+        user_id, project_id, project_ids=project_ids, include_unassigned=include_unassigned
+    )
     return match_jd_requirements(jd_text, cards)

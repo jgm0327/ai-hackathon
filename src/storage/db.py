@@ -185,6 +185,19 @@ def init_db() -> None:
             )
             """
         )
+        # 9/18 신규 — "마스터 경력기술서"(여러 프로젝트를 한 문서로, Figma 4.2.1
+        # "범위 선택") 초안은 프로젝트 하나에 귀속되지 않아 resume_drafts에 담을 수
+        # 없다(그 테이블은 project_id가 PK다). 기존 테이블을 재구성하는 대신 유저당
+        # 1개짜리 별도 테이블을 추가한다 — 기존 프로젝트 단위 초안의 동작은 무변경.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS master_resume_drafts (
+                user_id    INTEGER PRIMARY KEY REFERENCES users(id),
+                content    TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
 
 
 def upsert_user(
@@ -569,6 +582,44 @@ def save_resume_draft(user_id: int, project_id: int, content: str, now: str) -> 
             (project_id, user_id, content, now),
         )
     return ResumeDraft(project_id=project_id, content=content, updated_at=now)
+
+
+def get_master_resume_draft(user_id: int) -> ResumeDraft | None:
+    """유저의 "마스터 경력기술서" 초안을 반환한다 (9/18 신규, Figma 4.2.1 범위 선택).
+
+    프로젝트 단위 초안(`get_resume_draft`)과 완전히 별개 저장소다. 반환 타입은
+    재사용하되 `project_id`는 마스터를 뜻하는 0으로 채운다 — 프론트/스키마가
+    "프로젝트 없음"을 이 값 하나로 판별한다.
+    """
+    init_db()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM master_resume_drafts WHERE user_id = ?", (user_id,)
+        ).fetchone()
+    if row is None:
+        return None
+    return ResumeDraft(project_id=0, content=row["content"], updated_at=row["updated_at"])
+
+
+def save_master_resume_draft(user_id: int, content: str, now: str) -> ResumeDraft:
+    """마스터 초안을 저장한다(유저당 1개, upsert).
+
+    `save_resume_draft`와 달리 소유권 사전 검사가 필요 없다 — PK가 user_id 자체라
+    다른 유저의 행을 건드릴 경로가 존재하지 않는다.
+    """
+    init_db()
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO master_resume_drafts (user_id, content, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                content = excluded.content,
+                updated_at = excluded.updated_at
+            """,
+            (user_id, content, now),
+        )
+    return ResumeDraft(project_id=0, content=content, updated_at=now)
 
 
 def get_profile(user_id: int) -> Profile:

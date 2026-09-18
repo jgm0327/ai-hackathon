@@ -17,6 +17,7 @@ import {
   getSkillSummary,
   getUnclassifiedSuggestions,
   listCards,
+  singleProjectScope,
   updateCard,
 } from "@/lib/api";
 import { buildResumeCached } from "@/lib/resumeCache";
@@ -321,7 +322,7 @@ function StackPageContent() {
     setGroupsLoading(true);
     setGroupsError(null);
     try {
-      const items = await buildResumeCached(currentProject.id, { cards });
+      const items = await buildResumeCached(singleProjectScope(currentProject.id), { cards });
       setStarGroups(items);
     } catch (err) {
       setGroupsError(err instanceof ApiError ? err.detail : "인과관계 분석에 실패했습니다.");
@@ -499,7 +500,19 @@ function StackPageContent() {
   // 부모/자식은 바깥 래퍼(들여쓰기, 연결선)만 다르고 카드 자체 내용은 동일하다.
   const renderCardBody = (card: Card) => (
     <>
-      <p className="text-[13px] font-medium text-[#f2f2f2]">{card.refined_sentence}</p>
+      {/* 문장을 누르면 "4.1-b 기록 상세"로 (Figma 89:479, 9/18 신규) — 같은 주제에
+          쌓인 기록을 시간순으로 보고 거기에 바로 이어 쓸 수 있는 화면. 인라인 편집
+          중일 때는 링크를 빼서, 고치는 중에 실수로 화면을 벗어나지 않게 한다. */}
+      {editingId === card.id ? (
+        <p className="text-[13px] font-medium text-[#f2f2f2]">{card.refined_sentence}</p>
+      ) : (
+        <Link
+          href={`/stack/${card.id}`}
+          className="text-[13px] font-medium text-[#f2f2f2] transition-colors hover:text-white"
+        >
+          {card.refined_sentence}
+        </Link>
+      )}
       <div className="flex items-center gap-2">
         {showAllProjects && (
           <p className="rounded-full bg-[#262626] px-2 py-0.5 text-[11px] font-medium text-[#a0a0a0]">

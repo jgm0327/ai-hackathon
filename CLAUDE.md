@@ -159,6 +159,25 @@ OCI 단일 VM에 상주 프로세스로 올리므로 **콜드 스타트와 디�
 > 임베딩 호출을 query/upsert 중복 없이 최대 1회로 줄이고, `OLLAMA_BASE_URL`을
 > `localhost`에서 `127.0.0.1`로 바꿔 Windows의 IPv6 우선 시도 지연(호출당 2~3초)을
 > 제거함 — 카드 생성 전체가 체감상 수 초대로 단축됨.
+>
+> **추가 갱신 (2026-09-18)**: Figma 전수 재조사(캔버스 `10:2`, 화면 39개)로 남아
+> 있던 미구현 화면을 구현함 — ①**4.2.1 범위 선택**(`89:161`, "그동안 이런 걸
+> 하셨어요"): `/resume`이 현재 프로젝트 하나에 고정돼 있어 "마스터 경력기술서"
+> 버튼이 실제로는 마스터가 아니었다. `POST /api/resume`가 `project_ids` +
+> `include_unassigned`를 받도록 넓히고(프로젝트 경계는 유지 — 5장 참고) 결과에
+> 프로젝트 헤드(`41:254`)를 그린다. 범위가 여러 개인 문서의 초안은 프로젝트에
+> 귀속되지 않아 `master_resume_drafts`(유저당 1개)에 저장한다. ②**4.1-b 기록
+> 상세**(`89:479`, `/stack/<id>` 신규): 같은 주제(대표 태그+프로젝트)의 기록을
+> 시간순으로 보여주고 거기에 바로 이어 쓴다. 이 묶음도 저장하지 않는다(3장).
+> ③`/`의 이어 쓰기 배너(`41:119`)·타깃 트랙 칩(`41:116`)·노션 링크(`41:128`),
+> 복사 완료 토스트(`41:880`), ④설정의 백업 내보내기/불러오기(`41:333`/`41:338`,
+> `GET /api/backup` + `POST /api/backup/import` 신규 — 불러오기는 LLM을 타지 않고
+> **덧붙이기만** 한다).
+>
+> 아직 남은 미구현 화면은 전부 **사용자가 이전 세션에서 보류를 확정한 것들**이다 —
+> 2.1 이력서 파일 업로드(`89:6`), 직무 전환·목표 직무 번역 5화면(`89:368`/`89:206`/
+> `89:286`/`89:46`/`89:76`), 노션 OAuth 3화면(`41:452`/`41:486`/`41:832`, client_id
+> 미발급). 다시 제안하기 전에 사용자에게 확인할 것.
 
 | 트랙 | 브랜치 | 범위 | 상태 |
 |---|---|---|---|
@@ -185,9 +204,23 @@ class StarItem:
     title: str; period: str
     situation: str; task: str; action: str; result: str
     source_dates: list[str]      # 근거 추적용 — 반드시 반환할 것
+    # 9/18 추가 — 마스터 경력기술서에서 어느 프로젝트에서 나온 항목인지.
+    # build_resume()은 한 프로젝트 안에서만 묶으므로 이 둘을 채우지 않는다.
+    # 호출부(build_career_doc)가 찍는다. 단일 프로젝트 초안에서는 None.
+    project_id: int | None = None
+    project_name: str | None = None
 
 def build_resume(cards: list[Card], jd_text: str | None = None) -> list[StarItem]
+
+# src/agent/pipeline.py — 9/18 범위 확장 (Figma 4.2.1 "범위 선택")
+def build_career_doc(user_id: int, project_id: int | None = None, jd_text: str | None = None,
+                     *, project_ids: list[int] | None = None,
+                     include_unassigned: bool = False) -> list[StarItem]
 ```
+
+`build_career_doc()`은 **프로젝트마다 따로 `build_resume()`을 부른다.** 여러 프로젝트를
+한 번에 넣어 묶으면 3장이 말하는 "A은행 결제 API ≠ B카드 결제 API"가 깨진다 — 경력이
+반으로 줄어든다. 이 분리를 없애지 말 것.
 
 `source_dates`는 생략 불가다. 어느 카드에서 나온 문장인지 추적할 수 있어야
 2.2 원칙(환각 금지) 위반을 검증할 수 있고, 유저에게 근거를 보여줄 수 있다.

@@ -242,6 +242,13 @@ class StarItem:
     # 남겨두지만, 카드 매칭(예: /stack "인과관계로 묶어보기")은 반드시 이걸로 해야 한다 —
     # 날짜만으로는 같은 날짜 카드 여러 장을 구분할 수 없다.
     source_card_ids: list[int] = field(default_factory=list)
+    # 9/18 신규 — "마스터 경력기술서"(여러 프로젝트를 한 문서로, Figma 4.2.1 "범위
+    # 선택" → 4.2 빌더의 프로젝트 헤드)용. build_resume()은 한 프로젝트 안에서만
+    # 묶으므로 이 두 값을 스스로 채우지 않는다 — 호출부(build_career_doc)가 어느
+    # 프로젝트의 카드로 만든 항목인지 알고 나중에 찍어준다. 단일 프로젝트 초안에서는
+    # 그대로 None이어도 되고, 그 경우 프론트가 프로젝트 헤드를 그리지 않는다.
+    project_id: int | None = None
+    project_name: str | None = None
 
 
 @dataclass

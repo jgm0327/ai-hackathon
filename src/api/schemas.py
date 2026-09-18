@@ -144,7 +144,13 @@ class ProjectListResponse(BaseModel):
 
 
 class ResumeRequest(BaseModel):
-    project_id: int
+    # 9/18까지 이 엔드포인트는 프로젝트 하나만 받았다. Figma 4.2.1 "범위 선택"이
+    # 여러 프로젝트 + 미분류 기록을 한 문서(= "마스터 경력기술서")로 묶으라고 해서
+    # 스코프를 넓혔다. 기존 호출부 하위 호환을 위해 `project_id`는 그대로 두고
+    # (단독으로 넘어오면 예전과 100% 같은 동작), 아래 두 필드를 선택으로 추가한다.
+    project_id: int | None = None
+    project_ids: list[int] | None = Field(default=None, max_length=50)
+    include_unassigned: bool = False
     jd_text: str | None = Field(default=None, max_length=MAX_JD_TEXT)
 
 
@@ -159,6 +165,11 @@ class StarItemResponse(_FromAttributes):
     # 9/14 신규 — docs/05-api-contract.md 3장 참고. source_dates는 화면 표시(근거 토글)용,
     # source_card_ids는 카드 매칭(예: /stack "인과관계로 묶어보기")용으로 역할이 다르다.
     source_card_ids: list[int]
+    # 9/18 신규 — 마스터 경력기술서(여러 프로젝트를 한 문서로)에서 이 항목이 어느
+    # 프로젝트 카드로 만들어졌는지. 단일 프로젝트 초안에서는 null이고, 그때 프론트는
+    # 프로젝트 헤드(Figma 41:254 "project head")를 그리지 않는다.
+    project_id: int | None = None
+    project_name: str | None = None
 
 
 class ResumeResponse(BaseModel):
@@ -170,21 +181,27 @@ class ResumeResponse(BaseModel):
 # — CLAUDE.md 3장이 막는 "AI 그룹핑을 정식 데이터로 저장"과는 다른 문제라서
 # 별도로 허용됨(src/storage/db.py의 ResumeDraft 참고).
 class ResumeDraftResponse(BaseModel):
-    project_id: int
+    # 9/18 — 마스터 초안(여러 프로젝트를 한 문서로)은 프로젝트에 귀속되지 않아 null.
+    project_id: int | None
     # 저장된 초안이 없으면(또는 project_id가 이 유저 소유가 아니면) 둘 다 None.
     content: str | None
     updated_at: str | None
 
 
 class ResumeDraftSaveRequest(BaseModel):
-    project_id: int
+    # null이면 마스터 초안(master_resume_drafts, 유저당 1개)에 저장한다.
+    project_id: int | None = None
     content: str = Field(max_length=MAX_DRAFT_CONTENT)
 
 
 # "기존 경력기술서 붙여넣기 → Before/After 대조" (9/15 신규, docs/05-api-contract.md
 # 3장). 완전히 선택 사항 — 위 STAR 생성/초안 저장 경로와 독립적으로 동작한다.
 class ResumeEnhanceRequest(BaseModel):
-    project_id: int
+    # 9/18 — ResumeRequest와 같은 범위 필드. 붙여넣기/JD 매칭도 "지금 보고 있는
+    # 경력기술서"와 같은 범위의 카드를 근거로 써야 대조 결과가 어긋나지 않는다.
+    project_id: int | None = None
+    project_ids: list[int] | None = Field(default=None, max_length=50)
+    include_unassigned: bool = False
     existing_items: list[_ExistingItem] = Field(max_length=10)
 
 
@@ -204,7 +221,9 @@ class ResumeEnhanceResponse(BaseModel):
 # JD를 붙여넣은 직후, 실제로 초안을 만들기 전에 "요구사항 N개 중 M개에 기록이
 # 있어요"를 보여준다.
 class JdRequirementsRequest(BaseModel):
-    project_id: int
+    project_id: int | None = None
+    project_ids: list[int] | None = Field(default=None, max_length=50)
+    include_unassigned: bool = False
     jd_text: str = Field(max_length=MAX_JD_TEXT)
 
 
@@ -233,6 +252,10 @@ class StarItemPayload(BaseModel):
     result: str = Field(max_length=MAX_SENTENCE)
     source_dates: list[Annotated[str, Field(max_length=32)]] = Field(default=[], max_length=200)
     source_card_ids: list[int] = Field(default=[], max_length=200)
+    # 9/18 신규 — StarItemResponse와 대칭. 역질문/답변 반영은 이 값을 읽지 않지만,
+    # 프론트가 받은 항목을 그대로 돌려보내므로 왕복 중에 유실되지 않게 받아준다.
+    project_id: int | None = None
+    project_name: str | None = Field(default=None, max_length=MAX_TITLE)
 
 
 class StarQuestionsRequest(BaseModel):
@@ -364,3 +387,46 @@ class MeResponse(BaseModel):
     id: int
     nickname: str | None
     profile_image_url: str | None
+
+
+# ---------------------------------------------------------------------------
+# 백업 내보내기 / 불러오기 (9/18 신규, Figma "5.0 설정" 41:333 / 41:338)
+#
+# 불러오기는 LLM을 타지 않고 저장된 값을 그대로 되살린다 — 그래서 요청 쪽에도
+# refined_sentence/skill_tags가 그대로 들어온다(POST /api/cards와 다른 점).
+# 길이 상한은 카드 생성 경로와 같은 값을 쓴다.
+# ---------------------------------------------------------------------------
+class BackupProject(_FromAttributes):
+    id: int
+    name: str = Field(max_length=MAX_TITLE)
+    started_at: str = Field(max_length=32)
+    ended_at: str | None = Field(default=None, max_length=32)
+
+
+class BackupCard(_FromAttributes):
+    id: int
+    project_id: int | None = None
+    raw_text: str = Field(max_length=MAX_RAW_TEXT)
+    refined_sentence: str = Field(max_length=MAX_SENTENCE)
+    skill_tags: list[_Tag] = Field(default=[], max_length=MAX_TAGS)
+    confidence: float = 0.0
+    created_at: str = Field(max_length=32)
+    created_time: str | None = Field(default=None, max_length=16)
+
+
+class BackupResponse(BaseModel):
+    version: int
+    exported_at: str
+    projects: list[BackupProject]
+    cards: list[BackupCard]
+
+
+class BackupImportRequest(BaseModel):
+    # 한 번에 통째로 들어오는 파일이라 개수 상한을 넉넉히 두되 무한은 아니게 막는다.
+    projects: list[BackupProject] = Field(default=[], max_length=500)
+    cards: list[BackupCard] = Field(default=[], max_length=20_000)
+
+
+class BackupImportResponse(BaseModel):
+    imported_projects: int
+    imported_cards: int

@@ -464,3 +464,107 @@ def test_star_apply_answers_rejects_more_than_three_answers(client, current_user
         },
     )
     assert response.status_code == 422
+
+
+# --- 마스터 경력기술서: 범위 선택 (9/18 신규, Figma 4.2.1 "범위 선택") ---
+
+
+def test_create_resume_with_multiple_projects_stamps_each_item(client, current_user_id):
+    """여러 프로젝트를 한 문서로 만들 때, 각 항목에 출처 프로젝트가 찍혀야 한다.
+
+    프론트가 이 값으로 프로젝트 헤드(Figma 41:254 "project head")를 그린다.
+    """
+    a_id = db.create_project(current_user_id, "A은행 차세대", "2023-02-01")
+    _seed_cards(current_user_id, a_id)
+    b_id = db.create_project(current_user_id, "B카드 정산", "2024-02-01")
+    _seed_cards(current_user_id, b_id)
+
+    with patch("src.parsing.resume._call_llm", return_value=_MOCK_LLM_RESPONSE):
+        response = client.post("/api/resume", json={"project_ids": [b_id, a_id]})
+
+    assert response.status_code == 200
+    items = response.json()["items"]
+    # 프로젝트마다 따로 묶였으므로 항목이 2개 — 한 덩어리로 합쳐지면 1개가 된다.
+    assert [i["project_name"] for i in items] == ["B카드 정산", "A은행 차세대"]
+    assert [i["project_id"] for i in items] == [b_id, a_id]
+
+
+def test_create_resume_can_include_unassigned_cards(client, current_user_id):
+    db.save_card(
+        current_user_id,
+        None,
+        ParsedEntry(
+            raw_text="회고 정리",
+            refined_sentence="스프린트 회고를 정리함",
+            skill_tags=["회고"],
+            confidence=0.5,
+        ),
+        "2023-02-20",
+    )
+
+    with patch("src.parsing.resume._call_llm", return_value=_MOCK_LLM_RESPONSE):
+        response = client.post(
+            "/api/resume", json={"project_ids": [], "include_unassigned": True}
+        )
+
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert [i["project_name"] for i in items] == ["미분류 기록"]
+    assert items[0]["project_id"] is None
+
+
+def test_create_resume_single_project_still_works_with_old_payload(client, current_user_id):
+    """기존 계약(`project_id` 하나)이 그대로 동작해야 한다 — 프론트 배포 순서와 무관하게."""
+    project_id = db.create_project(current_user_id, "A은행 차세대", "2023-02-01")
+    _seed_cards(current_user_id, project_id)
+
+    with patch("src.parsing.resume._call_llm", return_value=_MOCK_LLM_RESPONSE):
+        response = client.post("/api/resume", json={"project_id": project_id})
+
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert len(items) == 1
+    assert items[0]["title"] == "결제 API 성능 개선"
+    assert items[0]["project_id"] == project_id
+
+
+# --- 마스터 초안 저장 (project_id 없이) ---
+
+
+def test_master_draft_roundtrip(client, current_user_id):
+    assert client.get("/api/resume/draft").json() == {
+        "project_id": None,
+        "content": None,
+        "updated_at": None,
+    }
+
+    saved = client.put("/api/resume/draft", json={"content": "# 마스터 초안"})
+    assert saved.status_code == 200
+    assert saved.json()["project_id"] is None
+    assert saved.json()["content"] == "# 마스터 초안"
+
+    assert client.get("/api/resume/draft").json()["content"] == "# 마스터 초안"
+
+
+def test_master_draft_is_separate_from_project_draft(client, current_user_id):
+    project_id = db.create_project(current_user_id, "A은행 차세대", "2023-02-01")
+    client.put("/api/resume/draft", json={"project_id": project_id, "content": "# 프로젝트 초안"})
+    client.put("/api/resume/draft", json={"content": "# 마스터 초안"})
+
+    assert client.get(f"/api/resume/draft?project_id={project_id}").json()["content"] == (
+        "# 프로젝트 초안"
+    )
+    assert client.get("/api/resume/draft").json()["content"] == "# 마스터 초안"
+
+
+def test_master_draft_does_not_leak_between_users(client, current_user_id):
+    client.put("/api/resume/draft", json={"content": "# 내 마스터 초안"})
+
+    other_user_id = db.upsert_user("other-kakao-id", "다른유저", None, "2026-01-01T00:00:00")
+    from src.auth.deps import get_current_user
+
+    app.dependency_overrides[get_current_user] = lambda: db.get_user(other_user_id)
+    try:
+        assert client.get("/api/resume/draft").json()["content"] is None
+    finally:
+        app.dependency_overrides[get_current_user] = lambda: db.get_user(current_user_id)

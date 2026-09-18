@@ -24,7 +24,18 @@ from fastapi.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from src.api import scheduler
-from src.api.routers import auth, cards, health, jds, notion, profile, projects, push, resume
+from src.api.routers import (
+    auth,
+    backup,
+    cards,
+    health,
+    jds,
+    notion,
+    profile,
+    projects,
+    push,
+    resume,
+)
 from src.config import settings
 
 logger = logging.getLogger(__name__)
@@ -197,6 +208,7 @@ app.include_router(jds.router, prefix="/api")
 app.include_router(notion.router, prefix="/api")
 app.include_router(push.router, prefix="/api")
 app.include_router(profile.router, prefix="/api")
+app.include_router(backup.router, prefix="/api")
 
 # --- 남은 P1 (docs/05-api-contract.md 6장) ---
 # TODO(6장 STT): POST /api/stt — 9/13 실기기 음성 검증에서 iOS Safari 실패가 실제로

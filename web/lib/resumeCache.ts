@@ -20,7 +20,7 @@
  * `source_card_ids`는 태그가 아니라 문장 내용에서 나오므로 문제 없다(태그는 애초에
  * 수정 후 재생성해도 결과가 똑같을 항목).
  */
-import { Card, StarItem, buildResume, listCards } from "./api";
+import { Card, ResumeScope, StarItem, buildResume, listCards, resumeScopeKey } from "./api";
 
 const CACHE_PREFIX = "career-log:resume-cache:";
 
@@ -34,8 +34,12 @@ interface CachedResume {
   generatedAt?: string;
 }
 
-function cacheKey(projectId: number, jdText?: string): string {
-  return `${CACHE_PREFIX}${projectId}:${jdText?.trim() ?? ""}`;
+/**
+ * 캐시 키에 범위 전체를 넣는다 (9/18 — 마스터 경력기술서). 프로젝트 id만 쓰면
+ * "A만" 고른 결과와 "A+B" 결과가 같은 칸을 덮어써서 엉뚱한 문서가 복원된다.
+ */
+function cacheKey(scope: ResumeScope, jdText?: string): string {
+  return `${CACHE_PREFIX}${resumeScopeKey(scope)}:${jdText?.trim() ?? ""}`;
 }
 
 function sortedIds(cards: Card[]): number[] {
@@ -72,19 +76,19 @@ function writeCache(key: string, data: CachedResume): void {
  * 가벼운 조회라 비용 걱정 없이 매번 해도 된다.
  */
 export async function buildResumeCached(
-  projectId: number,
+  scope: ResumeScope,
   opts?: { jdText?: string; cards?: Card[] },
 ): Promise<StarItem[]> {
-  const cards = opts?.cards ?? (await listCards(projectId));
+  const cards = opts?.cards ?? (await listCardsInScope(scope));
   const cardIds = sortedIds(cards);
-  const key = cacheKey(projectId, opts?.jdText);
+  const key = cacheKey(scope, opts?.jdText);
 
   const cached = readCache(key);
   if (cached && idsEqual(cached.cardIds, cardIds)) {
     return cached.items;
   }
 
-  const items = await buildResume(projectId, opts?.jdText);
+  const items = await buildResume(scope, opts?.jdText);
   writeCache(key, { cardIds, items, generatedAt: new Date().toISOString() });
   return items;
 }
@@ -102,15 +106,15 @@ export async function buildResumeCached(
  * `listCards()` 호출이 필요), 낡은 결과를 잠깐 보여줄 수는 있지만 "다시 만들기"를
  * 누르면 그 시점에 `buildResumeCached()`가 정상적으로 최신 여부를 검증한다.
  */
-export function peekCachedResume(projectId: number, jdText?: string): StarItem[] | null {
-  const cached = readCache(cacheKey(projectId, jdText));
+export function peekCachedResume(scope: ResumeScope, jdText?: string): StarItem[] | null {
+  const cached = readCache(cacheKey(scope, jdText));
   return cached?.items ?? null;
 }
 
 /** 캐시된 결과가 실제로 AI 호출로 "생성"된 시각 (Figma 41:236 메타 표시용, 9/16 신규).
  * 없으면(예전 캐시, 또는 캐시 자체가 없음) null — 호출부는 메타 줄을 그냥 숨기면 된다. */
-export function peekCachedResumeGeneratedAt(projectId: number, jdText?: string): string | null {
-  const cached = readCache(cacheKey(projectId, jdText));
+export function peekCachedResumeGeneratedAt(scope: ResumeScope, jdText?: string): string | null {
+  const cached = readCache(cacheKey(scope, jdText));
   return cached?.generatedAt ?? null;
 }
 
@@ -120,9 +124,28 @@ export function peekCachedResumeGeneratedAt(projectId: number, jdText?: string):
  * 그대로 두고 `items`만 바꾼다. 캐시가 아예 없으면(비정상 상태) 조용히 넘어간다 —
  * 화면 자체는 이미 React state로 반영돼 있어 지장 없다.
  */
-export function updateCachedResumeItems(projectId: number, items: StarItem[], jdText?: string): void {
-  const key = cacheKey(projectId, jdText);
+export function updateCachedResumeItems(
+  scope: ResumeScope,
+  items: StarItem[],
+  jdText?: string,
+): void {
+  const key = cacheKey(scope, jdText);
   const cached = readCache(key);
   if (!cached) return;
   writeCache(key, { cardIds: cached.cardIds, items, generatedAt: cached.generatedAt });
+}
+
+/**
+ * 범위 안의 카드를 전부 모은다 — 캐시 유효성 판단(카드 id 목록)에만 쓰는 가벼운
+ * 조회다. 프로젝트별 `listCards()`를 병렬로 부르고, 미분류를 포함하는 범위면
+ * 프로젝트가 없는 카드까지 더한다.
+ */
+async function listCardsInScope(scope: ResumeScope): Promise<Card[]> {
+  const perProject = await Promise.all(scope.projectIds.map((id) => listCards(id)));
+  const cards = perProject.flat();
+  if (scope.includeUnassigned) {
+    const all = await listCards();
+    cards.push(...all.filter((c) => c.project_id === null));
+  }
+  return cards;
 }

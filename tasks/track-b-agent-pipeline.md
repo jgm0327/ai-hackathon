@@ -308,3 +308,41 @@ CLAUDE.md 6장 P2 "온보딩(현재 직무/목표 직무/연차)"에 대응하�
 - 이 프로필 값은 아직 `build_resume()`/JD 매칭 어디에도 연결돼 있지 않다 — 온보딩
   화면과 입력 화면 상단에 컨텍스트를 보여주는 용도로만 쓰인다. 스코프 확장은
   실제 필요가 생겼을 때 논의(CLAUDE.md 2.4).
+
+---
+
+# 8부 — 마스터 경력기술서 범위 + 백업 (신규, 9/18)
+
+## 목표
+Figma 전수 재조사로 남아 있던 백엔드 쪽 미구현 두 건을 채운다.
+① "4.2.1 범위 선택"(`89:161`)이 요구하는 **여러 프로젝트를 한 문서로**,
+② "5.0 설정"의 **백업 내보내기/불러오기**(`41:333`/`41:338`).
+
+## 작업 항목
+- [x] `POST /api/resume`가 `project_ids: list[int]` + `include_unassigned: bool`을 받는다.
+      기존 `project_id` 하나만 넘기던 호출은 **동작 변화 없음**(하위 호환 테스트 있음)
+- [x] `build_career_doc()`이 **프로젝트마다 따로** `build_resume()`을 부르고 결과에
+      `project_id`/`project_name`을 찍는다 — 한 덩어리로 합치면 CLAUDE.md 3장의
+      "A은행 결제 API ≠ B카드 결제 API"가 깨진다. 이 분리가 이 작업의 핵심 제약이다
+- [x] `StarItem`에 `project_id`/`project_name` 추가(기본값 None, 순수 추가)
+- [x] `collect_scoped_cards()` — 프로젝트 경계가 필요 없는 경로(JD 요구사항 매칭,
+      기존 문장 보강)용. 합친 뒤 반드시 날짜순으로 다시 정렬한다(프롬프트가 날짜순 전제)
+- [x] `POST /api/resume/enhance` / `POST /api/resume/jd-requirements`도 같은 범위 필드 수용
+- [x] `master_resume_drafts` 테이블(유저당 1개) + `GET/PUT /api/resume/draft`의
+      `project_id`를 선택으로. 생략하면 마스터 초안. `resume_drafts`는 `project_id`가
+      PK라 범위 문서를 담을 수 없어서, 기존 테이블을 재구성하는 대신 병행 테이블을 뒀다
+- [x] `src/api/routers/backup.py` — `GET /api/backup`, `POST /api/backup/import`.
+      **불러오기는 LLM을 타지 않는다**(`POST /api/cards`를 재사용하면 저장돼 있던 정리
+      문장이 다른 문장으로 바뀌고 카드 수만큼 비용이 든다). **덧붙이기만 한다** —
+      기존 기록을 지우는 파괴적 동작은 되돌릴 수 없어서 넣지 않았다
+- [x] `docs/05-api-contract.md` 3장 개정 + 10장 신설
+- [x] 테스트: `tests/test_api_backup.py` 7개 신규, `tests/test_api_resume.py` 6개 추가
+      (다중 프로젝트 스탬핑, 미분류 구간, 예전 payload 하위 호환, 마스터 초안 왕복/격리),
+      `tests/test_pipeline.py` 4개 추가(프로젝트 경계 유지, 남의 프로젝트 무시, 날짜 정렬)
+
+## 알려진 한계 (의도된 스코프)
+- 프로젝트를 N개 고르면 LLM 호출도 N번이라 그만큼 느리다. 화면이 미리 그 사실을
+  알려주는 것으로 처리했다 — 한 번에 묶어 빠르게 만드는 건 위 제약과 맞바꿀 수 없다.
+- 백업 불러오기는 중복 판정을 하지 않는다. 같은 파일을 두 번 넣으면 두 벌이 생긴다
+  (프론트가 누르기 전에 그 사실을 문구로 알린다). 중복 병합은 "무엇을 같다고 볼지"를
+  정해야 하는 별도 문제라 최소 기능만 남겼다(CLAUDE.md 2.4 정신).

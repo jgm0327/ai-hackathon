@@ -24,55 +24,65 @@ import { StarItem } from "./api";
 export type StarField = "situation" | "task" | "action" | "result";
 
 type FieldMap = Partial<Record<StarField, string>>;
-type ProjectOverrides = Record<string, FieldMap>; // itemKey -> field -> 사용자가 쓴 값
+type ScopeOverrides = Record<string, FieldMap>; // itemKey -> field -> 사용자가 쓴 값
 
 const PREFIX = "career-log:resume-field-overrides:";
 
-function storageKey(projectId: number): string {
-  return `${PREFIX}${projectId}`;
+/**
+ * 9/18부터 프로젝트 id가 아니라 "범위 키"(`lib/api.ts`의 `resumeScopeKey`)로 칸을
+ * 나눈다 — 마스터 경력기술서(여러 프로젝트를 한 문서로)는 프로젝트 하나에 귀속되지
+ * 않기 때문. 프로젝트 하나짜리 범위의 키는 `"12"`처럼 예전과 같은 모양이라 이전에
+ * 저장된 수정값이 그대로 이어진다.
+ */
+function storageKey(scopeKey: string): string {
+  return `${PREFIX}${scopeKey}`;
 }
 
 function itemKey(sourceCardIds: number[]): string {
   return [...sourceCardIds].sort((a, b) => a - b).join(",");
 }
 
-function readAll(projectId: number): ProjectOverrides {
+function readAll(scopeKey: string): ScopeOverrides {
   try {
-    const raw = localStorage.getItem(storageKey(projectId));
-    return raw ? (JSON.parse(raw) as ProjectOverrides) : {};
+    const raw = localStorage.getItem(storageKey(scopeKey));
+    return raw ? (JSON.parse(raw) as ScopeOverrides) : {};
   } catch {
     return {};
   }
 }
 
-function writeAll(projectId: number, data: ProjectOverrides): void {
+function writeAll(scopeKey: string, data: ScopeOverrides): void {
   try {
-    localStorage.setItem(storageKey(projectId), JSON.stringify(data));
+    localStorage.setItem(storageKey(scopeKey), JSON.stringify(data));
   } catch {
     // 용량 초과 등 — 이번 수정만 반영이 안 될 뿐 치명적이지 않다.
   }
 }
 
-export function getFieldOverrides(projectId: number, sourceCardIds: number[]): FieldMap {
+export function getFieldOverrides(scopeKey: string, sourceCardIds: number[]): FieldMap {
   if (sourceCardIds.length === 0) return {};
-  return readAll(projectId)[itemKey(sourceCardIds)] ?? {};
+  return readAll(scopeKey)[itemKey(sourceCardIds)] ?? {};
 }
 
 export function setFieldOverride(
-  projectId: number,
+  scopeKey: string,
   sourceCardIds: number[],
   field: StarField,
   value: string,
 ): void {
   if (sourceCardIds.length === 0) return; // 근거 카드가 없는 항목은 재식별이 안 되므로 무시
-  const all = readAll(projectId);
+  const all = readAll(scopeKey);
   const key = itemKey(sourceCardIds);
   all[key] = { ...all[key], [field]: value };
-  writeAll(projectId, all);
+  writeAll(scopeKey, all);
 }
 
-export function clearFieldOverride(projectId: number, sourceCardIds: number[], field: StarField): void {
-  const all = readAll(projectId);
+export function clearFieldOverride(
+  scopeKey: string,
+  sourceCardIds: number[],
+  field: StarField,
+): void {
+  const all = readAll(scopeKey);
   const key = itemKey(sourceCardIds);
   if (!all[key]) return;
   const rest: FieldMap = { ...all[key] };
@@ -82,15 +92,15 @@ export function clearFieldOverride(projectId: number, sourceCardIds: number[], f
   } else {
     all[key] = rest;
   }
-  writeAll(projectId, all);
+  writeAll(scopeKey, all);
 }
 
 /** `items`에 저장된 override를 덮어씌운 표시용 배열을 만든다. 원본 `items`는 그대로
  * 두고 렌더링용으로만 파생시켜서, "되돌리기"가 항상 진짜 AI 원본으로 돌아갈 수
  * 있게 한다. */
-export function applyFieldOverrides(items: StarItem[], projectId: number): StarItem[] {
+export function applyFieldOverrides(items: StarItem[], scopeKey: string): StarItem[] {
   return items.map((item) => {
-    const overrides = getFieldOverrides(projectId, item.source_card_ids);
+    const overrides = getFieldOverrides(scopeKey, item.source_card_ids);
     if (Object.keys(overrides).length === 0) return item;
     return { ...item, ...overrides };
   });
