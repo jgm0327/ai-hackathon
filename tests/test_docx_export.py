@@ -1,8 +1,11 @@
 """markdown_to_docx_bytes() 테스트 — 이 앱이 실제로 생성하는 마크다운 형태(#, ##, -)만
 지원하는 변환기라, 그 세 가지 라인 종류가 올바른 문서 요소로 들어가는지만 검증한다.
 """
+import re
+import zipfile
 from io import BytesIO
 
+import pytest
 from docx import Document
 
 from src.export.docx_export import markdown_to_docx_bytes
@@ -79,3 +82,46 @@ def test_plain_text_line_becomes_normal_paragraph():
 def test_empty_markdown_produces_valid_empty_document():
     document = _reopen(markdown_to_docx_bytes(""))
     assert document.paragraphs == []
+
+
+# --- 한글 폰트 (9/18, 글자 깨짐 재발 방지) ---
+#
+# python-docx 기본 템플릿은 rFonts를 아예 지정하지 않아서 Word가 라틴 폰트로
+# 렌더링하고, 한글 글리프가 없어 깨져 보인다(실제 발생). 아래 두 테스트가 지키는
+# 조건이 깨지면 다운로드한 문서의 한글이 다시 깨진다.
+
+
+def _styles_xml(docx_bytes: bytes) -> str:
+    return zipfile.ZipFile(BytesIO(docx_bytes)).read("word/styles.xml").decode("utf-8")
+
+
+def _rfonts_of(styles_xml: str, style_id: str) -> str:
+    match = re.search(rf'w:styleId="{style_id}".*?</w:style>', styles_xml, re.S)
+    assert match, f"{style_id} 스타일을 찾을 수 없음"
+    fonts = re.findall(r"<w:rFonts[^>]*/>", match.group(0))
+    assert fonts, f"{style_id}에 rFonts가 없음 — 한글이 깨진다"
+    return fonts[0]
+
+
+@pytest.mark.parametrize("style_id", ["Normal", "Heading1", "Heading2", "ListBullet"])
+def test_style_sets_east_asia_font(style_id):
+    """한글은 ascii/hAnsi가 아니라 w:eastAsia 설정을 따른다."""
+    styles = _styles_xml(markdown_to_docx_bytes("# 제목"))
+    assert 'w:eastAsia="Malgun Gothic"' in _rfonts_of(styles, style_id)
+
+
+@pytest.mark.parametrize("style_id", ["Heading1", "Heading2"])
+def test_heading_styles_have_no_theme_font_attributes(style_id):
+    """제목 스타일의 `*Theme` 속성은 제거돼야 한다.
+
+    OOXML 규격상 테마 속성이 명시적 폰트보다 우선하므로, 남아 있으면 위에서 지정한
+    한글 폰트가 무시돼 제목만 계속 깨진다(9/18 실측).
+    """
+    styles = _styles_xml(markdown_to_docx_bytes("# 제목\n\n## 소제목"))
+    assert "Theme" not in _rfonts_of(styles, style_id)
+
+
+def test_korean_text_is_preserved_as_utf8():
+    """본문 인코딩 자체는 문제가 없었다는 것도 같이 고정해둔다."""
+    document = _reopen(markdown_to_docx_bytes("# 백엔드 엔지니어"))
+    assert document.paragraphs[0].text == "백엔드 엔지니어"
