@@ -43,6 +43,45 @@ class CardCreateRequest(BaseModel):
     # 내용 없는 카드를 만든다(실측 확인). 정리할 내용이 없으면 부를 이유도 없다.
     # 공백만 있는 경우는 라우터가 따로 거른다 — Pydantic은 공백도 글자로 세기 때문.
     raw_text: str = Field(min_length=1, max_length=MAX_RAW_TEXT)
+    # 9/18 신규 — Figma 3.1-q "변환 전 추가 질문"에 유저가 직접 답한 수치.
+    # 안 보내면(건너뛰기) 예전과 완전히 같은 동작이다. 이 값은 지어낸 게 아니라
+    # 유저가 타이핑한 값이므로 문장에 넣어도 CLAUDE.md 2.2에 어긋나지 않는다.
+    metric_answer: str | None = Field(default=None, max_length=MAX_ANSWER)
+
+
+class MetricQuestionRequest(BaseModel):
+    """POST /api/cards/metric-question — 변환 전에 "숫자가 빠졌는지"만 물어본다.
+
+    카드를 만들지 않는다. 저장은 뒤이은 POST /api/cards가 한다 — 유저가 질문 화면에서
+    뒤로 나가버려도 반쯤 저장된 카드가 남지 않게 하기 위해서다.
+    """
+
+    raw_text: str = Field(min_length=1, max_length=MAX_RAW_TEXT)
+
+
+class MetricQuestionResponse(BaseModel):
+    """`question`이 빈 문자열이면 물어볼 게 없다는 뜻 — 프론트는 화면을 건너뛴다."""
+
+    question: str = ""
+    placeholder: str = ""
+
+
+class CardTranslateRequest(BaseModel):
+    """POST /api/cards/{id}/translate — Figma 3.1-b / 3.1-c "직무 전환 번역".
+
+    `target_job`은 온보딩 2/4에서 고른 목표 직무 중 하나다. 프론트가 그중 하나를
+    실어 보낸다(서버가 고르지 않는다 — 여러 개를 오가는 건 유저의 선택이다).
+    """
+
+    target_job: str = Field(min_length=1, max_length=MAX_TITLE)
+
+
+class CardTranslateResponse(BaseModel):
+    related: bool
+    headline: str
+    translated_sentence: str
+    #  related=False일 때만 채워진다 (3.1-c "다음 기록 제안").
+    suggestion: str = ""
 
 
 class CardTagsUpdateRequest(BaseModel):
@@ -54,6 +93,9 @@ class CardTagsUpdateRequest(BaseModel):
 
     skill_tags: list[_Tag] | None = Field(default=None, max_length=MAX_TAGS)
     refined_sentence: str | None = Field(default=None, max_length=MAX_SENTENCE)
+    # 9/18 신규 — Figma 3.1-d "AI 문장으로 되돌리기". true면 refined_sentence를
+    # 무시하고 카드에 보관된 ai_sentence로 되돌린다(되돌릴 원본이 없으면 400).
+    revert_to_ai: bool = False
 
 
 class CardResponse(_FromAttributes):
@@ -81,6 +123,11 @@ class CardResponse(_FromAttributes):
     # 라우터가 채워 넣는다. GET/PATCH 응답에서는 항상 빈 문자열(카드 저장 후에는
     # 다시 보여줄 이유가 없는, 생성 순간 전용 문구라서).
     case_summary: str = ""
+    # 9/18 신규 — Figma 3.1-d "문장 수정" 시트가 "AI 문장으로 되돌리기"를 띄울지
+    # 판단하는 값. `sentence_edited`가 true고 `ai_sentence`가 있을 때만 띄운다.
+    # 마이그레이션 이전 카드는 ai_sentence가 null이라 자연스럽게 안 뜬다.
+    ai_sentence: str | None = None
+    sentence_edited: bool = False
 
 
 class CardListResponse(BaseModel):

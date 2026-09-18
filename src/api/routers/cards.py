@@ -22,7 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from src.agent.card_clustering import suggest_clusters
 from src.agent.pipeline import retry_refinement, run_pipeline
-from src.api.rate_limit import limit_light
+from src.api.rate_limit import limit_heavy, limit_light
 from src.api.schemas import (
     BundleIntoProjectRequest,
     CardClusterSuggestion,
@@ -30,11 +30,16 @@ from src.api.schemas import (
     CardListResponse,
     CardResponse,
     CardTagsUpdateRequest,
+    CardTranslateRequest,
+    CardTranslateResponse,
+    MetricQuestionRequest,
+    MetricQuestionResponse,
     ProjectResponse,
     SkillCategoryCount,
     SkillSummaryResponse,
     UnclassifiedSuggestionsResponse,
 )
+from src.parsing.parser import detect_missing_metric, translate_for_target_job
 from src.auth.deps import get_current_user
 from src.storage import db
 
@@ -49,12 +54,76 @@ def create_card(
     # 글자로 세므로 여기서 한 번 더 거른다(notion.py의 user_token 검증과 같은 패턴).
     if not payload.raw_text.strip():
         raise HTTPException(status_code=422, detail="내용을 입력해 주세요.")
-    result = run_pipeline(current_user.id, payload.raw_text)
+    result = run_pipeline(current_user.id, payload.raw_text, payload.metric_answer)
     card = db.get_card(current_user.id, result["card_id"])
     response = CardResponse.model_validate(card)
     response.refinement_failed = result["refinement_failed"]
     response.case_summary = result["parsed"].case_summary
     return response
+
+
+@router.post(
+    "/cards/metric-question",
+    response_model=MetricQuestionResponse,
+    dependencies=[Depends(limit_light)],
+)
+def metric_question_endpoint(
+    payload: MetricQuestionRequest, current_user: db.User = Depends(get_current_user)
+) -> MetricQuestionResponse:
+    """"변환 전 추가 질문" (Figma "02 · 변환 결과" 3.1-q, 9/18 신규).
+
+    CLAUDE.md 2.2가 정한 "숫자가 없으면 ... 유저에게 되묻는다(건너뛰기 가능)" 경로다.
+    카드를 만들지 않고 **질문만** 돌려준다 — 저장은 뒤이은 POST /api/cards가 한다.
+
+    2.1("평소 입력 비용 0")과의 균형은 프롬프트가 맡는다: 수치가 정말로 빠진 기록에만
+    질문이 나오고 나머지는 빈 문자열로 와서 프론트가 화면을 건너뛴다. 판정 자체가
+    실패해도 빈 값이 오므로(`detect_missing_metric`) 입력 흐름이 막히지 않는다.
+    """
+    if not payload.raw_text.strip():
+        raise HTTPException(status_code=422, detail="내용을 입력해 주세요.")
+    result = detect_missing_metric(payload.raw_text)
+    return MetricQuestionResponse(question=result.question, placeholder=result.placeholder)
+
+
+@router.post(
+    "/cards/{card_id}/translate",
+    response_model=CardTranslateResponse,
+    dependencies=[Depends(limit_heavy)],
+)
+def translate_card_endpoint(
+    card_id: int,
+    payload: CardTranslateRequest,
+    current_user: db.User = Depends(get_current_user),
+) -> CardTranslateResponse:
+    """"직무 전환 번역" (Figma 3.1-b / 3.1-c, 9/18 신규).
+
+    같은 기록을 **목표 직무** 관점으로 다시 읽어준다. 번역 결과는 **저장하지 않는다** —
+    카드 하나가 여러 목표 직무로 각각 다르게 읽힐 수 있고, 그걸 다 저장하기 시작하면
+    관리 UI가 필요해진다(CLAUDE.md 3장이 AI 그룹핑을 저장하지 않는 것과 같은 이유).
+    유저가 이 문장을 남기고 싶으면 복사하거나 "문장 고치기"로 직접 적용하면 된다.
+
+    `current_job`은 프로필에서 읽는다 — 유저에게 다시 묻지 않는다(2.1). 프로필이
+    비어 있으면 "현재 직무"라는 일반 표현을 쓴다(없는 직무를 지어내지 않는다).
+    """
+    card = db.get_card(current_user.id, card_id)
+    if card is None:
+        raise HTTPException(status_code=404, detail="카드를 찾을 수 없습니다")
+    profile = db.get_profile(current_user.id)
+    current_job = profile.job_detail or profile.job_field or "현재 직무"
+    try:
+        result = translate_for_target_job(
+            card.raw_text, card.refined_sentence, current_job, payload.target_job
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502, detail="지금은 다른 직무 관점으로 읽어드리기 어려워요."
+        ) from exc
+    return CardTranslateResponse(
+        related=result.related,
+        headline=result.headline,
+        translated_sentence=result.translated_sentence,
+        suggestion=result.suggestion,
+    )
 
 
 @router.post("/cards/{card_id}/refine", response_model=CardResponse, dependencies=[Depends(limit_light)])
@@ -113,6 +182,24 @@ def update_card_tags_endpoint(
     payload: CardTagsUpdateRequest,
     current_user: db.User = Depends(get_current_user),
 ) -> CardResponse:
+    if payload.revert_to_ai:
+        # "AI 문장으로 되돌리기" (Figma 3.1-d, 9/18) — 되돌릴 원본이 없으면(마이그레이션
+        # 이전 카드) 아무것도 하지 않는다. 프론트는 원본이 있을 때만 버튼을 띄우므로
+        # 여기 오는 건 경합이나 직접 호출뿐이다.
+        existing = db.get_card(current_user.id, card_id)
+        if existing is None:
+            raise HTTPException(status_code=404, detail="카드를 찾을 수 없습니다")
+        if not existing.ai_sentence:
+            raise HTTPException(status_code=400, detail="되돌릴 AI 문장이 없습니다")
+        card = db.update_card(
+            current_user.id,
+            card_id,
+            skill_tags=payload.skill_tags,
+            refined_sentence=existing.ai_sentence,
+            sentence_edited=False,
+        )
+        return CardResponse.model_validate(card)
+
     if payload.skill_tags is None and payload.refined_sentence is None:
         raise HTTPException(status_code=400, detail="skill_tags 또는 refined_sentence 중 하나는 있어야 합니다")
     card = db.update_card(
@@ -120,6 +207,10 @@ def update_card_tags_endpoint(
         card_id,
         skill_tags=payload.skill_tags,
         refined_sentence=payload.refined_sentence,
+        # 문장을 손으로 고친 순간부터 "다시 만들기"가 그 문장을 덮어쓰지 않는다
+        # (Figma 3.1-d "직접 고친 문장은 다시 변환해도 유지돼요"). 태그만 고치는
+        # 요청은 이 플래그를 건드리지 않는다.
+        sentence_edited=True if payload.refined_sentence is not None else None,
     )
     if card is None:
         raise HTTPException(status_code=404, detail="카드를 찾을 수 없습니다")

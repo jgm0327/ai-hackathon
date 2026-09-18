@@ -60,6 +60,20 @@ class Card:
     # 묶는 로직) 절대 건드리지 않고, 시각만 별도 컬럼으로 추가했다 — 기존 동작 무변경,
     # 순수 추가. 예전 카드는 마이그레이션 시점에 없던 컬럼이라 None(빈 문자열).
     created_time: str | None = None
+    # 9/18 신규 — Figma "02 · 변환 결과"의 3.1-d "문장 수정" 시트.
+    #
+    # 그 화면은 두 가지를 동시에 약속한다: "직접 고친 문장은 다시 변환해도 유지돼요"와
+    # "AI 문장으로 되돌리기". 둘 다 지키려면 **AI가 만든 문장과 사람이 고친 문장을
+    # 따로** 들고 있어야 한다 — `refined_sentence` 한 칸만 있으면 사람이 고치는 순간
+    # AI 원본이 사라져서 되돌릴 수가 없고, 반대로 다시 변환하면 사람이 고친 게 날아간다.
+    #
+    # `refined_sentence`는 **지금 화면에 보이는 문장**(수정본이 있으면 수정본), 
+    # `ai_sentence`는 **가장 최근에 AI가 만든 문장**이다. `sentence_edited`가 True면
+    # `retry_refinement()`가 `ai_sentence`만 갱신하고 `refined_sentence`는 건드리지 않는다.
+    # 마이그레이션 이전 카드는 `ai_sentence`가 None이고 `sentence_edited`가 False다
+    # (= 되돌릴 AI 원본이 없는 상태 — 되돌리기 버튼을 그냥 안 띄운다).
+    ai_sentence: str | None = None
+    sentence_edited: bool = False
 
 
 @dataclass
@@ -176,7 +190,9 @@ def init_db() -> None:
                 refined_sentence TEXT NOT NULL,
                 skill_tags       TEXT NOT NULL,
                 confidence       REAL,
-                created_at       TEXT NOT NULL
+                created_at       TEXT NOT NULL,
+                ai_sentence      TEXT,
+                sentence_edited  INTEGER NOT NULL DEFAULT 0
             )
             """
         )
@@ -185,6 +201,13 @@ def init_db() -> None:
         existing_columns = {row["name"] for row in conn.execute("PRAGMA table_info(cards)")}
         if "created_time" not in existing_columns:
             conn.execute("ALTER TABLE cards ADD COLUMN created_time TEXT")
+        # 9/18 신규 — 위 Card 데이터클래스 주석 참고 (문장 직접 수정 / AI 문장 되돌리기).
+        if "ai_sentence" not in existing_columns:
+            conn.execute("ALTER TABLE cards ADD COLUMN ai_sentence TEXT")
+        if "sentence_edited" not in existing_columns:
+            conn.execute(
+                "ALTER TABLE cards ADD COLUMN sentence_edited INTEGER NOT NULL DEFAULT 0"
+            )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS profile (
@@ -321,8 +344,8 @@ def save_card(
             """
             INSERT INTO cards
                 (user_id, project_id, raw_text, refined_sentence, skill_tags, confidence,
-                 created_at, created_time)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 created_at, created_time, ai_sentence)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -333,6 +356,8 @@ def save_card(
                 parsed.confidence,
                 created_at,
                 created_time,
+                # 저장 시점엔 사람이 손댄 적이 없으니 보이는 문장 = AI 문장이다.
+                parsed.refined_sentence,
             ),
         )
         return cur.lastrowid
@@ -432,6 +457,8 @@ def update_card(
     skill_tags: list[str] | None = None,
     refined_sentence: str | None = None,
     confidence: float | None = None,
+    ai_sentence: str | None = None,
+    sentence_edited: bool | None = None,
 ) -> Card | None:
     """카드의 skill_tags/refined_sentence/confidence를 손으로(또는 재정리로) 고친다
     (9/14 카테고리 수정 신규, 9/15 문장 수정 + confidence 추가).
@@ -443,6 +470,10 @@ def update_card(
 
     `confidence`는 사람이 직접 고르는 값이 아니라 `pipeline.retry_refinement()`가
     재파싱 결과를 반영할 때만 쓴다 — PATCH API 스키마에는 노출하지 않는다.
+
+    `ai_sentence`/`sentence_edited`(9/18)도 마찬가지로 라우터가 직접 계산해서 넘기는
+    값이다 — 클라이언트가 임의로 설정할 수 있게 하면 "AI가 만든 문장"이라는 표시가
+    의미를 잃는다. Card 데이터클래스 주석 참고.
 
     아무 것도 안 넘기면(호출부가 실수한 경우) 아무 것도 안 건드리고 현재 카드를 그대로
     반환한다 — 라우터 쪽에서 이미 "최소 하나"를 강제하지만, 여기서도 안전하게 둔다.
@@ -462,6 +493,15 @@ def update_card(
     if confidence is not None:
         sets.append("confidence = ?")
         params.append(confidence)
+    # 9/18 — 둘 다 `refined_sentence`와 독립적으로 넘길 수 있어야 한다. "다시 만들기"는
+    # 사람이 고친 카드에서 `ai_sentence`만 갱신하고(보이는 문장은 그대로 두고),
+    # "AI 문장으로 되돌리기"는 `refined_sentence`를 되돌리면서 플래그만 내린다.
+    if ai_sentence is not None:
+        sets.append("ai_sentence = ?")
+        params.append(ai_sentence)
+    if sentence_edited is not None:
+        sets.append("sentence_edited = ?")
+        params.append(1 if sentence_edited else 0)
     if sets:
         with _connect() as conn:
             conn.execute(
@@ -794,6 +834,8 @@ def _row_to_card(row: sqlite3.Row) -> Card:
         # "created_time" in row_keys 체크: 마이그레이션 전 스키마로 열린 아주 오래된
         # 연결이 남아있을 극단적 경우를 대비한 방어(평소엔 init_db()가 항상 먼저 돈다).
         created_time=row["created_time"] if "created_time" in row_keys else None,
+        ai_sentence=row["ai_sentence"] if "ai_sentence" in row_keys else None,
+        sentence_edited=bool(row["sentence_edited"]) if "sentence_edited" in row_keys else False,
     )
 
 

@@ -34,6 +34,12 @@ export interface Card {
    * refinement_failed와 동일한 패턴: POST 생성 시점에만 채워지고, GET/PATCH
    * 응답에서는 항상 빈 문자열(또는 생략)이다. */
   case_summary?: string;
+  /** 9/18 신규 — Figma "02 · 변환 결과" 3.1-d "문장 수정" 시트.
+   * `refined_sentence`가 **지금 보이는 문장**(사람이 고쳤으면 고친 것)이고,
+   * `ai_sentence`는 **가장 최근에 AI가 만든 문장**이다. "AI 문장으로 되돌리기"
+   * 버튼은 `sentence_edited`가 true이고 `ai_sentence`가 있을 때만 띄운다. */
+  ai_sentence?: string | null;
+  sentence_edited?: boolean;
 }
 
 export interface Project {
@@ -205,11 +211,62 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 // 1. 카드 — docs/05-api-contract.md §1
 // ---------------------------------------------------------------------------
 
-/** 메모 한 줄을 파싱해 저장한다. 응답은 3~10초 걸릴 수 있다 (호출부에서 스켈레톤 표시). */
-export function createCard(rawText: string): Promise<Card> {
+/** 메모 한 줄을 파싱해 저장한다. 응답은 3~10초 걸릴 수 있다 (호출부에서 스켈레톤 표시).
+ *
+ * `metricAnswer`(9/18)는 변환 전 추가 질문(Figma 3.1-q)에 유저가 **직접 답한** 수치다.
+ * 건너뛰면 안 보내면 되고, 그때 동작은 예전과 완전히 같다. */
+export function createCard(rawText: string, metricAnswer?: string): Promise<Card> {
   return request<Card>("/cards", {
     method: "POST",
+    body: JSON.stringify({
+      raw_text: rawText,
+      ...(metricAnswer ? { metric_answer: metricAnswer } : {}),
+    }),
+  });
+}
+
+/**
+ * "변환 전 추가 질문" (Figma "02 · 변환 결과" 3.1-q, 9/18 신규).
+ *
+ * CLAUDE.md 2.2가 정한 "숫자가 없으면 ... 유저에게 되묻는다(건너뛰기 가능)" 경로다.
+ * **카드를 만들지 않는다** — 질문만 받아오고, 저장은 뒤이은 `createCard()`가 한다.
+ * `question`이 빈 문자열이면 물어볼 게 없다는 뜻이라 호출부는 화면을 건너뛴다
+ * (매일 쓰는 경로에 화면이 하나 더 끼지 않게 하는 장치 — 2.1).
+ */
+export interface MetricQuestion {
+  question: string;
+  placeholder: string;
+}
+
+export function getMetricQuestion(rawText: string): Promise<MetricQuestion> {
+  return request<MetricQuestion>("/cards/metric-question", {
+    method: "POST",
     body: JSON.stringify({ raw_text: rawText }),
+  });
+}
+
+/**
+ * "직무 전환 번역" (Figma 3.1-b / 3.1-c, 9/18 신규) — 같은 기록을 온보딩에서 고른
+ * **목표 직무** 관점으로 다시 읽어준다.
+ *
+ * 결과는 서버에 저장되지 않는다. 카드 하나가 목표 직무마다 다르게 읽힐 수 있는데
+ * 그걸 전부 저장하면 관리 UI가 필요해진다(CLAUDE.md 3장이 AI 그룹핑을 저장하지 않는
+ * 것과 같은 판단). 남기고 싶으면 복사하거나 "문장 고치기"로 직접 적용하면 된다.
+ *
+ * `related`가 false면 3.1-c("직무 접점 없음") 화면이다 — 억지로 갖다 붙이는 대신
+ * `suggestion`으로 무엇을 기록하면 가까워지는지 알려준다.
+ */
+export interface CardTranslation {
+  related: boolean;
+  headline: string;
+  translated_sentence: string;
+  suggestion: string;
+}
+
+export function translateCard(id: number, targetJob: string): Promise<CardTranslation> {
+  return request<CardTranslation>(`/cards/${id}/translate`, {
+    method: "POST",
+    body: JSON.stringify({ target_job: targetJob }),
   });
 }
 
@@ -251,18 +308,24 @@ export function getSkillSummary(projectId: number, topN?: number): Promise<Skill
  */
 export function updateCard(
   id: number,
-  patch: { skillTags?: string[]; refinedSentence?: string },
+  patch: { skillTags?: string[]; refinedSentence?: string; revertToAi?: boolean },
 ): Promise<Card> {
   return request<Card>(`/cards/${id}`, {
     method: "PATCH",
     body: JSON.stringify({
       ...(patch.skillTags !== undefined && { skill_tags: patch.skillTags }),
       ...(patch.refinedSentence !== undefined && { refined_sentence: patch.refinedSentence }),
+      // 9/18 — "AI 문장으로 되돌리기"(Figma 3.1-d). 서버가 카드에 보관된
+      // ai_sentence로 되돌리므로 문장을 클라이언트가 실어 보내지 않는다.
+      ...(patch.revertToAi && { revert_to_ai: true }),
     }),
   });
 }
 
-/** 폴백 저장된(원문 그대로인) 카드를 다시 AI로 정리해본다 (9/15 신규). */
+/** 카드를 다시 AI로 정리한다 (9/15 폴백 복구용으로 신설, 9/18 "다시 만들기"로 확장).
+ *
+ * 사람이 직접 고친 문장은 덮어쓰지 않는다 — 서버가 새 문장을 `ai_sentence`에만
+ * 넣는다(Figma 3.1-d "직접 고친 문장은 다시 변환해도 유지돼요"). */
 export function refineCard(id: number): Promise<Card> {
   return request<Card>(`/cards/${id}/refine`, { method: "POST" });
 }

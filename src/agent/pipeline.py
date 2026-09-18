@@ -61,10 +61,16 @@ from src.timeutil import now_local
 logger = logging.getLogger(__name__)
 
 
-def run_pipeline(user_id: int, raw_text: str) -> dict:
+def run_pipeline(user_id: int, raw_text: str, metric_answer: str | None = None) -> dict:
     """단일 낙서 문장을 받아 파싱하고 그 유저의 현재 프로젝트에 카드로 저장한다.
 
     JD 매칭은 하지 않는다 (이직 준비 시점의 `build_career_doc()`으로 이동됨).
+
+    `metric_answer`(9/18 신규)는 변환 전 추가 질문(Figma 3.1-q)에 유저가 **직접 답한**
+    수치다. 답이 오면 메모 뒤에 한 줄로 붙여서 그 값이 문장에 들어가게 한다 — 붙이는
+    위치가 `raw_text` 자체인 게 중요하다. 별도 컬럼에 두면 나중에 "다시 만들기"로
+    재파싱할 때 그 숫자만 조용히 빠져서, 유저가 답한 값이 사라진 문장이 나온다.
+    유저가 쓴 것만 저장하므로 CLAUDE.md 2.2(숫자 생성 금지)에 어긋나지 않는다.
 
     반환 스키마:
         {
@@ -73,6 +79,8 @@ def run_pipeline(user_id: int, raw_text: str) -> dict:
             "refinement_failed": bool,
         }
     """
+    if metric_answer and metric_answer.strip():
+        raw_text = f"{raw_text}\n(결과 수치: {metric_answer.strip()})"
     try:
         parsed = parse_note(raw_text)
         parsed.skill_tags = canonicalize_tags(parsed.skill_tags)
@@ -99,7 +107,15 @@ def run_pipeline(user_id: int, raw_text: str) -> dict:
 
 
 def retry_refinement(user_id: int, card_id: int) -> Card | None:
-    """폴백 저장된(원문 그대로인) 카드를 다시 AI로 정리한다 (9/15 신규).
+    """카드를 다시 AI로 정리한다 (9/15 신규, 9/18 "다시 만들기"로 용도 확장).
+
+    원래는 폴백 저장된(원문 그대로인) 카드를 복구하는 용도였는데, Figma "02 · 변환
+    결과" 3.1의 액션이 "다시 만들기"로 바뀌면서 정상 카드에서도 불린다.
+
+    **사람이 직접 고친 문장은 덮어쓰지 않는다** — 3.1-d가 "직접 고친 문장은 다시
+    변환해도 유지돼요"라고 화면에 써 두고 있다. 이 경우 새로 만든 문장은
+    `ai_sentence`에만 넣어서, "AI 문장으로 되돌리기"를 누르면 **가장 최근** AI 문장이
+    나오게 한다(되돌리기가 옛날 문장으로 가는 건 유저 기대와 어긋난다).
 
     이 유저 소유가 아니거나 없으면 None. 파싱이 다시 실패하면 예외를 그대로
     전파한다(카드는 이미 저장돼 있으니 데이터 유실 위험이 없다 — 호출부가 그냥
@@ -114,8 +130,9 @@ def retry_refinement(user_id: int, card_id: int) -> Card | None:
         user_id,
         card_id,
         skill_tags=parsed.skill_tags,
-        refined_sentence=parsed.refined_sentence,
+        refined_sentence=None if card.sentence_edited else parsed.refined_sentence,
         confidence=parsed.confidence,
+        ai_sentence=parsed.refined_sentence,
     )
 
 

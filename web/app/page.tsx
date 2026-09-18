@@ -4,7 +4,10 @@ import { FormEvent, Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { BottomSheet } from "@/components/BottomSheet";
+import { CardResultSheet } from "@/components/CardResultSheet";
+import { MetricQuestionScreen } from "@/components/MetricQuestionScreen";
 import { ProjectSwitcher } from "@/components/ProjectSwitcher";
+import { SentenceEditSheet } from "@/components/SentenceEditSheet";
 import { CardResultSkeleton } from "@/components/Skeleton";
 import { Toast, useToast } from "@/components/Toast";
 import { VoiceInput } from "@/components/VoiceInput";
@@ -14,6 +17,7 @@ import {
   Profile,
   SkillSummary,
   createCard,
+  getMetricQuestion,
   getProfile,
   getSkillSummary,
   listCards,
@@ -99,6 +103,19 @@ function HomePageInner() {
   // 또 실패해도 데이터 유실은 없다.
   const [refining, setRefining] = useState(false);
   const [refineError, setRefineError] = useState<string | null>(null);
+  // 결과 시트의 헤드라인("오늘 하신 A/B 테스트는 …"). POST /api/cards 응답에만 실려
+  // 오는 값이라(`case_summary`), 이후 PATCH/refine 응답으로 카드를 갈아끼워도
+  // 헤드라인이 사라지지 않게 따로 붙들어 둔다.
+  const [caseSummary, setCaseSummary] = useState("");
+  // "3.1-q 변환 전 추가 질문" (9/18) — 값이 있으면 질문 화면이 전체를 덮는다.
+  // 이 시점에 카드는 **아직 저장되지 않았다**. 뒤로 나가면 입력 화면으로 돌아간다.
+  const [pendingQuestion, setPendingQuestion] = useState<{
+    rawText: string;
+    question: string;
+    placeholder: string;
+  } | null>(null);
+  // "3.1-d 결과 문장 직접 수정" (9/18) — 결과 시트 위에 겹쳐 뜨는 수정 시트.
+  const [editingSentence, setEditingSentence] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // ProjectSwitcher에 그대로 넘긴다 — 훅 인스턴스를 이 화면과 공유해야 전환이 즉시
@@ -228,16 +245,20 @@ function HomePageInner() {
 
   // 텍스트 입력과 음성 입력이 공유하는 단일 제출 경로 — 어느 쪽에서 오든 동일한
   // 스켈레톤/결과 모달 UX를 탄다 (docs/06-migration.md §2.1: 별도 흐름을 만들지 않는다).
-  const submitText = async (text: string) => {
-    if (!text || submitting || isOffline) return;
-
+  /**
+   * 실제 저장 경로 — 메모(+되묻기 답)를 카드로 만든다.
+   *
+   * `metricAnswer`는 3.1-q에서 유저가 **직접 답한** 수치다. 건너뛰면 빈 문자열이고,
+   * 그때 동작은 되묻기가 생기기 전과 완전히 같다 (CLAUDE.md 2.2 "건너뛰기 가능").
+   */
+  const createCardFrom = async (text: string, metricAnswer: string) => {
     setSubmitting(true);
     setError(null);
     setResult(null);
     setRefineError(null);
     try {
       // 응답이 3~10초 걸린다 (docs/05-api-contract.md §1) — 스켈레톤으로 대기 표시.
-      let card = await createCard(text);
+      let card = await createCard(text, metricAnswer || undefined);
 
       // "이어 쓰기"로 들어온 메모는 그 주제에 확실히 붙여준다 (9/18). LLM이 뽑은
       // 태그에 그 주제가 없을 수 있는데(같은 일을 다른 말로 적으면 어휘가 안 겹친다
@@ -252,6 +273,10 @@ function HomePageInner() {
       }
 
       setResult(card);
+      // 3.1의 헤드라인은 POST 응답에만 실려 온다 — PATCH/refine 응답엔 없으므로
+      // 여기서 따로 붙들어 둬야 "다시 만들기" 후에도 헤드라인이 안 사라진다.
+      setCaseSummary(card.case_summary ?? "");
+      setPendingQuestion(null);
       setRawText("");
       setContinueTag(null);
       refreshHomeData(); // 방금 쌓인 카드를 버블/오늘 목록에 바로 반영
@@ -262,6 +287,35 @@ function HomePageInner() {
     }
   };
 
+  /**
+   * 텍스트 입력과 음성 입력이 공유하는 단일 제출 경로.
+   *
+   * 9/18 — 저장 앞에 "변환 전 추가 질문"(Figma 3.1-q)이 한 단계 붙었다. 다만
+   * **항상 뜨는 게 아니다**: 서버가 "이 기록엔 수치가 정말로 빠졌다"고 판단할 때만
+   * 질문이 오고, 그 외에는 빈 문자열이 와서 곧장 변환으로 넘어간다 — 매일 쓰는
+   * 경로에 화면을 더하지 않기 위한 조건이다(CLAUDE.md 2.1).
+   *
+   * 판정 호출이 실패해도 그냥 질문 없이 진행한다. 이건 부가 단계라, 여기서 막히면
+   * 메모 저장 자체가 막힌다(P0: 저장이 없으면 제품이 없다).
+   */
+  const submitText = async (text: string) => {
+    if (!text || submitting || isOffline) return;
+
+    setSubmitting(true);
+    setError(null);
+    try {
+      const { question, placeholder } = await getMetricQuestion(text);
+      if (question) {
+        setPendingQuestion({ rawText: text, question, placeholder });
+        setSubmitting(false);
+        return;
+      }
+    } catch {
+      // 판정 실패 — 되묻지 않고 그대로 변환한다.
+    }
+    await createCardFrom(text, "");
+  };
+
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     submitText(rawText.trim());
@@ -269,25 +323,26 @@ function HomePageInner() {
 
   const handleCloseResult = () => {
     setResult(null);
+    setEditingSentence(false);
   };
 
-  const handleRetry = () => {
-    setResult(null);
-    textareaRef.current?.focus();
-  };
-
-  const handleCopyResult = async () => {
-    if (!result) return;
+  const handleCopyResult = async (sentence: string) => {
     try {
-      await navigator.clipboard.writeText(result.refined_sentence);
+      await navigator.clipboard.writeText(sentence);
       setCopiedResult(true);
-      showToast("클립보드에 복사했어요"); // Figma 41:880
+      showToast("클립보드에 복사했어요"); // Figma 41:880 / 286:7211
       setTimeout(() => setCopiedResult(false), 1500);
     } catch {
       // 클립보드 접근 실패 — 조용히 무시
     }
   };
 
+  /**
+   * "다시 만들기" (Figma 286:7145) / 변환 실패 화면의 "다시 시도".
+   *
+   * 사람이 직접 고친 문장은 서버가 덮어쓰지 않는다 — 새 문장을 `ai_sentence`에만
+   * 넣는다(3.1-d "직접 고친 문장은 다시 변환해도 유지돼요").
+   */
   const handleRefine = async () => {
     if (!result) return;
     setRefining(true);
@@ -295,11 +350,30 @@ function HomePageInner() {
     try {
       const updated = await refineCard(result.id);
       setResult(updated);
+      refreshHomeData(); // 오늘 목록에도 새 문장이 반영돼야 한다
     } catch {
       setRefineError("다시 정리하는 데 실패했어요. 잠시 후 다시 시도해 주세요.");
     } finally {
       setRefining(false);
     }
+  };
+
+  /** 3.1-d "저장" — 고친 문장을 카드에 반영한다. 실패하면 시트가 열린 채로 남는다. */
+  const handleSaveSentence = async (sentence: string) => {
+    if (!result) return;
+    const updated = await updateCard(result.id, { refinedSentence: sentence });
+    setResult(updated);
+    setEditingSentence(false);
+    refreshHomeData();
+  };
+
+  /** 3.1-d "AI 문장으로 되돌리기" — 서버가 보관 중인 ai_sentence로 되돌린다. */
+  const handleRevertSentence = async () => {
+    if (!result) return;
+    const updated = await updateCard(result.id, { revertToAi: true });
+    setResult(updated);
+    setEditingSentence(false);
+    refreshHomeData();
   };
 
   const totalCards = skillSummary?.total_cards ?? 0;
@@ -501,9 +575,11 @@ function HomePageInner() {
 
       {error && <p className="rounded-lg bg-[#1e1e1e] px-3 py-2 text-sm text-red-400">{error}</p>}
 
-      {/* 결과 출력 바텀시트 (Figma "3.1 결과 출력 모달") */}
+      {/* 변환 실패 폴백 (Figma 41:737, 9/15) — 이 경우만 예전 시트를 그대로 쓴다.
+          "02 · 변환 결과" 섹션에는 실패 화면이 없어서 새 톤으로 다시 그릴 근거가
+          없고, 여기서 중요한 건 "메모는 남아 있다"는 사실이지 색이 아니다. */}
       <BottomSheet
-        open={!!result}
+        open={!!result && !!result.refinement_failed}
         onClose={handleCloseResult}
         hideHandle
         panelClassName="relative w-full max-w-md rounded-tl-[24px] rounded-tr-[24px] bg-[#1a1a1a] px-5 pt-3 pb-[30px] shadow-xl"
@@ -521,87 +597,89 @@ function HomePageInner() {
               </button>
             </div>
 
-            {result.refinement_failed ? (
-              <>
-                <div className="flex items-center gap-2">
-                  <span aria-hidden className="h-2 w-2 shrink-0 rounded-full bg-red-500" />
-                  <p className="text-[14px] font-semibold text-[#f2f2f2]">변환에 실패했어요</p>
-                </div>
-                <p className="text-[12px] text-amber-400">
-                  메모는 그대로 있습니다. 다시 시도하거나 원문만 저장할 수 있어요.
-                </p>
+            <div className="flex items-center gap-2">
+              <span aria-hidden className="h-2 w-2 shrink-0 rounded-full bg-red-500" />
+              <p className="text-[14px] font-semibold text-[#f2f2f2]">변환에 실패했어요</p>
+            </div>
+            <p className="text-[12px] text-amber-400">
+              메모는 그대로 있습니다. 다시 시도하거나 원문만 저장할 수 있어요.
+            </p>
 
-                <div className="flex gap-3 rounded-[14px] bg-[#2a2320] px-4 py-[18px]">
-                  <div className="w-[3px] shrink-0 self-stretch rounded-full bg-amber-500" />
-                  <p className="flex-1 text-[14px] font-medium text-[#f2f2f2]">{result.raw_text}</p>
-                </div>
+            <div className="flex gap-3 rounded-[14px] bg-[#2a2320] px-4 py-[18px]">
+              <div className="w-[3px] shrink-0 self-stretch rounded-full bg-amber-500" />
+              <p className="flex-1 text-[14px] font-medium text-[#f2f2f2]">{result.raw_text}</p>
+            </div>
 
-                {refineError && <p className="text-[12px] text-red-400">{refineError}</p>}
+            {refineError && <p className="text-[12px] text-red-400">{refineError}</p>}
 
-                <div className="flex gap-2.5">
-                  <button
-                    type="button"
-                    onClick={handleRefine}
-                    disabled={refining}
-                    className="flex flex-1 items-center justify-center rounded-[12px] bg-accent py-4 text-[14px] font-semibold text-accent-foreground transition-colors active:scale-[0.98] disabled:opacity-40"
-                  >
-                    {refining ? "정리하는 중…" : "다시 시도"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleCloseResult}
-                    className="flex flex-1 items-center justify-center rounded-[12px] border-[1.5px] border-[#333] bg-transparent py-4 text-[14px] font-semibold text-[#f2f2f2] transition-colors hover:bg-[#2a2a2a] active:scale-[0.98]"
-                  >
-                    그냥 저장하기
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <p className="text-[17px] font-bold leading-[24px] text-[#f2f2f2]">
-                  {result.case_summary || "오늘 기록을 이렇게 정리했어요."}
-                </p>
-
-                <div className="flex gap-3 rounded-[14px] bg-[#242424] px-4 py-[18px]">
-                  <p className="flex-1 text-[14px] leading-relaxed text-[#f2f2f2]">
-                    {result.refined_sentence}
-                  </p>
-                </div>
-
-                {result.skill_tags.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5">
-                    {result.skill_tags.map((tag) => (
-                      <span
-                        key={tag}
-                        className="rounded-full bg-[#2a2a2a] px-2.5 py-1 text-xs text-[#c8c8c8]"
-                      >
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                )}
-
-                <div className="flex gap-2.5">
-                  <button
-                    type="button"
-                    onClick={handleCopyResult}
-                    className="flex flex-1 items-center justify-center rounded-[12px] bg-accent py-4 text-[14px] font-semibold text-accent-foreground transition-colors active:scale-[0.98]"
-                  >
-                    {copiedResult ? "복사됨" : "복사하기"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleRetry}
-                    className="flex flex-1 items-center justify-center rounded-[12px] border-[1.5px] border-[#333] bg-transparent py-4 text-[14px] font-semibold text-[#f2f2f2] transition-colors hover:bg-[#2a2a2a] active:scale-[0.98]"
-                  >
-                    다시 변환
-                  </button>
-                </div>
-              </>
-            )}
+            <div className="flex gap-2.5">
+              <button
+                type="button"
+                onClick={handleRefine}
+                disabled={refining}
+                className="flex flex-1 items-center justify-center rounded-[12px] bg-accent py-4 text-[14px] font-semibold text-accent-foreground transition-colors active:scale-[0.98] disabled:opacity-40"
+              >
+                {refining ? "정리하는 중…" : "다시 시도"}
+              </button>
+              <button
+                type="button"
+                onClick={handleCloseResult}
+                className="flex flex-1 items-center justify-center rounded-[12px] border-[1.5px] border-[#333] bg-transparent py-4 text-[14px] font-semibold text-[#f2f2f2] transition-colors hover:bg-[#2a2a2a] active:scale-[0.98]"
+              >
+                그냥 저장하기
+              </button>
+            </div>
           </div>
         )}
       </BottomSheet>
+
+      {/* "3.1 결과 출력 모달" + 3.1-b/3.1-c 직무 전환 번역 (Figma 286:7130 등, 9/18).
+          기존 시트에 있던 스킬 태그 칩과 ✕ 버튼은 재설계에서 빠졌다 — 태그는
+          `/stack`에서 계속 보이고 고칠 수 있으므로 정보가 사라지진 않는다. */}
+      {result && !result.refinement_failed && (
+        <CardResultSheet
+          card={result}
+          caseSummary={caseSummary}
+          currentJob={targetTrackLabel(profile)}
+          targetJobs={profile?.target_jobs ?? []}
+          onClose={handleCloseResult}
+          onEditSentence={() => setEditingSentence(true)}
+          onCopy={handleCopyResult}
+          onRegenerate={handleRefine}
+          copied={copiedResult}
+          regenerating={refining}
+          error={refineError}
+        />
+      )}
+
+      {/* "3.1-d 결과 문장 직접 수정" (Figma 286:7148) — 결과 시트 위에 겹친다. */}
+      {result && (
+        <SentenceEditSheet
+          open={editingSentence}
+          sentence={result.refined_sentence}
+          aiSentence={result.ai_sentence}
+          onCancel={() => setEditingSentence(false)}
+          onSave={handleSaveSentence}
+          onRevertToAi={handleRevertSentence}
+        />
+      )}
+
+      {/* "3.1-q 변환 전 추가 질문" (Figma 286:7306) — 카드는 아직 저장 전이다. */}
+      {pendingQuestion && (
+        <MetricQuestionScreen
+          rawText={pendingQuestion.rawText}
+          question={pendingQuestion.question}
+          placeholder={pendingQuestion.placeholder}
+          submitting={submitting}
+          onBack={() => {
+            // 되묻기 화면에서 뒤로 나가면 메모를 입력창에 되돌려준다 — 음성 입력으로
+            // 들어온 경우 여기서 그냥 버리면 방금 말한 내용이 통째로 사라진다.
+            setRawText(pendingQuestion.rawText);
+            setPendingQuestion(null);
+          }}
+          onSubmit={(answer) => createCardFrom(pendingQuestion.rawText, answer)}
+        />
+      )}
 
       <Toast toast={toast} />
     </div>

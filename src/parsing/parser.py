@@ -12,7 +12,14 @@ import anthropic
 import requests
 
 from src.config import settings
-from src.parsing.prompt_templates import SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
+from src.parsing.prompt_templates import (
+    JOB_TRANSLATION_SYSTEM_PROMPT,
+    JOB_TRANSLATION_USER_TEMPLATE,
+    METRIC_QUESTION_SYSTEM_PROMPT,
+    METRIC_QUESTION_USER_TEMPLATE,
+    SYSTEM_PROMPT,
+    USER_PROMPT_TEMPLATE,
+)
 
 
 @dataclass
@@ -41,15 +48,22 @@ def _get_client() -> anthropic.Anthropic:
 
 
 def _call_llm_anthropic(raw_text: str) -> str:
+    return _call_llm_anthropic_with(SYSTEM_PROMPT, USER_PROMPT_TEMPLATE.format(raw_text=raw_text))
+
+
+def _call_llm_anthropic_with(system_prompt: str, user_prompt: str, max_tokens: int = 512) -> str:
+    """9/18 — 프롬프트를 인자로 받는 일반형. 원래 이 함수는 낙서 정리 프롬프트를
+    하드코딩하고 있었는데, 같은 "가벼운 Haiku 호출 + JSON 응답" 형태의 경로가
+    둘(숫자 되묻기 / 직무 전환 번역) 더 생겨서 공통부를 여기로 뺐다.
+    타임아웃·재시도·텍스트 블록 추출 규칙을 세 경로가 똑같이 따르게 하는 게 목적이다.
+    """
     response = _get_client().messages.create(
         # 매일 쓰는 가벼운 경로라 llm_model(Sonnet, 경력기술서용)이 아니라
         # llm_model_fast(Haiku)를 쓴다 — 9/15, 발표 데모 체감 속도 개선.
         model=settings.llm_model_fast,
-        max_tokens=512,
-        system=SYSTEM_PROMPT,
-        messages=[
-            {"role": "user", "content": USER_PROMPT_TEMPLATE.format(raw_text=raw_text)},
-        ],
+        max_tokens=max_tokens,
+        system=system_prompt,
+        messages=[{"role": "user", "content": user_prompt}],
     )
     return _extract_text(response)
 
@@ -73,13 +87,18 @@ def _call_llm_ollama(raw_text: str) -> str:
 
     `format: "json"`으로 JSON 강제 출력을 유도한다 (배포용 Anthropic 경로와 별개).
     """
+    return _call_llm_ollama_with(SYSTEM_PROMPT, USER_PROMPT_TEMPLATE.format(raw_text=raw_text))
+
+
+def _call_llm_ollama_with(system_prompt: str, user_prompt: str) -> str:
+    """`_call_llm_anthropic_with`의 Ollama 짝 (9/18)."""
     response = requests.post(
         f"{settings.ollama_base_url}/api/chat",
         json={
             "model": settings.ollama_model,
             "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": USER_PROMPT_TEMPLATE.format(raw_text=raw_text)},
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
             ],
             "format": "json",
             "stream": False,
@@ -96,6 +115,13 @@ def _call_llm(raw_text: str) -> str:
     if settings.llm_provider == "ollama":
         return _call_llm_ollama(raw_text)
     return _call_llm_anthropic(raw_text)
+
+
+def _call_llm_with(system_prompt: str, user_prompt: str, max_tokens: int = 512) -> str:
+    """프롬프트를 지정하는 `_call_llm` (9/18). 분기 규칙은 동일하다."""
+    if settings.llm_provider == "ollama":
+        return _call_llm_ollama_with(system_prompt, user_prompt)
+    return _call_llm_anthropic_with(system_prompt, user_prompt, max_tokens=max_tokens)
 
 
 _CODE_FENCE_RE = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?```$", re.DOTALL)
@@ -132,3 +158,105 @@ def parse_note(raw_text: str) -> ParsedEntry:
             if attempt == 1:
                 raise
     raise RuntimeError("unreachable")
+
+
+# ---------------------------------------------------------------------------
+# 변환 전 추가 질문 — Figma "02 · 변환 결과" 3.1-q (9/18 신규)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class MetricQuestion:
+    """"한 가지만 더" 화면에 띄울 질문 하나.
+
+    `question`이 비어 있으면 **질문할 게 없다**는 뜻이고, 프론트는 화면을 건너뛰고
+    바로 변환으로 넘어간다 — 매일 쓰는 경로에 화면이 하나 더 끼는 걸 이 판정이 막는다
+    (CLAUDE.md 2.1).
+    """
+
+    question: str = ""
+    placeholder: str = ""
+
+
+def detect_missing_metric(raw_text: str) -> MetricQuestion:
+    """메모에 성과 수치가 빠져 있으면 그걸 묻는 질문 하나를 만든다 (9/18 신규).
+
+    CLAUDE.md 2.2가 정한 "숫자가 없으면 ... 유저에게 되묻는다(건너뛰기 가능)" 경로다.
+    **되묻기만 하고 답을 지어내지는 않는다** — 유저가 건너뛰면 그냥 숫자 없이 간다.
+
+    LLM 호출이 실패하거나 응답이 깨져도 예외를 던지지 않고 빈 `MetricQuestion`을
+    반환한다. 이건 매일 쓰는 입력 경로에 얹히는 **부가** 단계라, 여기서 실패했다고
+    메모 저장 자체가 막히면 안 된다(P0: 저장이 없으면 제품이 없다).
+    """
+    try:
+        raw_response = _call_llm_with(
+            METRIC_QUESTION_SYSTEM_PROMPT,
+            METRIC_QUESTION_USER_TEMPLATE.format(raw_text=raw_text),
+            max_tokens=256,
+        )
+        data = json.loads(_strip_code_fence(raw_response))
+    except Exception:
+        return MetricQuestion()
+    question = data.get("question")
+    if not isinstance(question, str) or not question.strip():
+        return MetricQuestion()
+    placeholder = data.get("placeholder")
+    return MetricQuestion(
+        question=question.strip(),
+        placeholder=placeholder.strip() if isinstance(placeholder, str) else "",
+    )
+
+
+# ---------------------------------------------------------------------------
+# 직무 전환 번역 — Figma "02 · 변환 결과" 3.1-b / 3.1-c (9/18 신규)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class JobTranslation:
+    """같은 기록을 목표 직무 관점으로 다시 읽은 결과.
+
+    `related`가 False면 3.1-c("직무 접점 없음") 화면이다 — 억지로 갖다 붙이는 대신
+    "이건 그 직무로 읽기 어렵다"고 말하고, 대신 무엇을 기록하면 가까워지는지
+    `suggestion`으로 알려준다.
+    """
+
+    related: bool
+    headline: str
+    translated_sentence: str
+    suggestion: str = ""
+
+
+def translate_for_target_job(
+    raw_text: str, refined_sentence: str, current_job: str, target_job: str
+) -> JobTranslation:
+    """정제 문장을 목표 직무의 언어로 다시 쓴다 (9/18 신규).
+
+    **없는 경험을 만들어내지 않는다** — 프롬프트가 "원문에 없는 행동/도구/성과/숫자를
+    추가하지 말라"고 못박고 있고, 원문 숫자는 그대로 옮기게 한다 (CLAUDE.md 2.2).
+
+    `parse_note()`와 달리 실패 시 예외를 던진다 — 이건 유저가 관점 라벨을 눌러서
+    **명시적으로 요청한** 동작이라, 조용히 원문을 돌려주면 "번역이 됐는데 그대로인가"
+    하고 헷갈린다. 호출부(라우터)가 502로 알린다.
+    """
+    raw_response = _call_llm_with(
+        JOB_TRANSLATION_SYSTEM_PROMPT,
+        JOB_TRANSLATION_USER_TEMPLATE.format(
+            current_job=current_job,
+            target_job=target_job,
+            raw_text=raw_text,
+            refined_sentence=refined_sentence,
+        ),
+        max_tokens=512,
+    )
+    data = json.loads(_strip_code_fence(raw_response))
+    related = bool(data.get("related", False))
+    translated = data.get("translated_sentence")
+    return JobTranslation(
+        related=related,
+        headline=str(data.get("headline", "")).strip(),
+        # 모델이 문장을 안 돌려주면 원래 문장을 그대로 쓴다 — 빈 카드를 보여주느니
+        # 아무것도 안 바꾼 문장을 보여주는 쪽이 낫다(없는 문장을 만들지도 않는다).
+        translated_sentence=(translated.strip() if isinstance(translated, str) and translated.strip() else refined_sentence),
+        suggestion=str(data.get("suggestion", "")).strip() if not related else "",
+    )
