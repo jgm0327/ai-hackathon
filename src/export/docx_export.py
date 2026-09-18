@@ -14,10 +14,40 @@ Figma "4.2 경력기술서 빌더" 하단의 "Word" 버튼은 그동안 프론�
 from io import BytesIO
 
 from docx import Document
+from docx.oxml.ns import qn
+
+# 한글 폰트 (9/18 추가). python-docx 기본 템플릿은 `rFonts`를 아예 지정하지 않아서,
+# Word가 테마 기본값(Calibri 등 라틴 폰트)으로 렌더링한다 — 한글 글리프가 없어서
+# 글자가 깨져 보인다(9/18 실제 발생). 특히 `w:eastAsia`를 따로 지정해야 하는데
+# python-docx의 `style.font.name`은 ascii/hAnsi만 설정하므로 XML을 직접 건드린다.
+_KOREAN_FONT = "Malgun Gothic"  # 윈도우 기본 한글 폰트. 없는 환경에선 Word가 알아서 대체한다.
+
+# 이 변환기가 실제로 쓰는 스타일만 손본다.
+_STYLES_TO_PATCH = ("Normal", "Heading 1", "Heading 2", "List Bullet")
+
+
+def _apply_korean_font(document: Document) -> None:
+    for style_name in _STYLES_TO_PATCH:
+        try:
+            style = document.styles[style_name]
+        except KeyError:
+            continue  # 템플릿에 없는 스타일이면 건너뛴다
+        style.font.name = _KOREAN_FONT  # ascii / hAnsi
+        rfonts = style.element.get_or_add_rPr().get_or_add_rFonts()
+        rfonts.set(qn("w:eastAsia"), _KOREAN_FONT)  # 한글은 이 설정을 따른다
+
+        # 제목 스타일(Heading 1/2)에는 `*Theme` 속성이 함께 들어있는데, OOXML 규격상
+        # 테마 속성이 명시적 폰트보다 **우선**한다. 그대로 두면 위에서 지정한 한글
+        # 폰트가 무시돼 제목만 계속 깨진다(9/18 실측). 테마 속성을 지워야 적용된다.
+        for theme_attr in ("asciiTheme", "hAnsiTheme", "eastAsiaTheme", "cstheme"):
+            key = qn(f"w:{theme_attr}")
+            if key in rfonts.attrib:
+                del rfonts.attrib[key]
 
 
 def markdown_to_docx_bytes(markdown_text: str) -> bytes:
     document = Document()
+    _apply_korean_font(document)
     for raw_line in markdown_text.split("\n"):
         line = raw_line.rstrip()
         if not line:
