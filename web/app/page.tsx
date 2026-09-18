@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -109,9 +110,14 @@ export default function HomePage() {
   const recent = (cards ?? []).slice(0, RECENT_COUNT);
 
   return (
+    /* `-mb-6`은 레이아웃(`app/layout.tsx`의 `main`)이 주는 pb-6(24px)을 상쇄한다.
+       이 화면은 맨 아래 크림 밴드가 탭바 구분선까지 그대로 이어져야 하는데
+       (Figma 314:21466), 그 여백이 남아 있으면 크림과 탭바 사이에 body 배경
+       (#141210)이 24px 띠로 보인다(9/18 실측: 크림 하단 582 / 탭바 상단 606).
+       로그인 화면(`app/login/page.tsx`)이 같은 이유로 같은 방식을 쓴다. */
     <div
       style={{ backgroundColor: t.homeBg, color: t.text }}
-      className="flex min-h-full flex-col"
+      className="-mb-6 flex min-h-full flex-col"
     >
       {/* Header (303:15861) */}
       <div className="flex items-center px-[22px] pt-[4px] pb-[16px]">
@@ -155,13 +161,18 @@ export default function HomePage() {
         ))}
       </div>
 
+      {/* 누적 요약 아래부터 탭바 직전까지가 하나의 크림 밴드다 (Figma 314:21466 —
+          최근 기록·여백·입력 영역이 모두 `light/2` 위에 얹힌다). 예전에는 최근 기록
+          패널에서 크림이 끊기고 그 아래가 검정이었는데, 목업을 픽셀로 훑어보니
+          y 396~750이 통째로 #bdb7ae였다(그 아래 탭바만 검정). */}
+      <div
+        style={{ backgroundColor: t.light2, color: t.onLight }}
+        className="flex flex-1 flex-col"
+      >
       {/* 최근 기록 (303:15880) — 기록이 하나도 없으면 패널 자체를 안 그린다.
           빈 패널은 "아직 없다"는 정보를 주는 게 아니라 그냥 빈 칸으로 읽힌다. */}
       {recent.length > 0 && (
-        <div
-          style={{ backgroundColor: t.light2, color: t.onLight }}
-          className="flex flex-col px-[22px] py-[24px]"
-        >
+        <div className="flex flex-col px-[22px] py-[24px]">
           <div className="flex items-center gap-2">
             <p className="flex-1 text-[12px] font-medium leading-[20px]">최근 기록</p>
             {/* 전체 보기(3.2)로 가는 유일한 진입점이다 — 홈은 두 줄만 보여준다. */}
@@ -189,19 +200,19 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* 기록이 하나도 없을 때만 — 숫자 0 셋만 덩그러니 놓이지 않게 한 줄 안내한다. */}
+      {/* 기록이 하나도 없을 때만 — 숫자 0 셋만 덩그러니 놓이지 않게 한 줄 안내한다.
+          크림 밴드 위라 어두운 글자를 쓴다(검정 배경 시절의 textMuted가 아니다). */}
       {cards !== null && cards.length === 0 && (
-        <p
-          style={{ color: t.textMuted }}
-          className="px-[22px] pt-[24px] text-[14px] leading-[24px]"
-        >
+        <p className="px-[22px] pt-[24px] text-[14px] leading-[24px] opacity-70">
           아래에 한 줄만 남기면 여기부터 쌓이기 시작해요.
         </p>
       )}
 
+      {/* 여백 · 크림 (314:21497) — 목업에선 85px이지만, 화면 높이가 기기마다 달라서
+          남는 공간을 이 여백이 먹도록 flex-1로 둔다. */}
       <div className="min-h-[40px] flex-1" />
 
-      {/* 입력 영역 (303:15891) — 알약을 누르면 실제로 쓰는 화면(3.3)으로 간다.
+      {/* 입력 영역 (314:21498) — 알약을 누르면 실제로 쓰는 화면(3.3)으로 간다.
           마이크는 같은 화면으로 가되 음성으로 바로 시작한다. */}
       <div className="flex flex-col px-[22px] pb-[20px] pt-[12px]">
         <div
@@ -221,11 +232,14 @@ export default function HomePage() {
             onClick={() => router.push("/record?voice=1")}
             aria-label="음성으로 기록하기"
             style={{ backgroundColor: "var(--accent)", color: "var(--accent-foreground)" }}
-            className="flex size-[36px] shrink-0 items-center justify-center rounded-full text-[15px] transition-opacity active:opacity-80"
+            className="flex size-[36px] shrink-0 items-center justify-center rounded-full transition-opacity active:opacity-80"
           >
-            🎙
+            {/* 이모지였던 것을 Figma 아이콘으로 교체 (314:21503 icon/mic).
+                이모지는 기기마다 모양과 크기가 달라 목업과 안 맞는다. */}
+            <Image src="/icons/mic.svg" alt="" width={18} height={18} aria-hidden />
           </button>
         </div>
+      </div>
       </div>
     </div>
   );
