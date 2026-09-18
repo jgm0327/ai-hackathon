@@ -122,6 +122,27 @@ class ResumeDraft:
 
 
 @dataclass
+class NotionConnection:
+    """노션 OAuth로 받은 연결 (9/18 신규).
+
+    **`access_token`은 서드파티 자격증명이다.** 노션 OAuth는 서버가 코드를 토큰으로
+    교환하는 구조라 서버가 보관할 수밖에 없다(통합 토큰 방식은 클라이언트가 세션
+    저장소에만 들고 있었다). 그래서 이렇게 다룬다:
+      - 어떤 API 응답에도 싣지 않는다 (`NotionConnectionResponse`에 없다)
+      - 연결 해제(`delete_notion_connection`)로 행째 지운다
+      - 워크스페이스 이름만 화면에 보여준다("어디에 연결됐는지"는 사용자가 알아야 한다)
+
+    암호화는 하지 않았다 — 키 관리가 없는 상태에서 DB 옆에 키를 두면 실질적인 보호가
+    되지 않으면서 복잡도만 늘어난다. DB 파일 자체의 접근 통제가 방어선이다.
+    """
+
+    user_id: int
+    access_token: str
+    workspace_name: str
+    connected_at: str
+
+
+@dataclass
 class SavedResume:
     """이름 붙여 보관한 경력기술서 (9/18 신규, Figma 4.3 "내 경력기술서 (저장본)").
 
@@ -254,6 +275,17 @@ def init_db() -> None:
         # 9/18 신규 — 기록 첨부 사진 (Figma "03 · 커리어 스택" 4.1-b).
         # `ON DELETE`를 SQLite가 기본으로 강제하지 않으므로(외래키 미활성) 카드 삭제
         # 시 사진 행/파일 정리는 `delete_card()`가 직접 한다.
+        # 9/18 신규 — 노션 OAuth 연결. 유저당 하나(워크스페이스 하나만 연결한다).
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS notion_connections (
+                user_id        INTEGER PRIMARY KEY REFERENCES users(id),
+                access_token   TEXT NOT NULL,
+                workspace_name TEXT NOT NULL,
+                connected_at   TEXT NOT NULL
+            )
+            """
+        )
         # 9/18 신규 — 이름 붙여 보관한 경력기술서 (Figma 4.3). 위 SavedResume 주석 참고.
         conn.execute(
             """
@@ -919,6 +951,51 @@ def save_resume_draft(user_id: int, project_id: int, content: str, now: str) -> 
             (project_id, user_id, content, now),
         )
     return ResumeDraft(project_id=project_id, content=content, updated_at=now)
+
+
+def save_notion_connection(
+    user_id: int, access_token: str, workspace_name: str, now: str
+) -> NotionConnection:
+    """노션 연결을 저장한다. 다시 연결하면 덮어쓴다(유저당 워크스페이스 하나)."""
+    init_db()
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO notion_connections (user_id, access_token, workspace_name, connected_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                access_token = excluded.access_token,
+                workspace_name = excluded.workspace_name,
+                connected_at = excluded.connected_at
+            """,
+            (user_id, access_token, workspace_name, now),
+        )
+    return NotionConnection(
+        user_id=user_id, access_token=access_token, workspace_name=workspace_name, connected_at=now
+    )
+
+
+def get_notion_connection(user_id: int) -> NotionConnection | None:
+    init_db()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM notion_connections WHERE user_id = ?", (user_id,)
+        ).fetchone()
+    if row is None:
+        return None
+    return NotionConnection(
+        user_id=row["user_id"],
+        access_token=row["access_token"],
+        workspace_name=row["workspace_name"],
+        connected_at=row["connected_at"],
+    )
+
+
+def delete_notion_connection(user_id: int) -> None:
+    """연결 해제 — 토큰을 **지운다**. 없어도 조용히 무시한다(멱등)."""
+    init_db()
+    with _connect() as conn:
+        conn.execute("DELETE FROM notion_connections WHERE user_id = ?", (user_id,))
 
 
 def create_saved_resume(

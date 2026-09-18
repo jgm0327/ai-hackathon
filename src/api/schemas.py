@@ -433,10 +433,27 @@ class JDMatchResponse(BaseModel):
     matches: list[JDMatchItem]
 
 
+class NotionConnectionResponse(BaseModel):
+    """노션 연결 상태 (9/18 신규).
+
+    **`access_token`을 절대 싣지 않는다.** 서드파티 자격증명이라 서버 밖으로 나갈
+    이유가 없다 — 화면엔 "어디에 연결됐는지"만 있으면 된다.
+
+    `oauth_available`이 false면 `NOTION_OAUTH_CLIENT_ID`가 아직 없다는 뜻이라,
+    프론트는 OAuth 버튼 대신 통합 토큰 입력을 보여준다.
+    """
+
+    connected: bool
+    workspace_name: str | None = None
+    oauth_available: bool = False
+
+
 class NotionPageRequest(BaseModel):
     """노션 요청 공통 — 토큰만 받는다 (9/18 재작성).
 
-    `user_token`은 필수다. `settings.notion_token`(로컬 개발용 폴백)으로 암묵 폴백하면
+    `user_token`은 **OAuth 연결이 없을 때만** 필수다. 연결이 있으면 서버가 보관 중인
+    토큰을 쓰고 이 값은 무시된다(`routers/notion.py`의 `_resolve_token`).
+    `settings.notion_token`(로컬 개발용 폴백)으로 암묵 폴백하면
     **다른 사용자가 개발자 본인의 노션 데이터를 끌어오는** 사고가 된다
     (docs/03-risk-fallback.md 리스크 6). 빈 문자열 거부는 라우터가 한다 — Pydantic의
     `str`은 빈 문자열을 통과시킨다.

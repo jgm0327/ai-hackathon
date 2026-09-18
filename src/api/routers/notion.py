@@ -20,34 +20,146 @@
 (`web/lib/notionToken.ts`). `user_token`(노션 신원)과 `current_user`(이 앱의 로그인
 유저)는 서로 다른 축이라 둘 다 필요하다.
 """
-from fastapi import APIRouter, Depends, HTTPException
+import secrets
+from datetime import datetime, timezone
 
-from src.agent.notion_client import fetch_notion_page_content, list_notion_pages
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import RedirectResponse
+
+from src.agent.notion_client import (
+    NotionOAuthError,
+    build_authorize_url,
+    exchange_code_for_token,
+    fetch_notion_page_content,
+    list_notion_pages,
+    oauth_enabled,
+)
 from src.api.rate_limit import limit_light
 from src.api.schemas import (
+    NotionConnectionResponse,
     NotionPageContentResponse,
     NotionPageListResponse,
     NotionPageRequest,
     NotionPageSummaryResponse,
 )
 from src.auth.deps import get_current_user
+from src.config import settings
 from src.storage import db
 
 router = APIRouter(tags=["notion"])
 
+_OAUTH_STATE_COOKIE = "notion_oauth_state"
 
-def _require_token(user_token: str) -> str:
-    """빈 문자열도 "값 없음"으로 거부한다.
 
-    Pydantic의 `str`은 빈 문자열을 통과시키므로 스키마만으로는 못 막는다. 토큰이
-    없으면 `notion_client`가 `settings.notion_token`(로컬 개발용 폴백)으로 넘어가는데,
-    그러면 **다른 사용자가 개발자 본인의 노션 데이터를 끌어오는** 사고가 된다
+def _resolve_token(user_id: int, user_token: str) -> str:
+    """이 요청에 쓸 노션 토큰을 정한다 — **OAuth 연결이 있으면 그걸 우선한다.**
+
+    두 경로를 같이 지원하는 이유: OAuth client_id 발급 전에도 앱이 굴러가야 하고,
+    발급 뒤에는 사용자가 아무것도 안 해도 자동으로 더 안전한 경로로 넘어가야 한다.
+      1. OAuth 연결(서버 보관 토큰) — 사용자가 인가 화면에서 **고른 페이지만** 보인다
+      2. 없으면 요청이 실어 보낸 통합 토큰 — 그 통합에 공유된 것 **전부**가 보인다
+
+    빈 문자열은 "값 없음"으로 거부한다. Pydantic의 `str`은 빈 문자열을 통과시키므로
+    스키마만으로는 못 막고, 통과시키면 `notion_client`가 `settings.notion_token`
+    (로컬 개발용 폴백)으로 넘어가 **개발자 본인의 노션이 열린다**
     (docs/03-risk-fallback.md 리스크 6).
     """
+    connection = db.get_notion_connection(user_id)
+    if connection:
+        return connection.access_token
+
     token = user_token.strip()
     if not token:
-        raise HTTPException(status_code=422, detail="user_token은 필수입니다.")
+        raise HTTPException(
+            status_code=422, detail="노션 연결이 필요합니다. 먼저 연결해 주세요."
+        )
     return token
+
+
+@router.get("/notion/connection", response_model=NotionConnectionResponse)
+def get_connection(current_user: db.User = Depends(get_current_user)) -> NotionConnectionResponse:
+    """현재 연결 상태. **액세스 토큰은 절대 싣지 않는다** — 워크스페이스 이름만 준다.
+
+    `oauth_available`이 false면 client_id가 아직 없다는 뜻이라, 프론트는 OAuth 버튼
+    대신 통합 토큰 입력을 보여준다.
+    """
+    connection = db.get_notion_connection(current_user.id)
+    return NotionConnectionResponse(
+        connected=connection is not None,
+        workspace_name=connection.workspace_name if connection else None,
+        oauth_available=oauth_enabled(),
+    )
+
+
+@router.delete("/notion/connection", status_code=204)
+def disconnect(current_user: db.User = Depends(get_current_user)) -> None:
+    """연결 해제 — 보관 중인 액세스 토큰을 **지운다**. 없어도 204(멱등)."""
+    db.delete_notion_connection(current_user.id)
+
+
+@router.get("/notion/oauth/start")
+def oauth_start(current_user: db.User = Depends(get_current_user)) -> RedirectResponse:
+    """노션 인가 화면으로 보낸다 (Figma 3.0-a).
+
+    그 화면에는 **노션이 그리는 페이지 선택기**가 있어서, 사용자가 거기서 고른 것만
+    이 통합이 볼 수 있게 된다 — 통합 토큰 방식에서 "허용하지 않은 페이지까지 보이던"
+    문제의 근본 해법이다.
+
+    CSRF 방지용 state를 임시 쿠키에 저장해뒀다가 콜백에서 대조한다(카카오와 동일).
+    """
+    if not oauth_enabled():
+        raise HTTPException(
+            status_code=503, detail="노션 OAuth가 아직 설정되지 않았습니다."
+        )
+
+    state = secrets.token_urlsafe(16)
+    response = RedirectResponse(url=build_authorize_url(state))
+    response.set_cookie(
+        _OAUTH_STATE_COOKIE,
+        state,
+        max_age=600,  # 10분 — 인가 화면에서 페이지를 고르는 시간까지 넉넉하게
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="lax",
+        path="/",
+    )
+    return response
+
+
+@router.get("/notion/oauth/callback")
+def oauth_callback(
+    request: Request,
+    code: str,
+    state: str,
+    current_user: db.User = Depends(get_current_user),
+) -> RedirectResponse:
+    """노션이 인가 코드와 함께 돌아오는 지점. 토큰으로 교환해 보관한다.
+
+    `Depends(get_current_user)`가 붙어 있는 게 중요하다 — 이 콜백은 **이미 로그인한
+    유저의 연결을 맺는 것**이라, 세션이 없으면 어느 유저에게 붙일지 알 수 없다.
+    """
+    saved_state = request.cookies.get(_OAUTH_STATE_COOKIE)
+    if not saved_state or saved_state != state:
+        raise HTTPException(
+            status_code=400, detail="잘못된 연결 요청입니다(state 불일치). 다시 시도해 주세요."
+        )
+
+    try:
+        result = exchange_code_for_token(code)
+    except NotionOAuthError as e:
+        raise HTTPException(status_code=502, detail=f"노션 연결에 실패했습니다: {e}") from e
+
+    db.save_notion_connection(
+        current_user.id,
+        result.access_token,
+        result.workspace_name,
+        datetime.now(timezone.utc).isoformat(),
+    )
+
+    # 연결을 시작한 자리(기록 화면)로 돌려보낸다.
+    response = RedirectResponse(url=f"{settings.frontend_base_url}/record?notion=connected")
+    response.delete_cookie(_OAUTH_STATE_COOKIE, path="/")
+    return response
 
 
 @router.post("/notion/pages", response_model=NotionPageListResponse, dependencies=[Depends(limit_light)])
@@ -59,7 +171,7 @@ def list_pages(
     **제목과 수정 시각만 돌려준다.** 본문을 읽지 않고, 카드를 만들지 않고, LLM을
     부르지 않는다 — 노션 내용이 밖으로 나가는 지점이 아니다.
     """
-    token = _require_token(payload.user_token)
+    token = _resolve_token(current_user.id, payload.user_token)
     try:
         pages = list_notion_pages(user_token=token)
     except ValueError as e:
@@ -87,7 +199,7 @@ def get_page_content(
     [문장으로 바꾸기]를 눌러야 변환된다 — 무엇이 LLM으로 나가는지 사용자가 보고
     정하게 하는 게 이 구조의 요점이다.
     """
-    token = _require_token(payload.user_token)
+    token = _resolve_token(current_user.id, payload.user_token)
     try:
         entry = fetch_notion_page_content(page_id, user_token=token)
     except ValueError as e:

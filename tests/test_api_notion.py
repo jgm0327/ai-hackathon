@@ -153,3 +153,137 @@ def test_unfiltered_search_helpers_are_gone():
 
     assert not hasattr(notion_client, "fetch_notion_entries")
     assert not hasattr(notion_client, "_search_pages")
+
+
+# ---------------------------------------------------------------------------
+# OAuth (Figma 3.0-a) — 9/18 신규
+# ---------------------------------------------------------------------------
+#
+# 통합 토큰과의 차이는 **페이지를 누가 어디서 고르느냐**다. OAuth는 노션의 인가 화면에
+# 페이지 선택기가 있어서 사용자가 고른 것만 통합이 보게 된다. 여기서 검증할 건
+# 그 플로우의 배관(state 대조, 토큰 보관, 응답에 토큰이 안 새는지)이다.
+
+from dataclasses import replace as _dc_replace  # noqa: E402
+
+from src.agent.notion_client import NotionOAuthError, NotionOAuthResult  # noqa: E402
+from src.config import settings  # noqa: E402
+
+
+@pytest.fixture
+def oauth_configured(monkeypatch):
+    """client_id/secret이 있는 상태로 만든다 (settings는 frozen이라 인스턴스를 갈아끼운다)."""
+    patched = _dc_replace(
+        settings,
+        notion_oauth_client_id="cid",
+        notion_oauth_client_secret="csecret",
+        notion_oauth_redirect_uri="http://localhost:8000/api/notion/oauth/callback",
+    )
+    monkeypatch.setattr("src.agent.notion_client.settings", patched)
+    monkeypatch.setattr("src.api.routers.notion.settings", patched)
+    yield patched
+
+
+def test_connection_reports_disconnected_by_default(client, current_user_id):
+    body = client.get("/api/notion/connection").json()
+    assert body["connected"] is False
+    assert body["workspace_name"] is None
+
+
+def test_connection_hides_oauth_when_client_id_missing(client, current_user_id):
+    """client_id 발급 전 — 프론트가 OAuth 버튼 대신 토큰 입력을 띄우게 한다."""
+    assert client.get("/api/notion/connection").json()["oauth_available"] is False
+
+
+def test_oauth_start_is_unavailable_without_client_id(client, current_user_id):
+    assert client.get("/api/notion/oauth/start", follow_redirects=False).status_code == 503
+
+
+def test_oauth_start_redirects_to_notion_with_state(client, current_user_id, oauth_configured):
+    response = client.get("/api/notion/oauth/start", follow_redirects=False)
+
+    assert response.status_code == 307
+    location = response.headers["location"]
+    assert location.startswith("https://api.notion.com/v1/oauth/authorize")
+    assert "client_id=cid" in location
+    # owner=user가 있어야 인가 화면에 페이지 선택기가 뜬다 — 이 기능의 핵심이다.
+    assert "owner=user" in location
+    assert "notion_oauth_state" in response.headers.get("set-cookie", "")
+
+
+def test_oauth_callback_rejects_state_mismatch(client, current_user_id, oauth_configured):
+    client.cookies.set("notion_oauth_state", "expected")
+    with patch("src.api.routers.notion.exchange_code_for_token") as mock_exchange:
+        response = client.get(
+            "/api/notion/oauth/callback?code=abc&state=forged", follow_redirects=False
+        )
+
+    assert response.status_code == 400
+    # state가 안 맞으면 코드 교환 자체를 시도하지 않아야 한다.
+    mock_exchange.assert_not_called()
+
+
+def test_oauth_callback_stores_token_and_redirects(client, current_user_id, oauth_configured):
+    client.cookies.set("notion_oauth_state", "st")
+    with patch(
+        "src.api.routers.notion.exchange_code_for_token",
+        return_value=NotionOAuthResult(access_token="ntn_secret", workspace_name="내 워크스페이스"),
+    ):
+        response = client.get(
+            "/api/notion/oauth/callback?code=abc&state=st", follow_redirects=False
+        )
+
+    assert response.status_code == 307
+    assert "/record?notion=connected" in response.headers["location"]
+    stored = db.get_notion_connection(current_user_id)
+    assert stored.access_token == "ntn_secret"
+    assert stored.workspace_name == "내 워크스페이스"
+
+
+def test_connection_never_exposes_the_access_token(client, current_user_id):
+    """토큰은 서버 밖으로 나갈 이유가 없다 — 화면엔 워크스페이스 이름만 있으면 된다."""
+    db.save_notion_connection(current_user_id, "ntn_secret", "내 워크스페이스", "2026-09-18T00:00:00Z")
+
+    body = client.get("/api/notion/connection").json()
+    assert body["connected"] is True
+    assert body["workspace_name"] == "내 워크스페이스"
+    assert "ntn_secret" not in client.get("/api/notion/connection").text
+
+
+def test_oauth_callback_maps_exchange_failure_to_502(client, current_user_id, oauth_configured):
+    client.cookies.set("notion_oauth_state", "st")
+    with patch(
+        "src.api.routers.notion.exchange_code_for_token",
+        side_effect=NotionOAuthError("토큰 교환 실패 (400)"),
+    ):
+        response = client.get(
+            "/api/notion/oauth/callback?code=abc&state=st", follow_redirects=False
+        )
+
+    assert response.status_code == 502
+
+
+def test_disconnect_deletes_the_stored_token(client, current_user_id):
+    db.save_notion_connection(current_user_id, "ntn_secret", "내 워크스페이스", "2026-09-18T00:00:00Z")
+
+    assert client.delete("/api/notion/connection").status_code == 204
+    assert db.get_notion_connection(current_user_id) is None
+
+
+def test_stored_connection_is_used_instead_of_request_token(client, current_user_id):
+    """OAuth 연결이 있으면 그 토큰을 쓴다 — 요청이 다른 토큰을 실어 보내도 무시한다."""
+    db.save_notion_connection(current_user_id, "ntn_from_oauth", "내 워크스페이스", "2026-09-18T00:00:00Z")
+
+    with patch("src.api.routers.notion.list_notion_pages", return_value=[]) as mock_list:
+        client.post("/api/notion/pages", json={"user_token": "ignored_integration_token"})
+
+    assert mock_list.call_args.kwargs["user_token"] == "ntn_from_oauth"
+
+
+def test_pages_work_without_request_token_once_connected(client, current_user_id):
+    """연결된 뒤에는 프론트가 토큰을 안 보내도 된다 — "처음 한 번만 연결하면 돼요"."""
+    db.save_notion_connection(current_user_id, "ntn_from_oauth", "내 워크스페이스", "2026-09-18T00:00:00Z")
+
+    with patch("src.api.routers.notion.list_notion_pages", return_value=[]):
+        response = client.post("/api/notion/pages", json={"user_token": ""})
+
+    assert response.status_code == 200

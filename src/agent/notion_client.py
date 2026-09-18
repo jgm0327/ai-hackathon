@@ -24,6 +24,7 @@ end-to-end 검증도 된 적이 없다(9/14 노트). 필요하면 git 히스토�
 폴백은 로컬 단독 테스트용일 뿐이라 토큰별 클라이언트를 전역 캐싱하지 않는다.
 """
 from dataclasses import dataclass
+from urllib.parse import urlencode
 
 import requests
 
@@ -185,3 +186,101 @@ def _raise_for_notion_error(response: requests.Response) -> None:
     if response.status_code == 401:
         raise ValueError("Notion 토큰이 유효하지 않습니다. 토큰을 다시 확인해주세요.")
     response.raise_for_status()
+
+
+# ---------------------------------------------------------------------------
+# OAuth (9/18 신규) — Figma 3.0-a "노션 인증"
+# ---------------------------------------------------------------------------
+#
+# 통합 토큰 방식과 무엇이 다른가: **페이지를 누가 어디서 고르느냐**가 다르다.
+#   - 통합 토큰: 사용자가 노션에 들어가 페이지마다 수동으로 공유해야 하고, 앱은
+#     "그동안 공유된 것 전부"를 본다. 범위를 좁힐 방법이 앱에 없다.
+#   - OAuth: 노션의 인가 화면에 **페이지 선택기가 내장**돼 있어, 사용자가 그 자리에서
+#     고른 것만 통합이 볼 수 있다. 우리가 신고받은 "허용하지 않은 페이지" 문제의
+#     근본 해법이다(다만 권한 상속은 그대로라 부모를 고르면 하위는 딸려온다).
+#
+# 구조는 카카오 로그인(`src/auth/kakao_client.py`)과 같은 authorization code 플로우다.
+# 다른 점은 토큰 교환 때 client_id/secret을 **HTTP Basic**으로 보낸다는 것뿐.
+
+_NOTION_OAUTH_AUTHORIZE_URL = "https://api.notion.com/v1/oauth/authorize"
+_NOTION_OAUTH_TOKEN_URL = "https://api.notion.com/v1/oauth/token"
+
+
+class NotionOAuthError(Exception):
+    """인가 코드 교환 실패 — 라우터가 502로 바꿔 사용자에게 알린다."""
+
+
+@dataclass
+class NotionOAuthResult:
+    access_token: str
+    workspace_name: str
+
+
+def oauth_enabled() -> bool:
+    """OAuth를 쓸 수 있는 상태인지.
+
+    client_id가 없으면(발급 전) OAuth 경로 전체를 감추고, 사용자가 통합 토큰을 직접
+    넣는 기존 경로로 동작한다 — 발급 전에도 앱이 그대로 굴러가게 하려는 설계다.
+    """
+    return bool(settings.notion_oauth_client_id and settings.notion_oauth_client_secret)
+
+
+def build_authorize_url(state: str) -> str:
+    """노션 인가 화면 URL. `state`는 호출부가 CSRF 방지용으로 쿠키에 저장해뒀다가
+    콜백에서 되돌아온 값과 대조한다(카카오와 동일한 패턴).
+
+    `owner=user`는 노션 OAuth에서 필수다 — 이 값이 있어야 사용자 계정 단위로 인가하고
+    인가 화면에 페이지 선택기가 뜬다.
+    """
+    params = {
+        "client_id": settings.notion_oauth_client_id,
+        "redirect_uri": settings.notion_oauth_redirect_uri,
+        "response_type": "code",
+        "owner": "user",
+        "state": state,
+    }
+    return f"{_NOTION_OAUTH_AUTHORIZE_URL}?{urlencode(params)}"
+
+
+def exchange_code_for_token(code: str) -> NotionOAuthResult:
+    """인가 코드를 액세스 토큰으로 교환한다(서버-서버 호출).
+
+    노션은 카카오와 달리 client_id/secret을 본문이 아니라 **HTTP Basic**으로 받는다.
+    `redirect_uri`는 인가 요청 때와 **바이트 단위로 같아야** 한다 — 다르면 노션이
+    거부한다(카카오에서 똑같이 데였던 지점).
+    """
+    if not oauth_enabled():
+        raise NotionOAuthError("노션 OAuth가 설정되어 있지 않습니다 (NOTION_OAUTH_CLIENT_ID 확인)")
+
+    response = requests.post(
+        _NOTION_OAUTH_TOKEN_URL,
+        auth=(settings.notion_oauth_client_id, settings.notion_oauth_client_secret),
+        headers={"Notion-Version": _NOTION_VERSION},
+        json={
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": settings.notion_oauth_redirect_uri,
+        },
+        timeout=15,
+    )
+    if response.status_code >= 400:
+        # 노션이 주는 본문에 client_secret이 섞여 올 이유는 없지만, 그래도 전문을
+        # 그대로 올리지 않고 상태 코드와 error 필드만 남긴다(로그 유출 방지).
+        detail = ""
+        try:
+            detail = str(response.json().get("error", ""))
+        except ValueError:
+            pass
+        raise NotionOAuthError(f"토큰 교환 실패 ({response.status_code}) {detail}".strip())
+
+    data = response.json()
+    token = data.get("access_token")
+    if not token:
+        raise NotionOAuthError("응답에 access_token이 없습니다")
+
+    return NotionOAuthResult(
+        access_token=token,
+        # 워크스페이스 이름은 "어디에 연결됐는지"를 사용자에게 보여주는 용도다.
+        # 없을 수도 있어서(개인 페이지만 인가한 경우 등) 기본값을 둔다.
+        workspace_name=data.get("workspace_name") or "노션 워크스페이스",
+    )

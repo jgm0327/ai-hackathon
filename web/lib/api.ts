@@ -756,6 +756,34 @@ export interface NotionPageSummary {
   last_edited_time: string;
 }
 
+/**
+ * 노션 연결 상태 (9/18 신규).
+ *
+ * `oauth_available`이 false면 `NOTION_OAUTH_CLIENT_ID`가 아직 없다는 뜻이라, 화면은
+ * OAuth 버튼 대신 통합 토큰 입력을 보여준다. **액세스 토큰은 응답에 실리지 않는다** —
+ * 서드파티 자격증명이라 서버 밖으로 나갈 이유가 없다.
+ */
+export interface NotionConnection {
+  connected: boolean;
+  workspace_name: string | null;
+  oauth_available: boolean;
+}
+
+export function getNotionConnection(): Promise<NotionConnection> {
+  return request<NotionConnection>("/notion/connection");
+}
+
+/** 연결 해제 — 서버가 보관 중인 토큰을 지운다. */
+export function disconnectNotion(): Promise<void> {
+  return request<void>("/notion/connection", { method: "DELETE" });
+}
+
+/** 노션 인가 화면으로 보낼 주소. 리다이렉트를 따라가야 하므로 fetch가 아니라
+ * `window.location`으로 이동한다 — 노션이 그리는 페이지 선택기를 거쳐 돌아온다. */
+export function notionOAuthStartUrl(): string {
+  return `${API_BASE}/notion/oauth/start`;
+}
+
 export function listNotionPages(userToken: string): Promise<NotionPageSummary[]> {
   return request<{ pages: NotionPageSummary[] }>("/notion/pages", {
     method: "POST",

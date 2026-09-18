@@ -5,9 +5,13 @@ import { useEffect, useState } from "react";
 import { stackTheme as t } from "@/components/stackTheme";
 import {
   ApiError,
+  NotionConnection,
   NotionPageSummary,
+  disconnectNotion,
+  getNotionConnection,
   getNotionPageContent,
   listNotionPages,
+  notionOAuthStartUrl,
 } from "@/lib/api";
 import { clearNotionToken, getNotionToken, setNotionToken } from "@/lib/notionToken";
 
@@ -51,6 +55,8 @@ function editedLabel(iso: string): string {
 export function NotionPagePicker({ open, onClose, onPicked }: NotionPagePickerProps) {
   const [token, setToken] = useState("");
   const [needsToken, setNeedsToken] = useState(true);
+  // 서버가 보관 중인 OAuth 연결. 있으면 토큰 입력 단계 자체가 없다.
+  const [connection, setConnection] = useState<NotionConnection | null>(null);
   const [pages, setPages] = useState<NotionPageSummary[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,7 +67,8 @@ export function NotionPagePicker({ open, onClose, onPicked }: NotionPagePickerPr
     setError(null);
     try {
       setPages(await listNotionPages(withToken));
-      setNotionToken(withToken);
+      // OAuth 경로(빈 토큰)에서는 브라우저에 저장할 토큰 자체가 없다.
+      if (withToken) setNotionToken(withToken);
       setNeedsToken(false);
     } catch (err) {
       // 토큰이 틀렸으면 세션에 남겨둘 이유가 없다 — 다음에 또 같은 실패를 반복한다.
@@ -78,22 +85,48 @@ export function NotionPagePicker({ open, onClose, onPicked }: NotionPagePickerPr
   // 건너뛴다("처음 한 번만 연결하면 돼요").
   useEffect(() => {
     if (!open) return;
-    const stored = getNotionToken();
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setError(null);
-    if (stored) {
-      setNeedsToken(false);
-      void load(stored);
-    } else {
-      setNeedsToken(true);
-      setPages(null);
-    }
+    let cancelled = false;
+
+    // 열릴 때 서버 연결 상태를 먼저 본다 — OAuth로 이미 연결돼 있으면 토큰을 물을
+    // 이유가 없고, 그 경로가 더 안전하다(사용자가 인가 화면에서 고른 페이지만 보인다).
+    getNotionConnection()
+      .then((next) => {
+        if (cancelled) return;
+        setConnection(next);
+        if (next.connected) {
+          setNeedsToken(false);
+          // 서버가 토큰을 들고 있으므로 요청 본문의 토큰은 빈 문자열로 둔다.
+          void load("");
+          return;
+        }
+        const stored = getNotionToken();
+        if (stored) {
+          setNeedsToken(false);
+          void load(stored);
+        } else {
+          setNeedsToken(true);
+          setPages(null);
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        // 상태 조회에 실패해도 통합 토큰 경로는 열어둔다.
+        setNeedsToken(true);
+        setPages(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
     // `load`는 매 렌더 새로 만들어지므로 의존성에 넣지 않는다 — 넣으면 무한 루프다.
   }, [open]);
 
   const handlePick = async (page: NotionPageSummary) => {
-    const stored = getNotionToken();
-    if (!stored) {
+    // OAuth 연결이면 서버가 토큰을 들고 있으므로 빈 문자열로 보낸다.
+    const stored = connection?.connected ? "" : getNotionToken();
+    if (stored === null) {
       setNeedsToken(true);
       return;
     }
@@ -136,6 +169,32 @@ export function NotionPagePicker({ open, onClose, onPicked }: NotionPagePickerPr
       <div className="flex flex-1 flex-col gap-[10px] pt-[24px]">
         {needsToken ? (
           <>
+            {/* OAuth 경로 (Figma 3.0-a). client_id가 있을 때만 뜬다.
+                이쪽이 더 안전하다 — 노션이 그리는 인가 화면에 **페이지 선택기**가
+                있어서, 사용자가 거기서 고른 것만 이 앱이 볼 수 있게 된다. 통합 토큰은
+                "그동안 공유해둔 것 전부"가 대상이라 앱이 범위를 좁힐 수 없다. */}
+            {connection?.oauth_available && (
+              <>
+                <a
+                  href={notionOAuthStartUrl()}
+                  style={{ backgroundColor: "var(--accent)", color: "var(--accent-foreground)" }}
+                  className="flex h-[50px] items-center justify-center rounded-[8px] text-[14px] font-bold transition-opacity active:opacity-80"
+                >
+                  노션으로 연결하기
+                </a>
+                <p style={{ color: t.textMuted }} className="text-[12px] leading-[20px]">
+                  노션 화면에서 가져올 페이지를 직접 고르게 돼요. 고르지 않은 페이지는 이
+                  앱이 볼 수 없습니다.
+                </p>
+                <div
+                  style={{ borderColor: t.border, color: t.textMuted }}
+                  className="my-2 border-t pt-3 text-[12px] leading-[20px]"
+                >
+                  또는 통합 토큰을 직접 넣기
+                </div>
+              </>
+            )}
+
             <p style={{ color: t.textSoft }} className="text-[14px] leading-[24px]">
               노션 통합(integration) 토큰을 넣으면 그 통합에 공유된 페이지 목록을 보여드려요.
               목록에서 고른 페이지 하나만 가져옵니다.
@@ -241,19 +300,39 @@ export function NotionPagePicker({ open, onClose, onPicked }: NotionPagePickerPr
             <p style={{ color: t.textMuted }} className="text-center text-[12px] leading-[20px]">
               선택한 페이지 본문이 입력창에 삽입됩니다
             </p>
-            <button
-              type="button"
-              onClick={() => {
-                clearNotionToken();
-                setNeedsToken(true);
-                setPages(null);
-                setToken("");
-              }}
-              style={{ color: t.textMuted }}
-              className="pt-1 text-center text-[12px] leading-[20px] underline"
-            >
-              다른 토큰으로 연결하기
-            </button>
+            {connection?.connected ? (
+              <button
+                type="button"
+                onClick={async () => {
+                  // 연결 해제 = 서버가 보관 중인 토큰을 지우는 것. 여기서만 지울 수
+                  // 있어야 사용자가 언제든 회수할 수 있다.
+                  await disconnectNotion().catch(() => {});
+                  setConnection((prev) => (prev ? { ...prev, connected: false, workspace_name: null } : prev));
+                  setNeedsToken(true);
+                  setPages(null);
+                }}
+                style={{ color: t.textMuted }}
+                className="pt-1 text-center text-[12px] leading-[20px] underline"
+              >
+                {connection.workspace_name
+                  ? `${connection.workspace_name} 연결 해제`
+                  : "노션 연결 해제"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  clearNotionToken();
+                  setNeedsToken(true);
+                  setPages(null);
+                  setToken("");
+                }}
+                style={{ color: t.textMuted }}
+                className="pt-1 text-center text-[12px] leading-[20px] underline"
+              >
+                다른 토큰으로 연결하기
+              </button>
+            )}
           </>
         )}
       </div>

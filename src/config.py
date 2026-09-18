@@ -44,8 +44,25 @@ class Settings:
     local_multilingual_model: str = os.getenv(
         "LOCAL_MULTILINGUAL_MODEL", "paraphrase-multilingual-MiniLM-L12-v2"
     )
+    # 로컬 단독 테스트용 폴백 토큰. **서비스 경로에서 이 값에 의존하면 안 된다** —
+    # 사용자가 토큰을 안 넣었을 때 여기로 폴백하면 개발자 본인의 노션이 열린다
+    # (docs/03-risk-fallback.md 리스크 6). 라우터가 빈 토큰을 422로 막는 이유다.
     notion_token: str = os.getenv("NOTION_TOKEN", "")
-    notion_mcp_server_url: str = os.getenv("NOTION_MCP_SERVER_URL", "")
+
+    # --- 노션 OAuth (9/18 신규) ---
+    # 카카오와 구조가 같다: 콘솔에서 받은 client_id/secret + 바이트 단위로 일치하는
+    # redirect_uri. notion.so/my-integrations에서 **Public** 타입으로 만들어야 나온다
+    # (Internal은 토큰만 주고 OAuth를 안 쓴다).
+    #
+    # **비어 있으면 OAuth 경로 전체가 비활성**이고, 사용자가 통합 토큰을 직접 넣는
+    # 기존 경로로 동작한다 — 발급 전에도 앱이 그대로 굴러가게 하려는 설계다.
+    notion_oauth_client_id: str = os.getenv("NOTION_OAUTH_CLIENT_ID", "")
+    notion_oauth_client_secret: str = os.getenv("NOTION_OAUTH_CLIENT_SECRET", "")
+    # 노션 콘솔에 등록한 값과 **바이트 단위로 정확히 일치**해야 한다(트레일링 슬래시 포함).
+    # 카카오에서 똑같이 데였던 지점이다(DEPLOY-OCI.local.md).
+    notion_oauth_redirect_uri: str = os.getenv(
+        "NOTION_OAUTH_REDIRECT_URI", "http://localhost:8000/api/notion/oauth/callback"
+    )
     # 사람인 오픈API(oapi.saramin.co.kr). 키 승인 대기 중 — 승인되면 .env에 채워 넣으면 됨.
     saramin_api_key: str = os.getenv("SARAMIN_API_KEY", "")
     chroma_persist_dir: str = os.getenv("CHROMA_PERSIST_DIR", "./.chroma")
