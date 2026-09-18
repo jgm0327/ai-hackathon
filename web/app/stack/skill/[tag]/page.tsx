@@ -256,6 +256,17 @@ export default function SkillDetailPage() {
             </p>
           )}
 
+          {/* "왜 이 역량인가요 ›" (Figma `303:16338`, 9/18 신규) — AI가 이 기록들을 왜
+              이 역량으로 묶었는지 보여주는 4.1-l로 간다. 분류가 틀렸을 때 거기서 바로
+              고칠 수 있다. */}
+          <Link
+            href={`/stack/skill/${encodeURIComponent(tag)}/why`}
+            style={{ color: t.accentText }}
+            className="mt-[8px] self-start py-[12px] text-[12px] font-medium leading-[20px]"
+          >
+            왜 이 역량인가요&nbsp;›
+          </Link>
+
           {buildError && <p className="mt-2 text-[12px] text-red-400">{buildError}</p>}
 
           {/* 쌓인 기록 (301:15263) */}
