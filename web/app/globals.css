@@ -80,3 +80,59 @@ body {
     animation: none;
   }
 }
+
+/*
+ * 웰컴 인트로 1번 → 2번 전환 (9/18) — "로고가 깨지면서 2번 화면의 조각으로 흩어진다".
+ *
+ * 로고 마크는 단일 path라 진짜로 쪼갤 수 없다(없는 기하를 만들어낼 수는 없다). 대신
+ * 2번 화면의 조각 6개를 **로고가 있던 자리에서 튀어나오게** 하고, 그 순간 로고 자체는
+ * 살짝 커지며 사라진다 — 두 동작이 겹치면 로고가 부서져 그 파편이 날아가는 것으로 읽힌다.
+ *
+ * 조각마다 시작 위치(--dx/--dy)·회전(--r)·지연(--d)이 달라서 한꺼번에 움직이지 않는다.
+ * 값은 조각이 화면에서 실제로 놓인 자리를 기준으로, 전부 로고 중심 쪽에서 출발하게 잡았다.
+ */
+@keyframes welcome-shard-in {
+  from {
+    opacity: 0;
+    transform: translate(var(--dx, 0), var(--dy, 0)) scale(0.24) rotate(var(--r, 0deg));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.welcome-shard {
+  /* 되돌아오는 느낌 없이 빠르게 감속 — 파편이 날아가 자리에 얹히는 느낌. */
+  animation: welcome-shard-in 620ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: var(--d, 0ms);
+}
+
+@keyframes welcome-logo-burst {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.22) rotate(7deg);
+  }
+}
+
+.welcome-logo-burst {
+  animation: welcome-logo-burst 380ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+/* 조각이 자리를 잡은 뒤 문장이 들어온다 — 동시에 나오면 시선이 갈라진다. */
+.welcome-copy-in {
+  animation: welcome-fade-in 420ms ease-out both;
+  animation-delay: 380ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welcome-shard,
+  .welcome-logo-burst,
+  .welcome-copy-in {
+    animation: none;
+  }
+}
