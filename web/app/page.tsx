@@ -22,9 +22,12 @@ function toDateKey(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+/** 주황 날짜 배너(303:15868)의 라벨. `/record`의 같은 배너와 문구를 맞춘다 —
+ * 두 화면에 같은 이름의 함수가 따로 있어서 한쪽만 고치면 배너 문구가 갈린다
+ * (9/18 실제로 그렇게 어긋났다). 한쪽을 바꾸면 다른 쪽도 같이 볼 것. */
 function formatTodayLabel(): string {
   const d = new Date();
-  return `${d.getMonth() + 1}월 ${d.getDate()}일  ·  오늘`;
+  return `${d.getMonth() + 1}월 ${d.getDate()}일 · TODAY`;
 }
 
 /**
