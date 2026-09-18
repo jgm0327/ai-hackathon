@@ -145,6 +145,10 @@ def run_pipeline_batch(user_id: int, raw_texts: list[str]) -> list[dict]:
 # 프로젝트가 아니라 "남은 것들"을 뜻하는 라벨이라 AI가 이름을 짓지 않는다.
 UNASSIGNED_SECTION_NAME = "미분류 기록"
 
+# 역량 집계에서 "태그가 없는 카드"를 가리키는 이름 (`db.get_skill_category_counts()`와
+# 같은 문자열이어야 한다 — 화면에 보이는 역량 이름을 그대로 조회에 쓰기 때문).
+UNCATEGORIZED_TAG = "미분류"
+
 
 def collect_scoped_cards(
     user_id: int,
@@ -192,6 +196,22 @@ def _normalize_scope(
     return result
 
 
+def cards_with_skill_tag(cards: list[Card], skill_tag: str) -> list[Card]:
+    """대표 태그가 `skill_tag`인 카드만 고른다 (9/18 신규, Figma 4.1-j "역량 상세").
+
+    **대표 태그(`skill_tags[0]`) 하나로만 판정한다** — `get_skill_category_counts()`가
+    역량별 개수를 세는 규칙과 정확히 같아야, 목록에 "8"이라고 적힌 역량을 눌렀을 때
+    기록이 8개 나온다. 태그 배열 전체를 훑으면 카드 한 장이 여러 역량에 중복으로
+    잡혀서 합계가 전체 카드 수를 넘긴다.
+
+    "미분류"는 태그가 아예 없는 카드를 가리키는 이름이다(`get_skill_category_counts()`와
+    동일). 그 이름으로 조회하면 태그 없는 카드가 나온다.
+    """
+    if skill_tag == UNCATEGORIZED_TAG:
+        return [c for c in cards if not c.skill_tags]
+    return [c for c in cards if c.skill_tags and c.skill_tags[0] == skill_tag]
+
+
 def build_career_doc(
     user_id: int,
     project_id: int | None = None,
@@ -199,6 +219,7 @@ def build_career_doc(
     *,
     project_ids: list[int] | None = None,
     include_unassigned: bool = False,
+    skill_tag: str | None = None,
 ) -> list[StarItem]:
     """선택한 범위의 누적 카드를 모아 STAR 형식 경력기술서로 변환한다 (이직 준비 시점).
 
@@ -213,20 +234,29 @@ def build_career_doc(
     나왔는지를 찍어서 이어 붙인다. 프론트는 그 표시를 보고 프로젝트 헤드(Figma 41:254)를
     그린다.
 
+    **구현 노트 (9/18, 역량 상세)**: Figma 4.1-j "이 역량으로 문장 만들기"가 프로젝트가
+    아니라 **역량 태그** 기준으로 문장을 만든다. `skill_tag`를 주면 각 프로젝트의 카드
+    중 대표 태그가 그 역량인 것만 남긴다. **프로젝트별로 나눠 부르는 구조는 그대로
+    둔다** — 사용자가 9/18에 "프로젝트 경계 유지"로 확정했고, 같은 역량이라도 A은행과
+    B카드의 것은 별개 경력이라는 3장 원칙이 역량 기준에서도 똑같이 적용되기 때문이다.
+
     `project_id` 하나만 넘기던 기존 호출은 그대로 동작한다.
     """
     items: list[StarItem] = []
     projects = {p.id: p for p in list_projects(user_id)}
 
+    def scoped(cards: list[Card]) -> list[Card]:
+        return cards_with_skill_tag(cards, skill_tag) if skill_tag else cards
+
     for pid in _normalize_scope(user_id, project_id, project_ids):
         # 카드가 없어도 build_resume()을 그냥 부른다 — 빈 목록이면 LLM 호출 없이 바로
         # []를 돌려주므로(resume.py) 여기서 따로 가지치기할 이유가 없다.
         project_name = projects[pid].name
-        for item in build_resume(list_cards(user_id, pid), jd_text=jd_text):
+        for item in build_resume(scoped(list_cards(user_id, pid)), jd_text=jd_text):
             items.append(replace(item, project_id=pid, project_name=project_name))
 
     if include_unassigned:
-        for item in build_resume(list_unassigned_cards(user_id), jd_text=jd_text):
+        for item in build_resume(scoped(list_unassigned_cards(user_id)), jd_text=jd_text):
             items.append(replace(item, project_id=None, project_name=UNASSIGNED_SECTION_NAME))
 
     return items

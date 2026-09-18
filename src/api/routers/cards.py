@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from src.agent.card_clustering import suggest_clusters
 from src.agent.pipeline import retry_refinement, run_pipeline
+from src.agent.tag_suggester import suggest_tags_for_cards
 from src.api.rate_limit import limit_heavy, limit_light
 from src.api.schemas import (
     BundleIntoProjectRequest,
@@ -30,6 +31,7 @@ from src.api.schemas import (
     CardListResponse,
     CardResponse,
     CardTagsUpdateRequest,
+    CardTagSuggestion,
     CardTranslateRequest,
     CardTranslateResponse,
     MetricQuestionRequest,
@@ -37,6 +39,7 @@ from src.api.schemas import (
     ProjectResponse,
     SkillCategoryCount,
     SkillSummaryResponse,
+    TagSuggestionsResponse,
     UnclassifiedSuggestionsResponse,
 )
 from src.parsing.parser import detect_missing_metric, translate_for_target_job
@@ -148,7 +151,22 @@ def list_cards_endpoint(
     # list_cards()는 내부 계약상 오래된 순(build_resume에 넘길 때 시간순이 필요)이라
     # API 계약(최신순)에 맞추기 위해 여기서만 뒤집는다.
     cards = list(reversed(db.list_cards(current_user.id, project_id)))
-    return CardListResponse(cards=[CardResponse.model_validate(c) for c in cards])
+    return CardListResponse(cards=_with_photo_counts(current_user.id, cards))
+
+
+def _with_photo_counts(user_id: int, cards: list[db.Card]) -> list[CardResponse]:
+    """카드 목록에 첨부 사진 장수를 채워 넣는다 (9/18 신규).
+
+    카드마다 따로 세면 목록 하나에 쿼리가 N번 나간다 — `count_card_photos()`가 한 번에
+    세어 주는 dict를 받아서 붙인다. 사진이 한 장도 없는 계정에서도 쿼리는 한 번이다.
+    """
+    counts = db.count_card_photos(user_id, [c.id for c in cards])
+    responses = []
+    for card in cards:
+        response = CardResponse.model_validate(card)
+        response.photo_count = counts.get(card.id, 0)
+        responses.append(response)
+    return responses
 
 
 @router.get("/cards/skill-summary", response_model=SkillSummaryResponse)
@@ -236,6 +254,42 @@ def get_unclassified_suggestions(
             )
             for cluster in clusters
         ]
+    )
+
+
+@router.get("/cards/tag-suggestions", response_model=TagSuggestionsResponse)
+def get_tag_suggestions(
+    project_id: int | None = None, current_user: db.User = Depends(get_current_user)
+) -> TagSuggestionsResponse:
+    """"4.1-i 분류 수정 (반자동 · 미분류 처리)" (9/18 신규).
+
+    역량 태그가 **하나도 없는** 기록에, 이 유저가 이미 가진 역량 중 가까운 것 2개를
+    후보로 붙여서 돌려준다. CLAUDE.md 2.3이 말하는 임베딩의 자리다("새 카드를 기존
+    작업 그룹에 배정 — 보조적, 틀려도 손해 작음"). LLM을 부르지 않는다.
+
+    확정은 이 엔드포인트가 하지 않는다 — 사용자가 화면에서 고른 뒤 기존
+    `PATCH /api/cards/{id}`로 태그를 저장한다. AI가 고른 걸 그대로 쓰면 사용자가
+    검증하지 않은 분류가 조용히 굳는다.
+    """
+    cards = [c for c in db.list_cards(current_user.id, project_id) if not c.skill_tags]
+    known_tags = db.list_skill_tags(current_user.id)
+    try:
+        suggestions = suggest_tags_for_cards(cards, known_tags)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502, detail="지금은 역량을 추천해 드리기 어려워요."
+        ) from exc
+    by_id = {c.id: c for c in cards}
+    return TagSuggestionsResponse(
+        suggestions=[
+            CardTagSuggestion(
+                card_id=s.card_id,
+                card=CardResponse.model_validate(by_id[s.card_id]),
+                suggested_tags=s.suggested_tags,
+            )
+            for s in suggestions
+        ],
+        known_tags=known_tags,
     )
 
 

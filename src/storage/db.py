@@ -19,6 +19,7 @@ SQLite로 충분하다 — 단일 VM, 단일 프로세스, 데이터 수천 건 
 import json
 import secrets
 import sqlite3
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -74,6 +75,24 @@ class Card:
     # (= 되돌릴 AI 원본이 없는 상태 — 되돌리기 버튼을 그냥 안 띄운다).
     ai_sentence: str | None = None
     sentence_edited: bool = False
+
+
+@dataclass
+class CardPhoto:
+    """기록에 첨부한 사진 한 장 (9/18 신규, Figma 4.1-b "첨부한 사진").
+
+    이미지 바이트 자체는 디스크(`settings.photo_dir`)에 있고 여기엔 메타만 있다 —
+    `stored_name`이 그 디렉터리 안의 파일 이름이다. 원본 파일명(`original_name`)은
+    표시용으로만 보관하고 경로 조립에는 절대 쓰지 않는다(경로 탈출 방지).
+    """
+
+    id: int
+    card_id: int
+    stored_name: str
+    original_name: str
+    mime_type: str
+    byte_size: int
+    created_at: str
 
 
 @dataclass
@@ -208,6 +227,26 @@ def init_db() -> None:
             conn.execute(
                 "ALTER TABLE cards ADD COLUMN sentence_edited INTEGER NOT NULL DEFAULT 0"
             )
+        # 9/18 신규 — 기록 첨부 사진 (Figma "03 · 커리어 스택" 4.1-b).
+        # `ON DELETE`를 SQLite가 기본으로 강제하지 않으므로(외래키 미활성) 카드 삭제
+        # 시 사진 행/파일 정리는 `delete_card()`가 직접 한다.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS card_photos (
+                id            INTEGER PRIMARY KEY,
+                user_id       INTEGER NOT NULL REFERENCES users(id),
+                card_id       INTEGER NOT NULL REFERENCES cards(id),
+                stored_name   TEXT NOT NULL,
+                original_name TEXT NOT NULL,
+                mime_type     TEXT NOT NULL,
+                byte_size     INTEGER NOT NULL,
+                created_at    TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_card_photos_card ON card_photos(user_id, card_id)"
+        )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS profile (
@@ -403,6 +442,23 @@ def get_skill_category_counts(user_id: int, project_id: int, top_n: int = 4) -> 
     return top + [("미분류", rest_count)] if rest_count > 0 else top
 
 
+def list_skill_tags(user_id: int) -> list[str]:
+    """이 유저의 카드에 실제로 붙어 있는 역량 이름 전체 (9/18 신규).
+
+    Figma 4.1-i "다른 역량에서 고르기"와 역량 추천의 후보 풀이다. **대표 태그만이
+    아니라 모든 태그**를 모은다 — 고를 수 있는 선택지를 좁힐 이유가 없다(역량 개수를
+    세는 `get_skill_category_counts()`와는 목적이 다르다).
+
+    많이 쓰인 순으로 돌려준다 — 화면에서 위쪽이 눌릴 확률이 높은 것이 되게.
+    """
+    init_db()
+    counts: dict[str, int] = {}
+    for card in list_cards(user_id):
+        for tag in card.skill_tags:
+            counts[tag] = counts.get(tag, 0) + 1
+    return [tag for tag, _ in sorted(counts.items(), key=lambda kv: kv[1], reverse=True)]
+
+
 def list_unassigned_cards(user_id: int) -> list[Card]:
     """프로젝트가 아직 배정되지 않은(`project_id IS NULL`) 카드만 반환한다 (9/14 신규).
 
@@ -576,10 +632,166 @@ def get_current_project(user_id: int) -> Project | None:
 
 
 def delete_card(user_id: int, card_id: int) -> None:
-    """카드 하나를 삭제한다. 이 유저 소유가 아니거나 존재하지 않아도 조용히 무시한다(멱등)."""
+    """카드 하나를 삭제한다. 이 유저 소유가 아니거나 존재하지 않아도 조용히 무시한다(멱등).
+
+    9/18 — 첨부 사진도 같이 지운다. Figma 4.1-c 삭제 확인 다이얼로그가 "되돌릴 수
+    없어요"라고 명시하고 있고, 행만 지우고 파일을 남기면 디스크에 영영 못 찾는
+    쓰레기가 쌓인다. 파일 삭제가 실패해도 DB 행은 반드시 지운다 — 반대로 두면
+    "지웠는데 목록에 계속 보인다"가 된다.
+    """
+    init_db()
+    for photo in list_card_photos(user_id, card_id):
+        _unlink_photo_file(photo.stored_name)
+    with _connect() as conn:
+        conn.execute("DELETE FROM card_photos WHERE card_id = ? AND user_id = ?", (card_id, user_id))
+        conn.execute("DELETE FROM cards WHERE id = ? AND user_id = ?", (card_id, user_id))
+
+
+# ---------------------------------------------------------------------------
+# 기록 첨부 사진 (9/18 신규, Figma "03 · 커리어 스택" 4.1-b "첨부한 사진")
+# ---------------------------------------------------------------------------
+
+
+def _photo_dir() -> Path:
+    """사진 저장 디렉터리. 없으면 만든다(첫 업로드 때 자동 생성)."""
+    path = Path(settings.photo_dir)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def photo_path(stored_name: str) -> Path:
+    """저장 파일명 → 실제 경로.
+
+    `stored_name`은 **우리가 생성한 uuid + 확장자**라 사용자 입력이 섞이지 않는다.
+    그래도 방어적으로 경로 구분자가 들어간 값은 거부한다 — 이 함수를 나중에 다른
+    호출부가 쓰게 되면 그때 경로 탈출이 생길 수 있다.
+    """
+    if "/" in stored_name or "\\" in stored_name or stored_name in ("", ".", ".."):
+        raise ValueError(f"잘못된 사진 파일명: {stored_name!r}")
+    return _photo_dir() / stored_name
+
+
+def _unlink_photo_file(stored_name: str) -> None:
+    """파일 하나를 지운다. 이미 없거나 지울 수 없어도 조용히 넘어간다."""
+    try:
+        photo_path(stored_name).unlink(missing_ok=True)
+    except (OSError, ValueError):
+        pass
+
+
+def save_card_photo(
+    user_id: int,
+    card_id: int,
+    data: bytes,
+    original_name: str,
+    mime_type: str,
+    now: str,
+) -> CardPhoto | None:
+    """사진 한 장을 디스크에 쓰고 메타를 저장한다.
+
+    카드가 이 유저 소유가 아니면 아무것도 하지 않고 None (다른 카드 함수들과 동일한
+    소유권 규칙 — 남의 카드에 사진을 붙일 수 없다).
+
+    파일을 먼저 쓰고 DB 행을 나중에 넣는다. 반대로 하면 "행은 있는데 파일이 없는"
+    상태가 생겨서 목록에 깨진 썸네일이 뜬다 — 반대 방향(파일은 있는데 행이 없음)은
+    화면에 아무 영향이 없는 고아 파일일 뿐이라 이쪽이 안전하다.
+    """
+    init_db()
+    if get_card(user_id, card_id) is None:
+        return None
+    # 확장자만 원본에서 물려받는다(브라우저가 mime로 못 고르는 경우 대비). 경로
+    # 구분자나 비ASCII가 섞이면 통째로 버린다 — 확장자 없는 파일이어도 서빙에는
+    # 문제가 없다(mime_type을 DB에 따로 들고 있다).
+    suffix = Path(original_name).suffix.lower()[:10]
+    if not suffix.isascii() or "/" in suffix or "\\" in suffix:
+        suffix = ""
+    stored_name = f"{uuid.uuid4().hex}{suffix}"
+    photo_path(stored_name).write_bytes(data)
+    with _connect() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO card_photos
+                (user_id, card_id, stored_name, original_name, mime_type, byte_size, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (user_id, card_id, stored_name, original_name, mime_type, len(data), now),
+        )
+        photo_id = cur.lastrowid
+    return CardPhoto(
+        id=photo_id,
+        card_id=card_id,
+        stored_name=stored_name,
+        original_name=original_name,
+        mime_type=mime_type,
+        byte_size=len(data),
+        created_at=now,
+    )
+
+
+def list_card_photos(user_id: int, card_id: int) -> list[CardPhoto]:
+    """한 기록의 첨부 사진을 붙인 순서대로 반환한다."""
     init_db()
     with _connect() as conn:
-        conn.execute("DELETE FROM cards WHERE id = ? AND user_id = ?", (card_id, user_id))
+        rows = conn.execute(
+            "SELECT * FROM card_photos WHERE user_id = ? AND card_id = ? ORDER BY id",
+            (user_id, card_id),
+        ).fetchall()
+    return [_row_to_card_photo(r) for r in rows]
+
+
+def count_card_photos(user_id: int, card_ids: list[int]) -> dict[int, int]:
+    """카드 id → 사진 장수. 목록 화면(4.1-j의 44px 썸네일, 4.1-b 타임라인의 "사진 2")이
+    카드마다 따로 조회하지 않도록 한 번에 세어 준다.
+
+    빈 목록이면 쿼리를 아예 안 보낸다 — `IN ()`은 SQLite에서 문법 오류다.
+    """
+    init_db()
+    if not card_ids:
+        return {}
+    placeholders = ",".join("?" for _ in card_ids)
+    with _connect() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT card_id, COUNT(*) AS n FROM card_photos
+            WHERE user_id = ? AND card_id IN ({placeholders})
+            GROUP BY card_id
+            """,
+            (user_id, *card_ids),
+        ).fetchall()
+    return {r["card_id"]: r["n"] for r in rows}
+
+
+def get_card_photo(user_id: int, photo_id: int) -> CardPhoto | None:
+    """사진 한 장을 id로 조회한다. 이 유저 소유가 아니면 None."""
+    init_db()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM card_photos WHERE id = ? AND user_id = ?", (photo_id, user_id)
+        ).fetchone()
+    return _row_to_card_photo(row) if row else None
+
+
+def delete_card_photo(user_id: int, photo_id: int) -> bool:
+    """사진 한 장을 지운다(파일 + 행). 없거나 남의 것이면 False."""
+    photo = get_card_photo(user_id, photo_id)
+    if photo is None:
+        return False
+    _unlink_photo_file(photo.stored_name)
+    with _connect() as conn:
+        conn.execute("DELETE FROM card_photos WHERE id = ? AND user_id = ?", (photo_id, user_id))
+    return True
+
+
+def _row_to_card_photo(row: sqlite3.Row) -> CardPhoto:
+    return CardPhoto(
+        id=row["id"],
+        card_id=row["card_id"],
+        stored_name=row["stored_name"],
+        original_name=row["original_name"],
+        mime_type=row["mime_type"],
+        byte_size=row["byte_size"],
+        created_at=row["created_at"],
+    )
 
 
 def update_project(user_id: int, project_id: int, **fields) -> None:
@@ -659,6 +871,23 @@ def save_resume_draft(user_id: int, project_id: int, content: str, now: str) -> 
             (project_id, user_id, content, now),
         )
     return ResumeDraft(project_id=project_id, content=content, updated_at=now)
+
+
+def count_resume_drafts(user_id: int) -> int:
+    """저장된 경력기술서 초안 개수 (9/18 신규, Figma 4.1-h "내 경력기술서  3개").
+
+    프로젝트별 초안 + 마스터 초안(유저당 1개)을 합쳐서 센다. 화면에 숫자를 띄우려면
+    실제로 몇 개인지 알아야 한다 — 짐작해서 적을 수는 없다(CLAUDE.md 2.2).
+    """
+    init_db()
+    with _connect() as conn:
+        by_project = conn.execute(
+            "SELECT COUNT(*) AS n FROM resume_drafts WHERE user_id = ?", (user_id,)
+        ).fetchone()["n"]
+        master = conn.execute(
+            "SELECT COUNT(*) AS n FROM master_resume_drafts WHERE user_id = ?", (user_id,)
+        ).fetchone()["n"]
+    return by_project + master
 
 
 def get_master_resume_draft(user_id: int) -> ResumeDraft | None:

@@ -23,6 +23,7 @@ from src.api.schemas import (
     JdRequirementResponse,
     JdRequirementsRequest,
     JdRequirementsResponse,
+    ResumeDraftCountResponse,
     ResumeDraftResponse,
     ResumeDraftSaveRequest,
     ResumeEnhanceRequest,
@@ -59,8 +60,19 @@ def create_resume(
         jd_text=payload.jd_text,
         project_ids=payload.project_ids,
         include_unassigned=payload.include_unassigned,
+        skill_tag=payload.skill_tag,
     )
     return ResumeResponse(items=[StarItemResponse.model_validate(item) for item in items])
+
+
+@router.get("/resume/draft-count", response_model=ResumeDraftCountResponse)
+def resume_draft_count(current_user: db.User = Depends(get_current_user)) -> ResumeDraftCountResponse:
+    """저장된 초안 개수 (9/18 신규, Figma 4.1-h "내 경력기술서  3개").
+
+    프로젝트별 초안 + 마스터 초안을 합친 수다. 화면에 띄울 숫자를 짐작하지 않기 위해
+    있는 엔드포인트라, 가벼운 COUNT 두 번으로 끝난다.
+    """
+    return ResumeDraftCountResponse(count=db.count_resume_drafts(current_user.id))
 
 
 @router.post("/resume/enhance", response_model=ResumeEnhanceResponse, dependencies=[Depends(limit_heavy)])

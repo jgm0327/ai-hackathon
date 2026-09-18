@@ -1,25 +1,31 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { BottomSheet } from "@/components/BottomSheet";
 import { ProjectSwitcher } from "@/components/ProjectSwitcher";
 import { SkeletonLine } from "@/components/Skeleton";
+import { stackTheme, stripColor } from "@/components/stackTheme";
 import {
   ApiError,
   Card,
   CardCluster,
+  Profile,
   SkillSummary,
   StarItem,
   bundleCardsIntoProject,
   deleteCard,
+  getProfile,
+  getResumeDraftCount,
   getSkillSummary,
   getUnclassifiedSuggestions,
   listCards,
   singleProjectScope,
   updateCard,
 } from "@/lib/api";
+import { missingCoreCompetencies } from "@/lib/coreCompetencies";
 import { getCached, navKey, setCached } from "@/lib/navCache";
 import { buildResumeCached } from "@/lib/resumeCache";
 import { useProjects } from "@/lib/useProjects";
@@ -174,6 +180,43 @@ function StackPageContent() {
   const [deleteConfirmCard, setDeleteConfirmCard] = useState<Card | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
+  // 4.1-h 재설계에 딸려온 것들 (9/18).
+  // - profile: "마케팅 · 광고 직군 키워드 기준" 문구와 역량 공백 경고에 쓴다.
+  //   직군을 모르면 둘 다 안 띄운다 — 없는 직군을 임의로 고르지 않는다.
+  // - draftCount: "내 경력기술서  3개". 실제 저장된 초안 수를 서버에서 받아온다
+  //   (숫자를 짐작해서 적지 않는다 — CLAUDE.md 2.2).
+  // - addTagOpen: "+ 역량 추가" 시트.
+  const [profile, setProfile] = useState<Profile | null>(
+    () => getCached<Profile>(navKey.profile()) ?? null,
+  );
+  const [draftCount, setDraftCount] = useState<number | null>(null);
+  const [addTagOpen, setAddTagOpen] = useState(false);
+  const [newTagName, setNewTagName] = useState("");
+  const [newTagCardIds, setNewTagCardIds] = useState<Set<number>>(new Set());
+  const [addTagError, setAddTagError] = useState<string | null>(null);
+  const [addingTag, setAddingTag] = useState(false);
+  // 태그를 바꾼 뒤 카드 목록/역량 집계를 다시 부르기 위한 트리거. 값 자체엔 의미가
+  // 없고, 아래 두 effect의 의존성으로만 쓰인다.
+  const [reloadToken, setReloadToken] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    getProfile()
+      .then((p) => {
+        setCached(navKey.profile(), p);
+        if (!cancelled) setProfile(p);
+      })
+      .catch(() => {});
+    getResumeDraftCount()
+      .then((n) => {
+        if (!cancelled) setDraftCount(n);
+      })
+      .catch(() => {}); // 실패하면 숫자만 안 뜬다 — 진입 자체는 그대로 동작한다
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // "4.1.1 AI 프로젝트 자동 제안" (9/14 신규) — project_id가 없는 카드끼리만 비교해서
   // 비슷한 것들을 묶어 후보로 제시한다. 이미 프로젝트가 배정된 카드는 서버가 애초에
   // 조회 대상으로도 삼지 않는다(CLAUDE.md 3장 안전장치, resilient-waddling-simon.md
@@ -244,6 +287,46 @@ function StackPageContent() {
       setBundleError(err instanceof ApiError ? err.detail : "묶기에 실패했습니다.");
     } finally {
       setBundling(false);
+    }
+  };
+
+  /**
+   * "+ 역량 추가" 적용 — 고른 기록들의 **대표 태그**를 새 이름으로 바꾼다 (9/18).
+   *
+   * 대표 태그(`skill_tags[0]`)만 바꾸는 게 핵심이다. 역량 목록과 역량 상세가 둘 다
+   * 대표 태그로 집계하므로(`get_skill_category_counts`), 뒤쪽 태그에 끼워 넣으면
+   * 새 역량이 목록에 나타나지 않는다. 기존 태그는 뒤로 밀어 보존한다 — 사람이
+   * 분류를 바꾼 것이지 원래 태그가 틀렸다는 뜻은 아니다.
+   */
+  const handleAddTag = async () => {
+    const name = newTagName.trim();
+    if (!name) {
+      setAddTagError("역량 이름을 입력해 주세요.");
+      return;
+    }
+    if (newTagCardIds.size === 0) {
+      setAddTagError("이 역량으로 볼 기록을 한 개 이상 골라 주세요.");
+      return;
+    }
+    setAddingTag(true);
+    setAddTagError(null);
+    try {
+      await Promise.all(
+        cards
+          .filter((c) => newTagCardIds.has(c.id))
+          .map((c) =>
+            updateCard(c.id, { skillTags: [name, ...c.skill_tags.filter((t) => t !== name)] }),
+          ),
+      );
+      setAddTagOpen(false);
+      setNewTagName("");
+      setNewTagCardIds(new Set());
+      // 목록과 역량 집계를 다시 불러온다 — 아래 effect들이 `reloadToken`을 보고 돈다.
+      setReloadToken((n) => n + 1);
+    } catch (err) {
+      setAddTagError(err instanceof ApiError ? err.detail : "역량을 만들지 못했어요.");
+    } finally {
+      setAddingTag(false);
     }
   };
 
@@ -386,7 +469,7 @@ function StackPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [projectsLoading, currentProject?.id, showAllProjects]);
+  }, [projectsLoading, currentProject?.id, showAllProjects, reloadToken]);
 
   // 역량 리스트(Figma 100:692 "4.1-h")는 프로젝트 하나를 볼 때만 의미가 있다
   // (CLAUDE.md 3장 — 프로젝트가 다르면 같은 이름 작업이라도 안 섞여야 한다) —
@@ -408,7 +491,19 @@ function StackPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [currentProject, showAllProjects, cards.length]);
+  }, [currentProject, showAllProjects, cards.length, reloadToken]);
+
+  // 역량 공백 경고 (Figma 4.1-h `294:10323`, 9/18) — 이 직군에서 자주 묻는 역량 중
+  // 아직 한 건도 기록하지 않은 것들. 목록은 우리가 구성한 것이고 원티드 공식 자료가
+  // 아니다(`lib/coreCompetencies.ts` 주석 참고). 직군을 모르면 빈 배열이라 안 뜬다.
+  const missingCore = useMemo(
+    () =>
+      missingCoreCompetencies(
+        profile?.job_field,
+        skillSummary?.categories.map((c) => c.tag) ?? [],
+      ),
+    [profile, skillSummary],
+  );
 
   // "쓸 수 있는 문장" (Figma 100:692 "4.1-h") — 경력기술서에 그대로 쓸 만큼 구체적인
   // 기록의 수. `confidence`가 낮으면(parse_note()가 "특정 업무 내용을 확인할 수
@@ -649,100 +744,168 @@ function StackPageContent() {
         </Link>
       </div>
 
-      {/* 재료 카운터 + 역량 리스트 (Figma 100:692 "4.1-h 역량 분류") — 홈 화면 버블과
-          같은 skill-summary 데이터를 재사용한다. "전체 프로젝트 보기" 중엔 의미가
-          없어서 숨긴다(위 effect가 그때 skillSummary를 null로 비움). */}
+      {/* 스택 헤드 + 역량 리스트 (Figma "03 · 커리어 스택" 4.1-h `294:10275`, 9/18 재설계).
+          "전체 프로젝트 보기" 중엔 역량 집계가 의미가 없어서 숨긴다(위 effect가 그때
+          skillSummary를 null로 비운다). */}
       {!showAllProjects && skillSummary && skillSummary.categories.length > 0 && (
-        <div className="flex flex-col gap-3">
-          <div className="flex items-center gap-[6px] rounded-[14px] px-[6px] py-[18px]">
-            <div className="flex flex-1 flex-col items-center justify-center gap-2">
-              <p className="text-[32px] font-bold leading-[38px] tracking-[-0.8px]">
-                {skillSummary.total_cards}
-              </p>
-              <p className="text-[11px] font-medium tracking-[0.4px] text-[#828282]">기록</p>
-            </div>
-            <div className="h-[30px] w-px shrink-0 bg-[#2e2e2e]" />
-            <div className="flex flex-1 flex-col items-center justify-center gap-2">
-              <p className="text-[32px] font-bold leading-[38px] tracking-[-0.8px]">
-                {skillSummary.categories.length}
-              </p>
-              <p className="text-[11px] font-medium tracking-[0.4px] text-[#828282]">역량</p>
-            </div>
-            <div className="h-[30px] w-px shrink-0 bg-[#2e2e2e]" />
-            <div className="flex flex-1 flex-col items-center justify-center gap-2">
-              <p className="text-[32px] font-bold leading-[38px] tracking-[-0.8px]">
-                {usableSentenceCount}
-              </p>
-              <p className="text-[11px] font-medium tracking-[0.4px] text-[#828282]">쓸 수 있는 문장</p>
-            </div>
+        <div className="flex flex-col">
+          {/* 스택 헤드 (294:10276) */}
+          <p
+            style={{ color: stackTheme.text }}
+            className="text-[20px] font-bold leading-[28px] tracking-[-0.8px]"
+          >
+            기록 <span style={{ color: stackTheme.accentText }}>{skillSummary.total_cards}</span>개를
+            역량 <span style={{ color: stackTheme.accentText }}>{skillSummary.categories.length}</span>
+            개로 나눴어요
+          </p>
+          <p
+            style={{ color: stackTheme.textMuted }}
+            className="mt-[6px] text-[12px] leading-[20px]"
+          >
+            지금 쓸 수 있는 문장 {usableSentenceCount}개
+          </p>
+
+          {/* 비중 스트립 (294:10281) — 역량별 개수를 그대로 비율로 쓴다. 색은 이름이
+              아니라 **순위**에 매핑한다(홈 버블과 같은 규칙). */}
+          <div className="mt-[28px] flex gap-[3px]">
+            {skillSummary.categories.map((cat, i) => (
+              <div
+                key={cat.tag}
+                title={`${cat.tag} ${cat.count}`}
+                style={{ flex: `${cat.count} 0 0`, backgroundColor: stripColor(i), minWidth: 1 }}
+                className="h-[5px]"
+              />
+            ))}
           </div>
 
-          <div className="flex flex-col gap-1">
-            <div className="flex items-center gap-[7px]">
-              <span aria-hidden className="text-[13px]">✦</span>
-              <p className="text-[13px] font-medium">
-                AI가 기록 {skillSummary.total_cards}개를 역량 {skillSummary.categories.length}개로
-                나눴어요
+          {/* 분류 헤더 (294:10288) — "AI가 먼저 나눠뒀어요" + 기준 + [수정].
+              [수정]은 4.1-i 분류 수정 화면으로 간다. */}
+          <div className="mt-[36px] flex flex-col gap-[10px]">
+            <div className="flex items-start gap-2">
+              <Image
+                src="/icons/sparkles.svg"
+                alt=""
+                width={15}
+                height={15}
+                aria-hidden
+                className="mt-[3px] shrink-0"
+              />
+              <p style={{ color: stackTheme.textSoft }} className="flex-1 text-[12px] leading-[20px]">
+                쓰신 기록의 키워드를 읽고 AI가 먼저 나눠뒀어요
               </p>
             </div>
-            <p className="text-[11px] tracking-[0.4px] text-[#828282]">
-              기록 문장의 태그 기준 · 태그는 카드에서 직접 고칠 수 있어요
-            </p>
+            <div className="flex items-center gap-2">
+              <p
+                style={{ color: stackTheme.textMuted }}
+                className="flex-1 text-[12px] leading-[20px] tracking-[0.4px]"
+              >
+                {profile?.job_field ? `${profile.job_field} 직군 키워드 기준` : "기록 키워드 기준"}
+              </p>
+              <Link
+                href="/stack/classify"
+                style={{ borderColor: stackTheme.border, color: stackTheme.textSoft }}
+                className="shrink-0 rounded-[4px] border px-[11px] py-[5px] text-[14px] font-medium leading-[24px] transition-opacity active:opacity-70"
+              >
+                수정
+              </Link>
+            </div>
           </div>
+          <div style={{ backgroundColor: stackTheme.border }} className="mt-[10px] h-px w-full" />
 
-          {!groupedView && (
-            <div className="flex flex-col overflow-hidden rounded-[14px]">
-              {skillSummary.categories.map((cat) => {
-                const barWidth = Math.round((cat.count / skillSummary.total_cards) * 100);
-                const isUncategorized = cat.tag === "미분류";
-                return (
-                  <button
-                    key={cat.tag}
-                    type="button"
-                    onClick={() => {
-                      setActiveTag(cat.tag);
-                      setActiveStreakDate(null);
-                      setPage(1);
-                    }}
-                    className={`flex w-full items-center gap-[9px] border border-[#252525] py-[13px] pl-[14px] pr-[13px] text-left transition-colors hover:bg-[#1a1a1a] ${
-                      activeTag === cat.tag ? "bg-[#202020]" : ""
-                    }`}
-                  >
-                    <p className={`text-[13px] font-medium ${isUncategorized ? "text-[#f2f2f2]" : ""}`}>
-                      {cat.tag}
-                    </p>
-                    <div className="flex-1" />
-                    <div className="h-[5px] w-[54px] shrink-0 overflow-hidden rounded-full bg-[#262626]">
-                      <div
-                        className={`h-[5px] rounded-full ${isUncategorized ? "bg-[#6e6e6e]" : "bg-[#f2f2f2]"}`}
-                        style={{ width: `${barWidth}%` }}
-                      />
-                    </div>
-                    <p
-                      className={`text-[11px] font-bold ${isUncategorized ? "text-[#a0a0a0]" : "text-[#f2f2f2]"}`}
-                    >
-                      {cat.count}
-                    </p>
-                    <span aria-hidden className="text-[#5e5e5e]">
-                      ›
-                    </span>
-                  </button>
-                );
-              })}
-              {activeTag && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActiveTag(null);
-                    setPage(1);
-                  }}
-                  className="w-full border border-[#252525] py-[10px] text-center text-[11px] font-medium text-[#828282] transition-colors hover:bg-[#1a1a1a]"
+          {/* 역량 리스트 (294:10298) — 누르면 역량 상세(4.1-j)로 간다. */}
+          <div className="mt-[12px] flex flex-col gap-[10px]">
+            {skillSummary.categories.map((cat, i) => (
+              <Link
+                key={cat.tag}
+                href={`/stack/skill/${encodeURIComponent(cat.tag)}`}
+                style={{ backgroundColor: stackTheme.cardBg }}
+                className="flex items-center gap-[14px] rounded-[12px] px-[16px] py-[18px] transition-opacity active:opacity-80"
+              >
+                <span
+                  style={{ color: stackTheme.textSoft }}
+                  className="text-[12px] leading-[20px] tracking-[0.72px]"
                 >
-                  전체 보기
-                </button>
-              )}
+                  {`${i + 1}`.padStart(2, "0")}
+                </span>
+                <span
+                  style={{ color: stackTheme.text }}
+                  className="flex-1 truncate text-[16px] font-medium leading-[28px] tracking-[-0.32px]"
+                >
+                  {cat.tag}
+                </span>
+                <span
+                  style={{ color: stripColor(i) === stackTheme.border ? stackTheme.textMuted : stripColor(i) }}
+                  className="text-[20px] font-bold leading-[28px]"
+                >
+                  {cat.count}
+                </span>
+                <Image
+                  src="/icons/chevron-right.svg"
+                  alt=""
+                  width={16}
+                  height={16}
+                  aria-hidden
+                  className="shrink-0"
+                />
+              </Link>
+            ))}
+            <button
+              type="button"
+              onClick={() => setAddTagOpen(true)}
+              style={{ borderColor: stackTheme.border, color: stackTheme.textSoft }}
+              className="rounded-[12px] border px-[16px] py-[18px] text-[14px] font-medium leading-[24px] transition-opacity active:opacity-70"
+            >
+              +&nbsp;&nbsp;역량 추가
+            </button>
+          </div>
+
+          {/* 역량 공백 경고 (Figma 4.1-h `301:15331`) — 직군을 알 때만, 그리고 실제로
+              비어 있을 때만. 각 역량은 4.1-k(역량 상세 · 기록 없음)로 이어진다 —
+              거기서 "이런 일을 하셨을 때 쌓여요" 예시를 보고 바로 기록할 수 있다. */}
+          {missingCore.length > 0 && (
+            <div className="mt-[12px] flex flex-col gap-2 px-[16px] py-[14px]">
+              <p style={{ color: stackTheme.textMuted }} className="text-[12px] leading-[20px]">
+                {profile?.job_field?.split("·")[0]} 면접에서 자주 묻는 역량인데, 아직 기록이
+                없어요
+              </p>
+              <div className="flex flex-wrap gap-[6px]">
+                {missingCore.slice(0, 3).map((name) => (
+                  <Link
+                    key={name}
+                    href={`/stack/skill/${encodeURIComponent(name)}`}
+                    style={{ borderColor: stackTheme.border, color: stackTheme.textSoft }}
+                    className="rounded-full border px-[14px] py-[8px] text-[12px] font-medium leading-[20px] transition-opacity active:opacity-70"
+                  >
+                    {name}
+                  </Link>
+                ))}
+              </div>
             </div>
           )}
+
+          {/* 내 경력기술서 진입 (294:10326) */}
+          <Link
+            href="/resume"
+            style={{ backgroundColor: stackTheme.cardBg }}
+            className="mt-[28px] flex items-center gap-2 rounded-[12px] p-[16px] transition-opacity active:opacity-80"
+          >
+            <span
+              style={{ color: stackTheme.text }}
+              className="text-[16px] font-medium leading-[28px]"
+            >
+              내 경력기술서
+            </span>
+            <span className="flex-1" />
+            {draftCount !== null && (
+              <span
+                style={{ color: stackTheme.textSoft }}
+                className="text-[12px] font-medium leading-[20px]"
+              >
+                {draftCount}개
+              </span>
+            )}
+            <Image src="/icons/chevron-right.svg" alt="" width={16} height={16} aria-hidden />
+          </Link>
         </div>
       )}
 
@@ -867,21 +1030,63 @@ function StackPageContent() {
         </div>
       )}
 
+      {/* "4.1-d 빈 상태 (카드 0장)" (Figma `294:10142`, 9/18 재설계). 예전엔 점선
+          placeholder 박스였는데, 새 목업이 그 자리에 **앱 로고**를 넣고 문구도
+          사람 이름을 부르는 쪽으로 바뀌었다. 백업 불러오기 진입도 같이 들어왔다 —
+          기기를 옮겨 온 사람이 여기서 막히지 않게 하는 게 목적이라 설정까지
+          찾아 들어가지 않아도 되게 링크를 둔다. */}
       {!loading && !groupsLoading && !error && groups.length === 0 && ungrouped.length === 0 && (
-        <div className="flex flex-col items-center gap-3 py-8">
-          {/* Figma 노드 41:695 "빈 스택 일러스트" — 실제로는 그림 없이 빈 점선
-              placeholder 박스뿐이었다(디자이너가 아직 못 채운 자리). 없는 그림을
-              지어내는 대신 그 placeholder 스타일 그대로만 가져왔다. */}
-          <div className="size-[120px] rounded-[18px] border-[1.5px] border-dashed border-[#2a2a2a] bg-[#262626]" />
-          <div className="flex flex-col items-center gap-1">
-            <p className="text-center text-sm font-medium text-[#828282]">아직 적립된 기록이 없습니다</p>
-            <p className="text-center text-xs text-[#5e5e5e]">
-              [일지 기록] 탭에서 오늘 하루의 업무 메모를 한 줄 던져보세요
+        <div className="flex flex-col">
+          <div className="flex flex-col items-center py-[24px]">
+            <Image
+              src="/welcome/logo-mark.svg"
+              alt=""
+              width={72}
+              height={72}
+              aria-hidden
+              className="opacity-90"
+            />
+            <p
+              style={{ color: stackTheme.text }}
+              className="mt-[36px] text-center text-[20px] font-bold leading-[28px]"
+            >
+              아직은 비어 있어요
+            </p>
+            <p
+              style={{ color: stackTheme.textMuted }}
+              className="mt-[20px] text-center text-[14px] leading-[24px]"
+            >
+              {profile?.job_detail ? `${profile.job_detail}의` : "오늘"} 하루는 분명 가득했을
+              거예요. 한 줄만 남겨두면 여기부터 쌓이기 시작해요.
             </p>
           </div>
+
+          <Link
+            href="/settings"
+            style={{ backgroundColor: stackTheme.cardBg }}
+            className="mt-[12px] flex items-center gap-2 rounded-[12px] p-[16px] transition-opacity active:opacity-80"
+          >
+            <span className="flex flex-1 flex-col">
+              <span
+                style={{ color: stackTheme.text }}
+                className="text-[16px] font-medium leading-[28px]"
+              >
+                백업 불러오기
+              </span>
+              <span
+                style={{ color: stackTheme.textMuted }}
+                className="text-[12px] leading-[20px]"
+              >
+                기기를 옮겨 오셨다면 백업 파일로 되살릴 수 있어요
+              </span>
+            </span>
+            <Image src="/icons/chevron-right.svg" alt="" width={16} height={16} aria-hidden />
+          </Link>
+
           <Link
             href="/"
-            className="rounded-full bg-accent px-4 py-2 text-xs font-semibold text-accent-foreground transition-colors hover:bg-[#ff7a2e]"
+            style={{ backgroundColor: "var(--accent)", color: "var(--accent-foreground)" }}
+            className="mt-[28px] flex h-[50px] items-center justify-center rounded-[8px] text-[14px] font-bold transition-opacity active:opacity-80"
           >
             기록하러 가기
           </Link>
@@ -958,6 +1163,65 @@ function StackPageContent() {
           마스터 경력기술서 초안 짜기
         </Link>
       </div>
+
+      {/* "+ 역량 추가" (Figma 4.1-h `294:10320`, 9/18 신규).
+          역량은 카드의 태그에서 나오는 값이라, 이름만 만들어 두면 어디에도 안 붙는
+          유령 역량이 된다(CLAUDE.md 3장이 AI 그룹핑을 저장하지 않는 것과 같은 이유 —
+          붙일 데가 없는 분류는 관리 대상만 늘린다). 그래서 이름과 함께 **그 역량으로
+          옮길 기록**을 같이 고르게 한다. */}
+      <BottomSheet
+        open={addTagOpen}
+        onClose={() => setAddTagOpen(false)}
+        title="역량 추가"
+      >
+        <div className="flex flex-col gap-3">
+          <p className="text-[12px] text-[#a0a0a0]">
+            역량 이름을 짓고, 이 역량으로 볼 기록을 고르세요. 고른 기록의 대표 역량이 이 이름으로
+            바뀝니다.
+          </p>
+          <input
+            value={newTagName}
+            onChange={(e) => setNewTagName(e.target.value)}
+            placeholder="예: 캠페인 운영"
+            maxLength={40}
+            className="rounded-[10px] bg-[#262626] px-3 py-2.5 text-sm text-[#f2f2f2] placeholder:text-[#5e5e5e] focus:outline-none"
+          />
+          <div className="flex max-h-[240px] flex-col gap-1 overflow-y-auto">
+            {cards.map((card) => (
+              <label
+                key={card.id}
+                className="flex cursor-pointer items-start gap-2 rounded-[10px] px-2 py-2 hover:bg-[#1e1e1e]"
+              >
+                <input
+                  type="checkbox"
+                  checked={newTagCardIds.has(card.id)}
+                  onChange={() =>
+                    setNewTagCardIds((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(card.id)) next.delete(card.id);
+                      else next.add(card.id);
+                      return next;
+                    })
+                  }
+                  className="mt-1 size-4 shrink-0 accent-[#ff5d00]"
+                />
+                <span className="flex-1 text-[13px] leading-[18px] text-[#f2f2f2]">
+                  {card.refined_sentence}
+                </span>
+              </label>
+            ))}
+          </div>
+          {addTagError && <p className="text-[12px] text-red-400">{addTagError}</p>}
+          <button
+            type="button"
+            disabled={addingTag}
+            onClick={handleAddTag}
+            className="flex h-[50px] items-center justify-center rounded-[8px] bg-accent text-[14px] font-bold text-accent-foreground transition-opacity active:opacity-80 disabled:opacity-40"
+          >
+            {addingTag ? "적용하는 중…" : "이 역량으로 묶기"}
+          </button>
+        </div>
+      </BottomSheet>
 
       {/* 카드 액션 시트 (Figma "4.1-a") */}
       <BottomSheet open={actionSheetCard !== null} onClose={() => setActionSheetCard(null)}>

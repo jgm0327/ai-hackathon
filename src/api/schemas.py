@@ -128,10 +128,30 @@ class CardResponse(_FromAttributes):
     # 마이그레이션 이전 카드는 ai_sentence가 null이라 자연스럽게 안 뜬다.
     ai_sentence: str | None = None
     sentence_edited: bool = False
+    # 9/18 신규 — 첨부 사진 장수 (Figma 4.1-b 타임라인의 "사진 2", 4.1-j의 44px
+    # 썸네일 유무). 목록 응답에서 카드마다 사진을 따로 조회하지 않게 라우터가 한 번에
+    # 세어 채운다. 사진 자체는 `GET /api/cards/{id}/photos`로 받는다.
+    photo_count: int = 0
 
 
 class CardListResponse(BaseModel):
     cards: list[CardResponse]
+
+
+# 기록 첨부 사진 (9/18 신규, Figma "03 · 커리어 스택" 4.1-b "첨부한 사진").
+# `stored_name`(디스크 파일명)은 **응답에 싣지 않는다** — 클라이언트는 `id`로만
+# 접근하면 되고, 내부 파일명을 노출하면 경로를 추측당할 여지만 생긴다.
+class CardPhotoResponse(_FromAttributes):
+    id: int
+    card_id: int
+    original_name: str
+    mime_type: str
+    byte_size: int
+    created_at: str
+
+
+class CardPhotoListResponse(BaseModel):
+    photos: list[CardPhotoResponse]
 
 
 # 홈 화면(Figma 100:692) "무엇이 쌓였나요" 버블 차트 (9/16 신규). 카드 대표 태그
@@ -157,6 +177,20 @@ class CardClusterSuggestion(BaseModel):
 
 class UnclassifiedSuggestionsResponse(BaseModel):
     clusters: list[CardClusterSuggestion]
+
+
+# "4.1-i 분류 수정 (반자동 · 미분류 처리)" (9/18 신규). 역량 태그가 없는 기록에
+# **이미 있는 역량 중** 가까운 것을 후보로 붙여 준다 — 없는 역량을 지어내지 않는다.
+class CardTagSuggestion(BaseModel):
+    card_id: int
+    card: CardResponse
+    suggested_tags: list[str]
+
+
+class TagSuggestionsResponse(BaseModel):
+    suggestions: list[CardTagSuggestion]
+    # 화면의 "다른 역량에서 고르기"가 띄울 전체 역량 목록(이 유저가 실제로 가진 것).
+    known_tags: list[str]
 
 
 class BundleIntoProjectRequest(BaseModel):
@@ -199,6 +233,14 @@ class ResumeRequest(BaseModel):
     project_ids: list[int] | None = Field(default=None, max_length=50)
     include_unassigned: bool = False
     jd_text: str | None = Field(default=None, max_length=MAX_JD_TEXT)
+    # 9/18 신규 — Figma 4.1-j "이 역량으로 문장 만들기". 주면 대표 태그가 이 역량인
+    # 카드만 묶는다. 프로젝트별로 나눠 부르는 구조는 그대로라 프로젝트 경계는 유지된다.
+    skill_tag: str | None = Field(default=None, max_length=MAX_TITLE)
+
+
+# Figma 4.1-h "내 경력기술서  3개" (9/18 신규) — 프로젝트별 초안 + 마스터 초안 합계.
+class ResumeDraftCountResponse(BaseModel):
+    count: int
 
 
 class StarItemResponse(_FromAttributes):

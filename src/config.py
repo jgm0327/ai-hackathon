@@ -75,6 +75,15 @@ class Settings:
     # 카드/프로젝트 영속 저장(SQLite). OCI VM 로컬 디스크는 재시작해도 유지되므로
     # 별도 클라우드 DB 불필요 (CLAUDE.md P0 1순위, 9/13 피벗).
     db_path: str = os.getenv("DB_PATH", "data/app.db")
+    # 기록에 첨부한 사진 (9/18 신규, Figma "03 · 커리어 스택" 4.1-b "첨부한 사진").
+    # DB에 BLOB으로 넣지 않고 디스크 파일로 둔다 — SQLite 파일이 사진만큼 불어나면
+    # 백업 내보내기(GET /api/backup)가 통째로 무거워지고, OCI AMD Micro(RAM 1GB)에서
+    # 큰 BLOB을 메모리로 읽어 내보내는 게 부담이다. DB에는 경로와 메타만 남긴다.
+    photo_dir: str = os.getenv("PHOTO_DIR", "data/photos")
+    # 사진 1장 최대 크기(바이트)와 기록 1건당 최대 장수. 폰 카메라 원본이 보통 2~5MB라
+    # 8MB면 넉넉하고, 장수는 목업(3장)보다 여유 있게 잡았다.
+    photo_max_bytes: int = int(os.getenv("PHOTO_MAX_BYTES", str(8 * 1024 * 1024)))
+    photo_max_per_card: int = int(os.getenv("PHOTO_MAX_PER_CARD", "10"))
     # FastAPI CORS 허용 origin. 콤마로 구분(예: "https://app.example.com,http://localhost:3000").
     # 9/14 카카오 로그인 도입으로 쿠키 기반 세션을 쓰게 되면서 기본값을 "*"로 둘 수 없게
     # 됐다(자격증명 포함 요청엔 브라우저가 와일드카드 origin을 거부함) — 로컬 개발 기본값을

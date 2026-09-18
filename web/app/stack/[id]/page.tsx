@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { PhotoStrip } from "@/components/PhotoStrip";
 import { SkeletonLine } from "@/components/Skeleton";
 import { Toast, useToast } from "@/components/Toast";
 import { ApiError, Card, Project, listCards, listProjects, updateCard } from "@/lib/api";
@@ -229,12 +230,21 @@ export default function CardDetailPage() {
                     {shortDate(entry.created_at)}
                     {i === 0 && " · 최신"}
                     {entry.id === card.id && " · 지금 보는 기록"}
+                    {/* Figma 301:15068 "02.24 · 최신 · 사진 2" — 사진이 붙은 기록을
+                        타임라인에서 바로 알아볼 수 있게 한다. */}
+                    {(entry.photo_count ?? 0) > 0 && ` · 사진 ${entry.photo_count}`}
                   </p>
                   <p className="text-[13px] leading-relaxed text-[#f2f2f2]">{entry.raw_text}</p>
                 </Link>
               ))}
             </div>
           </div>
+
+          {/* 첨부한 사진 (Figma "03 · 커리어 스택" 4.1-b `301:15077`, 9/18 신규).
+              기록에 근거 자료를 붙여두는 자리다 — 나중에 경력기술서를 쓸 때
+              "그때 화면이 어땠더라"를 되살리는 용도라서, LLM을 타지 않고 그냥 저장만
+              한다(변환 대기 시간에 영향 없음). */}
+          <PhotoStrip cardId={card.id} initialCount={card.photo_count ?? 0} />
 
           {/* 이 주제에 이어 쓰기 (Figma 89:519) — 홈으로 돌아가되 주제를 들고 간다.
               주제가 없는 카드(태그 0개)는 이어 쓸 대상이 없으므로 일반 기록으로 보낸다. */}

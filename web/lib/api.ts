@@ -40,6 +40,9 @@ export interface Card {
    * 버튼은 `sentence_edited`가 true이고 `ai_sentence`가 있을 때만 띄운다. */
   ai_sentence?: string | null;
   sentence_edited?: boolean;
+  /** 9/18 신규 — 첨부 사진 장수 (Figma 4.1-b 타임라인의 "사진 2", 4.1-j의 썸네일 유무).
+   * 목록 응답이 카드마다 채워 준다. 사진 자체는 `listCardPhotos()`로 따로 받는다. */
+  photo_count?: number;
 }
 
 export interface Project {
@@ -168,6 +171,10 @@ export class ApiError extends Error {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
+  // 9/18 — 사진 업로드(FormData)는 `Content-Type`을 **브라우저가 직접** 붙여야 한다.
+  // multipart 경계 문자열(boundary)이 헤더에 들어가는데, 우리가 "application/json"을
+  // 덮어써 버리면 서버가 본문을 파싱하지 못하고 400으로 떨어진다.
+  const isFormData = typeof FormData !== "undefined" && init?.body instanceof FormData;
   try {
     res = await fetch(`${API_BASE}${path}`, {
       ...init,
@@ -175,7 +182,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       // 백엔드(8000)가 다른 origin이라 기본값(same-origin)으로는 쿠키가 안 실린다.
       credentials: "include",
       headers: {
-        "Content-Type": "application/json",
+        ...(isFormData ? {} : { "Content-Type": "application/json" }),
         ...(init?.headers ?? {}),
       },
     });
@@ -346,6 +353,64 @@ export function getUnclassifiedSuggestions(): Promise<CardCluster[]> {
   );
 }
 
+// ---------------------------------------------------------------------------
+// 1.1 기록 첨부 사진 — Figma "03 · 커리어 스택" 4.1-b (9/18 신규)
+// ---------------------------------------------------------------------------
+
+export interface CardPhoto {
+  id: number;
+  card_id: number;
+  original_name: string;
+  mime_type: string;
+  byte_size: number;
+  created_at: string;
+}
+
+/** 사진 원본 주소. `<img src>`에 그대로 넣는다 — 같은 출처라 세션 쿠키가 자동으로
+ * 실리므로 별도 토큰이 필요 없다. */
+export function photoUrl(photoId: number): string {
+  return `${API_BASE}/photos/${photoId}`;
+}
+
+export function listCardPhotos(cardId: number): Promise<CardPhoto[]> {
+  return request<{ photos: CardPhoto[] }>(`/cards/${cardId}/photos`).then((res) => res.photos);
+}
+
+/** 사진 한 장을 기록에 붙인다. LLM을 타지 않아서 변환처럼 오래 걸리지 않는다. */
+export function uploadCardPhoto(cardId: number, file: File | Blob, filename: string): Promise<CardPhoto> {
+  const form = new FormData();
+  form.append("file", file, filename);
+  return request<CardPhoto>(`/cards/${cardId}/photos`, { method: "POST", body: form });
+}
+
+export function deleteCardPhoto(photoId: number): Promise<void> {
+  return request<void>(`/photos/${photoId}`, { method: "DELETE" });
+}
+
+/**
+ * "4.1-i 분류 수정 (반자동 · 미분류 처리)" (9/18 신규) — 역량 태그가 없는 기록에
+ * **이미 있는 역량 중** 가까운 것 2개를 후보로 붙여서 받아온다.
+ *
+ * 임베딩 기반이라 LLM만큼 느리지 않다(CLAUDE.md 2.3: 분류는 임베딩). 확정은 이
+ * 응답이 하지 않는다 — 사용자가 고른 뒤 `updateCard()`로 태그를 저장한다.
+ */
+export interface CardTagSuggestion {
+  card_id: number;
+  card: Card;
+  suggested_tags: string[];
+}
+
+export interface TagSuggestions {
+  suggestions: CardTagSuggestion[];
+  /** "다른 역량에서 고르기"가 띄울 전체 역량 목록(이 유저가 실제로 가진 것). */
+  known_tags: string[];
+}
+
+export function getTagSuggestions(projectId?: number): Promise<TagSuggestions> {
+  const query = typeof projectId === "number" ? `?project_id=${projectId}` : "";
+  return request<TagSuggestions>(`/cards/tag-suggestions${query}`);
+}
+
 /** 선택된 카드들을 새 프로젝트로 묶는다. 이름/시작일은 사용자가 직접 입력한 값
  * 그대로 보낸다 — AI가 이름을 짓지 않는다(CLAUDE.md 2.2). */
 export function bundleCardsIntoProject(
@@ -428,13 +493,22 @@ function scopeBody(scope: ResumeScope): Record<string, unknown> {
 }
 
 /** 범위 안의 카드를 묶어 STAR 항목으로 변환한다. 무거운 호출 — 로딩 상태 필수.
- * 프로젝트마다 따로 묶이므로 고른 프로젝트 수만큼 시간이 더 걸린다. */
-export function buildResume(scope: ResumeScope, jdText?: string): Promise<StarItem[]> {
+ * 프로젝트마다 따로 묶이므로 고른 프로젝트 수만큼 시간이 더 걸린다.
+ *
+ * `skillTag`(9/18, Figma 4.1-j "이 역량으로 문장 만들기")를 주면 대표 태그가 그
+ * 역량인 카드만 묶는다. **프로젝트별로 나눠 부르는 구조는 그대로**라 역량 기준으로
+ * 봐도 A은행과 B카드가 섞이지 않는다. */
+export function buildResume(
+  scope: ResumeScope,
+  jdText?: string,
+  skillTag?: string,
+): Promise<StarItem[]> {
   return request<{ items: StarItem[] }>("/resume", {
     method: "POST",
     body: JSON.stringify({
       ...scopeBody(scope),
       ...(jdText ? { jd_text: jdText } : {}),
+      ...(skillTag ? { skill_tag: skillTag } : {}),
     }),
   }).then((res) => res.items);
 }
@@ -449,6 +523,12 @@ export interface ResumeDraft {
   project_id: number | null;
   content: string | null;
   updated_at: string | null;
+}
+
+/** 저장된 초안 개수 (9/18 신규, Figma 4.1-h "내 경력기술서  3개").
+ * 프로젝트별 초안 + 마스터 초안 합계 — 화면에 띄울 숫자를 짐작하지 않기 위한 값이다. */
+export function getResumeDraftCount(): Promise<number> {
+  return request<{ count: number }>("/resume/draft-count").then((res) => res.count);
 }
 
 /** `projectId`가 null이면 마스터 초안(유저당 1개)을 조회한다 (9/18). */

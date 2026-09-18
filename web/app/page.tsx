@@ -23,7 +23,9 @@ import {
   listCards,
   refineCard,
   updateCard,
+  uploadCardPhoto,
 } from "@/lib/api";
+import { resizeImageForUpload } from "@/lib/imageResize";
 import { getCached, navKey, setCached } from "@/lib/navCache";
 import { useProjects } from "@/lib/useProjects";
 
@@ -116,7 +118,11 @@ function HomePageInner() {
   } | null>(null);
   // "3.1-d 결과 문장 직접 수정" (9/18) — 결과 시트 위에 겹쳐 뜨는 수정 시트.
   const [editingSentence, setEditingSentence] = useState(false);
+  // 저장 전에 고른 사진들 (9/18). 사진은 카드에 붙는 것이라 카드가 생기기 전엔
+  // 올릴 수 없다 — 여기 들고 있다가 `createCard()` 성공 직후에 올린다.
+  const [pendingPhotos, setPendingPhotos] = useState<File[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
 
   // ProjectSwitcher에 그대로 넘긴다 — 훅 인스턴스를 이 화면과 공유해야 전환이 즉시
   // 반영된다(구현 노트: components/ProjectSwitcher.tsx 9/14 참고).
@@ -269,6 +275,21 @@ function HomePageInner() {
           card = await updateCard(card.id, { skillTags: [continueTag, ...card.skill_tags] });
         } catch {
           // 태그 얹기에 실패해도 카드 자체는 이미 저장됐다 — 결과는 그대로 보여준다.
+        }
+      }
+
+      // 붙일 사진이 있으면 카드가 생긴 직후에 올린다. 실패해도 카드와 문장은 이미
+      // 저장돼 있으므로 결과는 그대로 보여준다 — 사진 때문에 메모를 잃지 않는다.
+      if (pendingPhotos.length > 0) {
+        const files = pendingPhotos;
+        setPendingPhotos([]);
+        for (const file of files) {
+          try {
+            const { blob, filename } = await resizeImageForUpload(file);
+            await uploadCardPhoto(card.id, blob, filename);
+          } catch {
+            // 개별 실패는 조용히 넘어간다(기록 상세에서 다시 붙일 수 있다).
+          }
         }
       }
 
@@ -546,7 +567,46 @@ function HomePageInner() {
             maxLength={2000}
             className="w-full resize-none border-0 bg-transparent p-0 text-[14px] text-[#f2f2f2] placeholder:text-[#828282] focus:outline-none"
           />
+          {/* 붙일 사진 미리보기 (9/18). 아직 카드가 없어서 업로드는 저장 직후에
+              일어난다 — 여기서는 고른 파일만 들고 있는다. */}
+          {pendingPhotos.length > 0 && (
+            <div className="no-scrollbar flex gap-2 overflow-x-auto">
+              {pendingPhotos.map((file, i) => (
+                <PendingPhotoThumb
+                  key={`${file.name}-${file.lastModified}-${i}`}
+                  file={file}
+                  onRemove={() => setPendingPhotos((prev) => prev.filter((_, j) => j !== i))}
+                />
+              ))}
+            </div>
+          )}
+
           <div className="flex items-center justify-end gap-2">
+            {/* 사진 붙이기 (9/18) — "03 · 커리어 스택" 4.1-b가 기록에 붙은 사진을
+                보여주는데, 정작 붙이는 화면이 어느 목업에도 없었다. 사용자가 9/18에
+                "사진까지 전부 구현"으로 확정해서 이 버튼만 우리가 넣었다.
+                LLM을 타지 않아서 변환 대기 시간에는 영향이 없다. */}
+            <button
+              type="button"
+              onClick={() => photoInputRef.current?.click()}
+              disabled={submitting || isOffline}
+              aria-label="사진 붙이기"
+              className="flex size-[36px] items-center justify-center rounded-full bg-[#2a2a2a] text-[15px] text-[#a0a0a0] transition-colors hover:bg-[#333] disabled:opacity-40"
+            >
+              ⊕
+            </button>
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              multiple
+              onChange={(e) => {
+                setPendingPhotos((prev) => [...prev, ...Array.from(e.target.files ?? [])]);
+                // 같은 파일을 연달아 고를 수 있게 비운다.
+                if (photoInputRef.current) photoInputRef.current.value = "";
+              }}
+              className="hidden"
+            />
             {rawText.trim() ? (
               <button
                 type="submit"
@@ -683,6 +743,37 @@ function HomePageInner() {
 
       <Toast toast={toast} />
     </div>
+  );
+}
+
+/**
+ * 저장 전 사진 미리보기 한 장 (9/18). 누르면 목록에서 뺀다.
+ *
+ * `createObjectURL`로 만든 주소는 **직접 해제해야** 브라우저가 파일 버퍼를 놓는다 —
+ * 여러 장을 고르고 지우기를 반복하면 그만큼 메모리가 쌓인다.
+ */
+function PendingPhotoThumb({ file, onRemove }: { file: File; onRemove: () => void }) {
+  // 지연 초기화로 한 번만 만든다 — 이 컴포넌트는 파일 하나당 하나이고(key가 파일
+  // 고유값), effect에서 setState를 부르지 않으려는 목적도 있다.
+  const [url] = useState(() => URL.createObjectURL(file));
+
+  useEffect(() => () => URL.revokeObjectURL(url), [url]);
+
+  return (
+    <button
+      type="button"
+      onClick={onRemove}
+      aria-label={`${file.name} 빼기`}
+      className="relative size-[44px] shrink-0 overflow-hidden rounded-[8px] border border-[#3a3a3a] bg-[#2a2a2a]"
+    >
+      {url && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={url} alt="" className="size-full object-cover" />
+      )}
+      <span className="absolute inset-0 flex items-center justify-center bg-black/40 text-[11px] text-white">
+        ✕
+      </span>
+    </button>
   );
 }
 
