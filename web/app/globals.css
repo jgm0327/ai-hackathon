@@ -136,3 +136,49 @@ body {
     animation: none;
   }
 }
+
+/*
+ * 3번 화면(흔적 격자)의 조각 모션 (9/18 사용자 요청) — 무작위 순서로 3개씩 드러난 뒤
+ * 구름처럼 계속 둥실거린다. 순서/폭/주기는 `components/WelcomeShapeField.tsx`가
+ * CSS 변수로 넘긴다.
+ *
+ * **두 애니메이션이 서로 다른 속성만 건드린다**는 게 중요하다 — 드러나기는 opacity,
+ * 둥실거림은 transform. 둘 다 transform을 쓰면 나중 것이 앞의 것을 덮어써서 한쪽이
+ * 통째로 무시된다.
+ *
+ * 둥실거림은 드러나기 전부터 돌고 있다(투명해서 안 보인다). 그래야 조각이 나타나는
+ * 순간 이미 제각각 다른 위상에 있어서, 전체가 한 몸처럼 오르내리지 않는다.
+ */
+@keyframes welcome-cloud-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes welcome-cloud-drift {
+  from {
+    transform: translate(0, 0);
+  }
+  50% {
+    transform: translate(var(--drift-x, 0), var(--drift-y, 0));
+  }
+  to {
+    transform: translate(0, 0);
+  }
+}
+
+.welcome-cloud {
+  animation:
+    welcome-cloud-in 900ms ease-out var(--in-delay, 0ms) both,
+    welcome-cloud-drift var(--drift-duration, 5s) ease-in-out var(--drift-delay, 0ms) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welcome-cloud {
+    /* 애니메이션을 끄면 조각이 처음부터 제자리에 선명하게 놓인다. */
+    animation: none;
+  }
+}
