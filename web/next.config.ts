@@ -1,6 +1,19 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // 9/18 신규 — 빌드를 VM 밖(GitHub Actions)에서 하기 위한 설정.
+  //
+  // 배포 VM이 OCI AMD Micro(RAM 977MB, 유휴 상태에서 available이 380MB 남짓)라
+  // `npm run build`가 스왑을 때리면서 기어간다. 스왑은 이미 4GB 붙어 있어서 더 늘려도
+  // 소용없다 — 빌드를 그 머신에서 안 하는 게 유일한 해법이다.
+  //
+  // `standalone`은 실행에 필요한 것만 추려낸 서버를 `.next/standalone`에 따로 만든다
+  // (`node_modules` 449MB 전체 대신 필요한 것만 추적해서 넣는다). 덕분에 빌드 산출물만
+  // 압축해 옮기는 배포가 가능해지고, VM엔 npm도 node_modules도 필요 없어진다.
+  //
+  // **기존 경로를 막지 않는다** — `.next`도 그대로 생성되므로 `npm run build && npm run
+  // start`로 VM에서 직접 빌드하던 방식이 여전히 폴백으로 동작한다.
+  output: "standalone",
   env: {
     // `lib/api.ts`가 읽는 API base. 기본값은 상대 경로 `/api` — 같은 도메인에서
     // nginx가 프록시하는 배포 구성을 전제해 CORS 문제 자체를 없앤다

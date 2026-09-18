@@ -2,14 +2,21 @@
 ;
 ; 사용법:
 ;   1. 아래 경로/사용자를 실제 VM 환경에 맞게 치환
-;   2. VM에서 미리 한 번 빌드해둘 것: cd <APP_DIR>/web && npm ci && npm run build
+;   2. 빌드 산출물을 먼저 배치할 것: sudo <APP_DIR>/deploy/update-web.sh
 ;   3. /etc/systemd/system/career-log-web.service 로 복사
 ;   4. systemctl daemon-reload
 ;   5. systemctl enable --now career-log-web
 ;
 ; NEXT_PUBLIC_API_BASE=/api(상대 경로)를 쓰면 프론트와 백엔드가 같은 도메인으로
-; 서빙되므로 CORS 문제 자체가 없어진다 (tasks/track-d-deploy.md 3.3절, web/.env.local.example
-; 참고). 이 값은 빌드 시점에 고정되므로 .env.local을 바꾸면 npm run build를 다시 해야 한다.
+; 서빙되므로 CORS 문제 자체가 없어진다 (tasks/track-d-deploy.md 3.3절). 이 값은
+; **빌드 시점에 번들에 박힌다** — 지금은 GitHub Actions가 빌드하므로
+; `.github/workflows/build-web.yml`에서 지정한다. 여기서 바꿔봐야 반영되지 않는다.
+;
+; 9/18 변경 — `npm run start`에서 standalone 서버 직접 실행으로 바꿨다.
+; 배포 VM(OCI AMD Micro, RAM 977MB)에서 `next build`가 스왑을 때리며 기어가서,
+; 빌드를 GitHub Actions로 옮겼기 때문이다(.github/workflows/build-web.yml).
+; 이제 VM엔 npm도 node_modules도 필요 없고, deploy/update-web.sh가 받아둔
+; <APP_DIR>/web-release를 그대로 실행한다.
 
 [Unit]
 Description=Career Log Next.js frontend
@@ -18,10 +25,24 @@ After=network.target
 [Service]
 Type=simple
 User=<APP_USER>
-WorkingDirectory=<APP_DIR>/web
-ExecStart=/usr/bin/npm run start -- --port 3000
+; 저장소의 web/이 아니라 update-web.sh가 펼쳐둔 빌드 산출물 디렉터리다.
+WorkingDirectory=<APP_DIR>/web-release
+; ⚠️ 0.0.0.0으로 열어야 한다. 이 환경의 nginx는 호스트가 아니라 Docker 컨테이너라
+; 127.0.0.1로 바인딩하면 컨테이너가 못 닿아서 502가 난다(운영 노트 1-7에서 실제로 겪음).
+; standalone 서버는 PORT/HOSTNAME 환경변수를 읽는다 — `--port` 인자가 아니다.
+Environment=PORT=3000
+Environment=HOSTNAME=0.0.0.0
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node server.js
 Restart=on-failure
 RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
+
+; --- 폴백: VM에서 직접 빌드하던 예전 방식 ---
+; next.config.ts의 output:"standalone"은 기존 .next 산출물도 그대로 만들기 때문에
+; 아래 구성이 여전히 동작한다. Actions가 막혔을 때만 쓸 것 — 이 VM에서는 빌드가
+; 매우 느리고, 빌드 중 OOM을 피하려면 career-log-api를 먼저 내려야 한다.
+;   WorkingDirectory=<APP_DIR>/web
+;   ExecStart=/usr/bin/npm run start -- --port 3000

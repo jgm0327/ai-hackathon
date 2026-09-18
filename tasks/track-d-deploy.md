@@ -75,9 +75,25 @@ nginx  ┬─ /       → localhost:3000  (Next.js)
 - [ ] Chroma 인덱스 초기 빌드 확인
 
 ### 3.3 프론트엔드
-- [ ] `npm run build` → `next start` systemd 서비스 (`--port 3000`)
+- [x] **빌드를 CI로 뺐다 (9/18)** — 위 2장이 예상한 그대로 `next build`가 이 VM에서
+      기어갔다. 실측: 총 977MB 중 available 380MB, 유휴 상태에서 이미 스왑 222MB 사용.
+      스왑은 이미 4GB라 더 늘려도 소용없었다(OOM으로 죽는 게 아니라 페이징으로 느린
+      것이라서). 같은 빌드가 개발 노트북에서 12초.
+      → `.github/workflows/build-web.yml`이 ubuntu 러너에서 빌드해 `web-latest`
+      릴리스에 올리고, VM은 `deploy/update-web.sh`로 받아서 펼치기만 한다.
+      `next.config.ts`에 `output: "standalone"`을 켜서 옮길 산출물이 22MB로 줄었다
+      (`node_modules` 449MB 전체를 옮기지 않아도 된다).
+      **도커 멀티스테이지는 채택하지 않았다** — 이미지 크기를 줄이는 기법이지 빌드
+      시간을 줄이는 게 아니라, VM에서 빌드하는 한 그대로다(데몬/레이어 쓰기로 오히려
+      더 느려진다). 이득은 "VM에서 안 빌드한다"에서 나오고 그건 위 방식으로 이미 얻는다.
+      게다가 이 호스트의 nginx는 컨테이너이고 real-diary도 같이 서빙 중이라, 컨테이너
+      구성을 건드리는 건 그 서비스까지 위험해진다.
+- [x] systemd는 `next start`가 아니라 standalone 서버를 직접 실행한다
+      (`node server.js`, `PORT`/`HOSTNAME` 환경변수). **`HOSTNAME=0.0.0.0` 필수** —
+      nginx가 컨테이너라 127.0.0.1로 바인딩하면 못 닿는다
 - [ ] `NEXT_PUBLIC_API_BASE` 환경변수 — **상대 경로 `/api` 권장.**
-      같은 도메인으로 서빙하면 CORS 문제 자체가 사라진다
+      같은 도메인으로 서빙하면 CORS 문제 자체가 사라진다.
+      빌드 시점에 박히므로 이제 VM의 `.env.local`이 아니라 워크플로에서 지정한다
 
 ### 3.4 nginx
 - [ ] 리버스 프록시 설정 (`/` → 3000, `/api/` → 8000)
