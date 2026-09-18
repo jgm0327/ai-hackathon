@@ -138,6 +138,8 @@ class CardResponse(_FromAttributes):
     # 썸네일 유무). 목록 응답에서 카드마다 사진을 따로 조회하지 않게 라우터가 한 번에
     # 세어 채운다. 사진 자체는 `GET /api/cards/{id}/photos`로 받는다.
     photo_count: int = 0
+    # 9/18 — "3.2 내 기록" 줄의 40×40 썸네일용. 사진이 없으면 None.
+    first_photo_id: int | None = None
 
 
 class CardListResponse(BaseModel):

@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -221,8 +222,12 @@ export default function SettingsPage() {
   return (
     <div className="flex min-h-full flex-col gap-4 bg-[#121212] px-5 pb-8">
       <div className="flex items-center gap-[10px] pb-[6px] pt-[8px]">
-        <Link href="/" aria-label="뒤로" className="text-[17px] text-[#f2f2f2]">
-          ←
+        <Link
+          href="/"
+          aria-label="뒤로"
+          className="flex size-[22px] items-center justify-center transition-opacity active:opacity-60"
+        >
+          <Image src="/icons/chevron-left.svg" alt="" width={20} height={20} aria-hidden />
         </Link>
         <p className="text-[15px] font-bold text-[#f2f2f2]">설정</p>
       </div>
@@ -349,9 +354,15 @@ export default function SettingsPage() {
         </button>
       </div>
 
-      <p className="px-1 text-[11px] text-[#828282]">
-        🔒 카카오 로그인으로 안전하게 보관돼요.
-      </p>
+      {/* 저장 안내 (Figma 5.0 `299:14492`) — 자물쇠는 이모지가 아니라 `icon/lock`이다.
+          **문구는 목업과 다르게 뒀다**: 목업은 "기록은 이 기기 안에만 저장됩니다"라고
+          적지만 이 앱은 서버(SQLite)에 저장하므로 그건 사실이 아니다(CLAUDE.md 2.2). */}
+      <div className="flex items-center justify-center gap-[10px] px-[16px] py-[14px]">
+        <Image src="/icons/lock.svg" alt="" width={14} height={14} aria-hidden />
+        <p className="text-[12px] leading-[20px] text-[#918c84]">
+          카카오 로그인으로 안전하게 보관돼요.
+        </p>
+      </div>
 
       <BottomSheet
         open={notionOpen}

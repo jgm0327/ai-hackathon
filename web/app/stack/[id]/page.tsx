@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -114,8 +115,13 @@ export default function CardDetailPage() {
   return (
     <div className="flex min-h-full flex-col gap-4 px-5 pb-8 pt-[8px] text-[#f2f2f2]">
       <div className="flex items-center gap-[10px]">
-        <button type="button" onClick={() => router.back()} aria-label="뒤로" className="text-[17px]">
-          ←
+        <button
+          type="button"
+          onClick={() => router.back()}
+          aria-label="뒤로"
+          className="flex size-[22px] items-center justify-center transition-opacity active:opacity-60"
+        >
+          <Image src="/icons/chevron-left.svg" alt="" width={20} height={20} aria-hidden />
         </button>
         <p className="text-[15px] font-bold">기록 상세</p>
       </div>
@@ -192,9 +198,11 @@ export default function CardDetailPage() {
                       setDraft(card.refined_sentence);
                       setEditing(true);
                     }}
-                    className="text-[12px] font-medium text-[#a0a0a0] underline underline-offset-2"
+                    className="flex items-center gap-[6px] text-[12px] font-medium text-[#a0a0a0]"
                   >
-                    ✎ 직접 수정
+                    {/* ✎ 문자 대신 Figma의 `icon/pencil` */}
+                    <Image src="/icons/pencil.svg" alt="" width={14} height={14} aria-hidden />
+                    <span className="underline underline-offset-2">직접 수정</span>
                   </button>
                   <button
                     type="button"

@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import Image from "next/image";
+import { MutableRefObject, useEffect, useRef, useState } from "react";
+
+/** 부모가 녹음을 멈출 수 있게 넘겨주는 핸들 (Figma 3.0-c의 정지 버튼이 쓴다). */
+export interface VoiceControls {
+  stop: () => void;
+}
 
 interface VoiceInputProps {
   /** 최종(또는 onend 시점까지 모인) 인식 결과를 텍스트 입력과 동일한 제출 경로로 넘긴다. */
@@ -8,11 +14,20 @@ interface VoiceInputProps {
   /** 부모가 이미 제출 처리 중이면(스켈레톤 표시 중) 마이크 버튼도 눌리지 않게 한다. */
   disabled?: boolean;
   /**
-   * "labeled" — 텍스트 라벨이 붙은 알약 버튼(기존 기본값).
-   * "icon" — Figma "3.0 일지 기록 패드" 대응: 입력창 우하단에 얹는 원형 아이콘
-   * 버튼(`size-[40px]`), 라벨 없음. 인식/에러 상태 텍스트는 버튼 아래 작게 표시.
+   * "labeled" — 텍스트 라벨이 붙은 알약 버튼.
+   * "icon" — Figma 3.1/3.3의 입력창 우하단 원형 버튼(44×44, `icon/mic` 20px).
    */
   variant?: "labeled" | "icon";
+  /**
+   * 녹음 상태를 부모에게 올려준다 (9/18 신규 — Figma "3.0-c 음성 녹음 중").
+   *
+   * 녹음 중 화면은 **입력창 자리를 통째로 대체**하는 상태라 이 컴포넌트가 혼자
+   * 그릴 수 없다(버튼은 입력창 안에 있다). 인식 엔진은 여기가 계속 들고 있고,
+   * 그리는 건 부모가 한다 — 상태와 정지 핸들만 넘긴다.
+   */
+  onListeningChange?: (listening: boolean) => void;
+  onInterimChange?: (text: string) => void;
+  controlsRef?: MutableRefObject<VoiceControls | null>;
 }
 
 /**
@@ -27,7 +42,14 @@ interface VoiceInputProps {
  * 텍스트 입력과 "같은 제출 경로"를 타야 하므로 이 컴포넌트 자신은 결과 카드/스켈레톤을
  * 렌더링하지 않는다 — 그건 부모(`app/page.tsx`)가 텍스트 제출과 동일하게 처리한다.
  */
-export function VoiceInput({ onTranscript, disabled = false, variant = "labeled" }: VoiceInputProps) {
+export function VoiceInput({
+  onTranscript,
+  disabled = false,
+  variant = "labeled",
+  onListeningChange,
+  onInterimChange,
+  controlsRef,
+}: VoiceInputProps) {
   // SSR과 첫 클라이언트 렌더를 일치시키기 위해 "지원됨"으로 시작하고, 마운트 후
   // 실제 지원 여부를 확인해 갱신한다 (하이드레이션 불일치 방지).
   const [supported, setSupported] = useState(true);
@@ -50,6 +72,31 @@ export function VoiceInput({ onTranscript, disabled = false, variant = "labeled"
       recognitionRef.current?.abort();
     };
   }, []);
+
+  // 상태를 부모에게도 같이 알린다 — setState와 콜백이 갈라지지 않게 한 곳에 묶는다.
+  const beginListening = () => {
+    setListening(true);
+    onListeningChange?.(true);
+  };
+  const endListening = () => {
+    setListening(false);
+    onListeningChange?.(false);
+  };
+  const pushInterim = (text: string) => {
+    setInterimText(text);
+    onInterimChange?.(text);
+  };
+
+  /** 부모의 정지 버튼(3.0-c)이 쓰는 핸들. `stop()`은 onend를 타므로 그때까지 모인
+   *  텍스트가 정상 제출된다(abort()는 버려진다 — 그래서 abort를 쓰지 않는다).
+   *  렌더 중에 ref를 쓰면 안 되므로 effect에서 붙인다. */
+  useEffect(() => {
+    if (!controlsRef) return;
+    controlsRef.current = { stop: () => recognitionRef.current?.stop() };
+    return () => {
+      controlsRef.current = null;
+    };
+  }, [controlsRef]);
 
   const handleClick = () => {
     if (disabled || listening) return;
@@ -75,12 +122,12 @@ export function VoiceInput({ onTranscript, disabled = false, variant = "labeled"
       if (!trimmed) return;
       submitted = true;
       onTranscript(trimmed);
-      setInterimText("");
+      pushInterim("");
     };
 
-    setListening(true);
+    beginListening();
     setStatusMessage(null);
-    setInterimText("");
+    pushInterim("");
 
     recognition.onresult = (event) => {
       let transcript = "";
@@ -93,7 +140,7 @@ export function VoiceInput({ onTranscript, disabled = false, variant = "labeled"
       if (lastResult.isFinal) {
         submit(transcript);
       } else {
-        setInterimText(transcript);
+        pushInterim(transcript);
       }
     };
 
@@ -108,7 +155,7 @@ export function VoiceInput({ onTranscript, disabled = false, variant = "labeled"
     };
 
     recognition.onend = () => {
-      setListening(false);
+      endListening();
       recognitionRef.current = null;
       // Chrome은 isFinal 결과 없이 조용히 onend로 끝나는 경우가 있다 — 그때까지 모인
       // 텍스트로 대신 제출한다 (submitted 플래그로 중복 제출 방지, 9/11에 실사용 중 발견된 버그).
@@ -127,6 +174,9 @@ export function VoiceInput({ onTranscript, disabled = false, variant = "labeled"
   }
 
   if (variant === "icon") {
+    // Figma 3.1/3.3 (`299:12251`): 44×44 원형, 배경 `text/1`, `icon/mic` 20px.
+    // 인식 중 상태 텍스트는 여기서 그리지 않는다 — 부모가 3.0-c 화면으로 그린다.
+    // 다만 마이크 권한 거부는 반드시 보여야 해서(목업엔 없는 상태) 남겨 둔다.
     return (
       <div className="flex flex-col items-end gap-1">
         <button
@@ -134,23 +184,13 @@ export function VoiceInput({ onTranscript, disabled = false, variant = "labeled"
           onClick={handleClick}
           disabled={disabled || listening}
           aria-label={listening ? "듣고 있어요" : "음성 입력"}
-          className={`flex size-[40px] shrink-0 items-center justify-center rounded-full text-base transition-colors active:scale-[0.95] disabled:opacity-50 ${
-            listening
-              ? "bg-[#18181b] text-white hover:bg-zinc-800"
-              : "bg-[#f4f4f5] text-[#6b7280] hover:bg-[#e4e4e7]"
-          }`}
+          className="flex size-[44px] shrink-0 items-center justify-center rounded-full bg-[#ede9e2] transition-opacity active:opacity-80 disabled:opacity-50"
         >
-          <span aria-hidden>🎙️</span>
+          <Image src="/icons/mic.svg" alt="" width={20} height={20} aria-hidden />
         </button>
 
-        {listening && (
-          <p className="max-w-[220px] text-right text-[11px] text-[#a1a1aa]">
-            {interimText ? `인식 중: ${interimText}` : "듣고 있어요…"}
-          </p>
-        )}
-
         {statusMessage && (
-          <p className="max-w-[220px] text-right text-[11px] text-red-600">{statusMessage}</p>
+          <p className="max-w-[220px] text-right text-[11px] text-red-400">{statusMessage}</p>
         )}
       </div>
     );

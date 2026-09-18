@@ -43,6 +43,10 @@ export interface Card {
   /** 9/18 신규 — 첨부 사진 장수 (Figma 4.1-b 타임라인의 "사진 2", 4.1-j의 썸네일 유무).
    * 목록 응답이 카드마다 채워 준다. 사진 자체는 `listCardPhotos()`로 따로 받는다. */
   photo_count?: number;
+  /** 9/18 신규 — 목록 줄에 40×40 썸네일을 그리기 위한 **첫 사진의 id**
+   * (Figma 3.2 `299:12086`). 장수만으로는 이미지를 못 그리고, 카드마다
+   * `listCardPhotos()`를 부르면 목록 한 화면에 요청이 N번 나간다. */
+  first_photo_id?: number | null;
 }
 
 export interface Project {

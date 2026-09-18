@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { CareerHistoryForm } from "@/components/CareerHistoryForm";
@@ -223,9 +224,9 @@ function OnboardingPageInner() {
             type="button"
             onClick={() => router.push("/settings")}
             aria-label="뒤로"
-            className="text-[17px] text-[#f2f2f2]"
+            className="flex size-[22px] items-center justify-center transition-opacity active:opacity-60"
           >
-            ←
+            <Image src="/icons/chevron-left.svg" alt="" width={20} height={20} aria-hidden />
           </button>
           <p className="text-[15px] font-semibold text-[#f2f2f2]">
             {notifyOnly ? "알림 설정" : "직무 설정"}

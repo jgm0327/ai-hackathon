@@ -185,3 +185,19 @@ def test_serving_photo_whose_file_vanished_returns_404(client, current_user_id):
 def test_photo_path_rejects_path_traversal():
     with pytest.raises(ValueError):
         db.photo_path("../app.db")
+
+def test_card_list_reports_first_photo_id(client, current_user_id):
+    """목록 줄의 40×40 썸네일(Figma 3.2)은 장수가 아니라 실제 사진 id가 필요하다.
+
+    카드마다 사진 API를 부르지 않기 위해 목록 응답이 한 번에 실어 준다. "첫 번째"는
+    붙인 순서(id)라 상세 화면 스트립의 첫 장과 같아야 한다.
+    """
+    card = _create_card(client)
+    assert client.get("/api/cards").json()["cards"][0]["first_photo_id"] is None
+
+    first = _upload(client, card["id"], name="a.png").json()
+    _upload(client, card["id"], name="b.png")
+
+    row = client.get("/api/cards").json()["cards"][0]
+    assert row["photo_count"] == 2
+    assert row["first_photo_id"] == first["id"]

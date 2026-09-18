@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -616,8 +617,12 @@ export default function ResumePage() {
   return (
     <div className="flex min-h-full flex-col gap-4 bg-[#121212] px-5 pb-8">
       <div className="flex items-center gap-[10px] pb-[6px] pt-[8px]">
-        <Link href="/stack" aria-label="뒤로" className="text-[17px] text-[#f2f2f2]">
-          ←
+        <Link
+          href="/stack"
+          aria-label="뒤로"
+          className="flex size-[22px] items-center justify-center transition-opacity active:opacity-60"
+        >
+          <Image src="/icons/chevron-left.svg" alt="" width={20} height={20} aria-hidden />
         </Link>
       </div>
 
@@ -755,9 +760,9 @@ export default function ResumePage() {
                   type="button"
                   onClick={() => setJdRequirements(null)}
                   aria-label="뒤로"
-                  className="text-[17px] text-[#f2f2f2]"
+                  className="flex size-[22px] items-center justify-center transition-opacity active:opacity-60"
                 >
-                  ←
+                  <Image src="/icons/chevron-left.svg" alt="" width={20} height={20} aria-hidden />
                 </button>
                 <p className="text-sm font-semibold text-[#f2f2f2]">공고 분석 결과</p>
                 <button
@@ -1053,9 +1058,13 @@ export default function ResumePage() {
                         type="button"
                         onClick={() => handleStartQuestions(i)}
                         disabled={questionsLoadingIndex === i}
-                        className="pb-2 text-left text-[11px] font-medium text-[#828282] underline underline-offset-2 disabled:opacity-50"
+                        className="flex items-center gap-[6px] pb-2 text-left text-[11px] font-medium text-[#828282] disabled:opacity-50"
                       >
-                        {questionsLoadingIndex === i ? "점검 중…" : "✨ AI로 초안 점검하기"}
+                        {/* ✨ 이모지 대신 Figma의 `icon/sparkles` */}
+                        <Image src="/icons/sparkles.svg" alt="" width={13} height={13} aria-hidden />
+                        <span className="underline underline-offset-2">
+                          {questionsLoadingIndex === i ? "점검 중…" : "AI로 초안 점검하기"}
+                        </span>
                       </button>
                       {questionsMessage?.index === i && (
                         <p className="pb-2 text-[11px] text-[#828282]">{questionsMessage.text}</p>

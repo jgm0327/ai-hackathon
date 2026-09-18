@@ -185,11 +185,16 @@ def _with_photo_counts(user_id: int, cards: list[db.Card]) -> list[CardResponse]
     카드마다 따로 세면 목록 하나에 쿼리가 N번 나간다 — `count_card_photos()`가 한 번에
     세어 주는 dict를 받아서 붙인다. 사진이 한 장도 없는 계정에서도 쿼리는 한 번이다.
     """
-    counts = db.count_card_photos(user_id, [c.id for c in cards])
+    card_ids = [c.id for c in cards]
+    counts = db.count_card_photos(user_id, card_ids)
+    # 목록 줄의 썸네일(3.2)은 장수가 아니라 실제 사진 id가 필요하다 — 같은 이유로
+    # 한 번에 모아 온다(카드마다 부르면 목록 한 화면에 요청이 N번 나간다).
+    first_photos = db.first_card_photo_ids(user_id, card_ids)
     responses = []
     for card in cards:
         response = CardResponse.model_validate(card)
         response.photo_count = counts.get(card.id, 0)
+        response.first_photo_id = first_photos.get(card.id)
         responses.append(response)
     return responses
 

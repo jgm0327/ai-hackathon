@@ -845,6 +845,35 @@ def count_card_photos(user_id: int, card_ids: list[int]) -> dict[int, int]:
     return {r["card_id"]: r["n"] for r in rows}
 
 
+def first_card_photo_ids(user_id: int, card_ids: list[int]) -> dict[int, int]:
+    """카드 id → **첫 번째 사진의 id** (9/18 신규).
+
+    "3.2 내 기록"(Figma `299:12086`)이 사진이 붙은 기록 줄에 40×40 썸네일을 그리는데,
+    그리려면 장수가 아니라 **실제 사진 id**가 필요하다. 카드마다 목록 API를 부르면
+    목록 한 화면에 요청이 N번 나가므로 `count_card_photos()`처럼 한 번에 모아 온다.
+
+    "첫 번째"는 `id` 순, 즉 붙인 순서다 — `list_card_photos()`와 같은 정렬이라
+    목록의 썸네일과 상세 스트립의 첫 사진이 어긋나지 않는다.
+    """
+    init_db()
+    if not card_ids:
+        return {}
+    placeholders = ",".join("?" for _ in card_ids)
+    with _connect() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT card_id, id FROM card_photos
+            WHERE user_id = ? AND card_id IN ({placeholders})
+            ORDER BY card_id, id
+            """,
+            (user_id, *card_ids),
+        ).fetchall()
+    first: dict[int, int] = {}
+    for row in rows:
+        first.setdefault(row["card_id"], row["id"])
+    return first
+
+
 def get_card_photo(user_id: int, photo_id: int) -> CardPhoto | None:
     """사진 한 장을 id로 조회한다. 이 유저 소유가 아니면 None."""
     init_db()

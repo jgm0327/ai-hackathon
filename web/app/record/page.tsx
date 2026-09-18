@@ -11,7 +11,7 @@ import { SentenceEditSheet } from "@/components/SentenceEditSheet";
 import { CardResultSkeleton } from "@/components/Skeleton";
 import { stackTheme as t } from "@/components/stackTheme";
 import { Toast, useToast } from "@/components/Toast";
-import { VoiceInput } from "@/components/VoiceInput";
+import { VoiceControls, VoiceInput } from "@/components/VoiceInput";
 import {
   ApiError,
   Card,
@@ -35,6 +35,13 @@ const DRAFT_KEY = "career-log:draft-raw-text";
  * **사람이 타이핑할 때만** 걸리므로, 노션에서 가져온 본문처럼 코드가 채우는 값은
  * 여기서 직접 잘라야 한다 — 안 자르면 [문장으로 바꾸기]에서 422로 튕긴다. */
 const MAX_RAW_TEXT = 2000;
+
+/** "00:12" — 녹음 경과 시간 (Figma 3.0-c "녹음 중  00:12"). */
+function formatElapsed(seconds: number): string {
+  const mm = `${Math.floor(seconds / 60)}`.padStart(2, "0");
+  const ss = `${seconds % 60}`.padStart(2, "0");
+  return `${mm}:${ss}`;
+}
 
 /** 입력창이 내용에 따라 늘어나는 상한(px). 이보다 길면 입력창 안에서 스크롤한다. */
 const TEXTAREA_MAX_PX = 320;
@@ -142,6 +149,23 @@ function RecordPageInner() {
   const [toast, showToast] = useToast();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
+
+  // "3.0-c 음성 녹음 중" (Figma `299:11892`, 9/18 신규) — 녹음 중에는 입력창 자리가
+  // 통째로 이 상태로 바뀐다. 인식 엔진은 `<VoiceInput>`이 계속 들고 있고(언마운트하면
+  // 녹음이 끊긴다) 여기서는 그 상태만 받아 그린다.
+  const [recording, setRecording] = useState(false);
+  const [interim, setInterim] = useState("");
+  const [elapsed, setElapsed] = useState(0);
+  const voiceControlsRef = useRef<VoiceControls | null>(null);
+
+  useEffect(() => {
+    if (!recording) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setElapsed(0);
+    const started = Date.now();
+    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, [recording]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -376,15 +400,13 @@ function RecordPageInner() {
         </button>
         <h1 className="text-[20px] font-bold leading-[32px]">기록하기</h1>
         <div className="flex-1" />
-        {/* 설정 진입 (Figma 3.1 우상단) — 홈이 대시보드로 바뀌며 ⚙가 사라졌는데,
-            목업은 이 화면 헤더에 두고 있다. 기록 탭 쪽의 유일한 설정 입구다. */}
+        {/* 설정 진입 (Figma 3.1 우상단 `299:11831`) — 이모지 ⚙가 아니라 아이콘이다. */}
         <Link
           href="/settings"
           aria-label="설정"
-          style={{ backgroundColor: t.cardBg, color: t.textSoft }}
-          className="flex size-[26px] items-center justify-center rounded-full text-[12px] transition-opacity active:opacity-70"
+          className="flex size-[22px] items-center justify-center transition-opacity active:opacity-60"
         >
-          ⚙
+          <Image src="/icons/settings.svg" alt="" width={20} height={20} aria-hidden />
         </Link>
       </div>
 
@@ -454,22 +476,74 @@ function RecordPageInner() {
           {formatTodayLabel()}
         </p>
 
-        <p className="mt-[20px] text-[28px] font-bold leading-[40px]">
-          오늘은
-          <br />
-          어떤 일을 하셨나요?
-        </p>
+        {/* 헤드라인은 이 화면에선 **한 줄**이다(299:12236 — 높이 40). 두 줄로 쓰는
+            건 홈(3.0)뿐이고, 여기는 아래 입력 히어로에 자리를 내줘야 한다. */}
+        <p className="mt-[20px] text-[28px] font-bold leading-[40px]">오늘은 어떤 일을 하셨나요?</p>
 
-        {/* 오늘 입력 (히어로) (299:12238) */}
+        {/* 오늘 입력 (히어로) (299:12238) — radius 2, 테두리만. */}
         <div
           style={{ borderColor: t.border }}
-          className="mt-[12px] flex flex-col rounded-[8px] border pt-[26px] pb-[23px] pl-[24px] pr-[20px]"
+          className="mt-[12px] flex flex-col rounded-[2px] border pt-[26px] pb-[23px] pl-[24px] pr-[20px]"
         >
           {/* maxLength는 서버(schemas.py MAX_RAW_TEXT)와 같은 값 */}
           {/* Enter = 변환, Shift+Enter = 줄바꿈 (9/18 사용자 요청).
               **한글 입력 중(조합 중)에는 무시해야 한다** — 한글은 글자를 확정할 때도
               Enter를 누르는데, 그걸 제출로 받으면 "안녕"을 치다가 "안"에서 변환이
               돌아버린다. `isComposing`이 그 구분을 해준다. */}
+          {/* "3.0-c 음성 녹음 중" (299:11906) — 녹음 중에는 입력 영역이 이 상태로
+              바뀐다. `<VoiceInput>`은 아래에서 hidden으로 **계속 마운트**된 채
+              있어야 한다(언마운트하면 cleanup이 인식을 abort해서 녹음이 날아간다). */}
+          {recording && (
+            <div className="flex flex-col gap-[10px]">
+              <div className="flex items-center gap-[7px] pb-[10px]">
+                <span
+                  aria-hidden
+                  style={{ backgroundColor: "var(--accent)" }}
+                  className="size-[8px] shrink-0 animate-pulse rounded-full"
+                />
+                <span className="text-[14px] font-medium leading-[24px]">
+                  녹음 중&nbsp;&nbsp;{formatElapsed(elapsed)}
+                </span>
+                <span className="flex-1" />
+                <span style={{ color: t.textSoft }} className="text-[12px] leading-[20px]">
+                  말하는 대로 적어드려요
+                </span>
+              </div>
+
+              {interim && <p className="text-[14px] leading-[24px]">{interim}</p>}
+
+              {/* 인식 대기 블록 (299:11913) — 아직 안 들어온 말의 자리. */}
+              <div className="flex items-center gap-[6px] pt-[6px]">
+                {[46, 30, 62].map((w, i) => (
+                  <span
+                    key={w}
+                    aria-hidden
+                    style={{ backgroundColor: t.border, width: w, animationDelay: `${i * 160}ms` }}
+                    className="h-[10px] animate-pulse rounded-[2px]"
+                  />
+                ))}
+              </div>
+
+              <div className="min-h-[120px] flex-1" />
+
+              {/* 녹음 중지 (299:11919) — 56×56, 안쪽 18px 정사각형. */}
+              <div className="flex items-center justify-center">
+                <button
+                  type="button"
+                  onClick={() => voiceControlsRef.current?.stop()}
+                  aria-label="녹음 중지"
+                  className="flex size-[56px] items-center justify-center rounded-full bg-[#ede9e2] transition-opacity active:opacity-80"
+                >
+                  <span
+                    aria-hidden
+                    style={{ backgroundColor: t.screenBg }}
+                    className="size-[18px] rounded-[2px]"
+                  />
+                </button>
+              </div>
+            </div>
+          )}
+
           <textarea
             ref={textareaRef}
             value={rawText}
@@ -485,10 +559,12 @@ function RecordPageInner() {
             maxLength={2000}
             aria-label="오늘 한 일"
             style={{ color: t.text }}
-            className="w-full resize-none border-0 bg-transparent p-0 text-[14px] leading-[24px] placeholder:text-[#918c84] focus:outline-none"
+            className={`w-full resize-none border-0 bg-transparent p-0 text-[14px] leading-[24px] placeholder:text-[#918c84] focus:outline-none ${
+              recording ? "hidden" : ""
+            }`}
           />
 
-          {photos.length > 0 && (
+          {photos.length > 0 && !recording && (
             <div className="no-scrollbar mt-3 flex gap-2 overflow-x-auto">
               {photos.map((file, i) => (
                 <button
@@ -505,7 +581,7 @@ function RecordPageInner() {
             </div>
           )}
 
-          <div className="mt-[12px] flex items-center gap-[10px]">
+          <div className={`mt-[12px] items-center gap-[10px] ${recording ? "hidden" : "flex"}`}>
             <span className="flex items-center gap-[6px]">
               <span
                 aria-hidden
@@ -518,14 +594,14 @@ function RecordPageInner() {
             </span>
             <span className="flex-1" />
 
+            {/* 사진 붙이기 (299:12246) — `icon/photo` 22px. 이모지 ⊕가 아니다. */}
             <button
               type="button"
               onClick={() => photoInputRef.current?.click()}
               aria-label="사진 붙이기"
-              style={{ color: t.text }}
-              className="flex size-[44px] items-center justify-center rounded-full text-[18px] transition-opacity active:opacity-60"
+              className="flex size-[44px] items-center justify-center rounded-full transition-opacity active:opacity-60"
             >
-              ⊕
+              <Image src="/icons/photo.svg" alt="" width={22} height={22} aria-hidden />
             </button>
             <input
               ref={photoInputRef}
@@ -545,16 +621,16 @@ function RecordPageInner() {
               variant="icon"
               disabled={submitting}
               onTranscript={(text) => updateRawText(rawText ? `${rawText} ${text}` : text)}
+              controlsRef={voiceControlsRef}
+              onListeningChange={setRecording}
+              onInterimChange={setInterim}
             />
           </div>
         </div>
 
         {error && <p className="mt-3 text-[12px] text-red-400">{error}</p>}
-        {submitting && !pendingQuestion && (
-          <div className="mt-4">
-            <CardResultSkeleton />
-          </div>
-        )}
+        {/* 3.0-e 변환 대기 — 이제 화면을 덮는 바텀시트다(components/Skeleton.tsx). */}
+        {submitting && !pendingQuestion && <CardResultSkeleton />}
 
         {/* 노션 연동 행 (Figma 3.0-i `299:12208`) — 주 액션 바로 위. */}
         <div className="mt-[12px] flex items-center gap-[9px]">
@@ -574,11 +650,17 @@ function RecordPageInner() {
         <button
           type="button"
           onClick={handleConvert}
-          disabled={!rawText.trim() || submitting || isOffline}
+          disabled={!rawText.trim() || submitting || isOffline || recording}
           style={{ backgroundColor: "var(--accent)", color: "var(--accent-foreground)" }}
           className="mt-[28px] flex items-center justify-center rounded-[8px] py-[17px] text-[14px] font-bold transition-opacity active:opacity-80 disabled:opacity-40"
         >
-          {submitting ? "만드는 중…" : "문장으로 바꾸기"}
+          {/* 녹음 중에는 눌러도 의미가 없다 — 목업도 이 버튼을 비활성 상태로 두고
+              라벨로 왜 못 누르는지 알려준다(299:11923). */}
+          {recording
+            ? "녹음을 마치면 변환할 수 있어요"
+            : submitting
+              ? "만드는 중…"
+              : "문장으로 바꾸기"}
         </button>
       </div>
 
@@ -613,35 +695,60 @@ function RecordPageInner() {
             className="absolute inset-0 bg-black/40"
             onClick={handleCloseResult}
           />
+          {/* "3.0-f 변환 오류" (Figma `299:12035`, 9/18 목업 반영).
+              버튼 둘 다 **테두리형**이다 — 여기서 주 액션을 하나로 못 정한다는 뜻으로
+              읽힌다(다시 만들든 원문만 두든 둘 다 정상 종료라서). */}
           <div
-            style={{ backgroundColor: t.cardBg }}
-            className="relative flex w-full max-w-md flex-col gap-3.5 rounded-t-[24px] px-5 pt-6 pb-[30px]"
+            style={{ backgroundColor: t.sheetBg }}
+            className="relative flex w-full max-w-md flex-col gap-[18px] rounded-t-[24px] px-[22px] pt-[14px] pb-[26px]"
           >
-            <p className="text-[14px] font-semibold">변환에 실패했어요</p>
-            <p className="text-[12px] text-amber-400">
-              메모는 그대로 있습니다. 다시 시도하거나 원문만 저장할 수 있어요.
+            <div className="flex items-center justify-center pt-[2px] pb-[18px]">
+              <div
+                aria-hidden
+                style={{ backgroundColor: t.border }}
+                className="h-[4px] w-[36px] rounded-full"
+              />
+            </div>
+
+            <div className="flex items-center gap-[9px]">
+              <span
+                aria-hidden
+                style={{ backgroundColor: t.text }}
+                className="size-[18px] shrink-0 rounded-full"
+              />
+              <p className="text-[20px] font-bold leading-[32px]">문장을 다 만들지 못했어요</p>
+            </div>
+
+            <p style={{ color: t.textSoft }} className="text-[14px] leading-[24px]">
+              적어주신 기록은 그대로 있어요. 다시 만들거나, 원문만 저장해도 돼요.
             </p>
-            <p className="rounded-[12px] bg-[#2a2320] px-4 py-[18px] text-[14px]">
+
+            <p
+              style={{ backgroundColor: t.cardBg, color: t.textSoft }}
+              className="mt-[20px] rounded-[12px] px-[16px] py-[17px] text-[14px] leading-[24px]"
+            >
               {result.raw_text}
             </p>
+
             {refineError && <p className="text-[12px] text-red-400">{refineError}</p>}
-            <div className="flex gap-2.5">
+
+            <div className="flex items-start gap-[10px]">
               <button
                 type="button"
                 onClick={handleRefine}
                 disabled={refining}
-                style={{ backgroundColor: "var(--accent)", color: "var(--accent-foreground)" }}
-                className="flex-1 rounded-[12px] py-4 text-[14px] font-semibold disabled:opacity-40"
+                style={{ borderColor: t.border, color: t.text }}
+                className="flex h-[50px] flex-1 items-center justify-center rounded-[8px] border text-[14px] font-medium transition-opacity active:opacity-70 disabled:opacity-40"
               >
-                {refining ? "정리하는 중…" : "다시 시도"}
+                {refining ? "만드는 중…" : "다시 만들기"}
               </button>
               <button
                 type="button"
                 onClick={handleCloseResult}
-                style={{ borderColor: t.border }}
-                className="flex-1 rounded-[12px] border-[1.5px] py-4 text-[14px] font-semibold"
+                style={{ borderColor: t.border, color: t.text }}
+                className="flex h-[50px] flex-1 items-center justify-center rounded-[8px] border text-[14px] font-medium transition-opacity active:opacity-70"
               >
-                그냥 저장하기
+                원문만 저장하기
               </button>
             </div>
           </div>

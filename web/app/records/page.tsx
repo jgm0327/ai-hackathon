@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState, useEffect } from "react";
 import { SkeletonLine } from "@/components/Skeleton";
 import { stackTheme as t } from "@/components/stackTheme";
-import { Card, listCards } from "@/lib/api";
+import { Card, listCards, photoUrl } from "@/lib/api";
 import { getCached, navKey, setCached } from "@/lib/navCache";
 import { useProjects } from "@/lib/useProjects";
 
@@ -205,6 +205,21 @@ export default function RecordsPage() {
                     >
                       {card.skill_tags[0]} ›
                     </span>
+                  )}
+                  {/* 사진 썸네일 (Figma 3.2 `299:12086`) — 40×40. 사진이 붙은 기록을
+                      목록에서 바로 알아볼 수 있어야 한다. id는 목록 응답이 같이 준다
+                      (카드마다 사진 API를 부르지 않기 위해 서버가 한 번에 모아 준다). */}
+                  {card.first_photo_id != null && (
+                    <Image
+                      src={photoUrl(card.first_photo_id)}
+                      alt=""
+                      width={40}
+                      height={40}
+                      unoptimized
+                      aria-hidden
+                      style={{ backgroundColor: t.screenBg }}
+                      className="size-[40px] shrink-0 rounded-[8px] object-cover"
+                    />
                   )}
                 </span>
                 <span className="text-[14px] leading-[24px]">{card.refined_sentence}</span>
