@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { preload } from "react-dom";
+import { useRouter } from "next/navigation";
 import { CSSProperties, useEffect, useState } from "react";
 import { FIELD_ASSETS, WelcomeShapeField } from "@/components/WelcomeShapeField";
 import { getMe, kakaoLoginUrl } from "@/lib/api";
@@ -23,9 +24,14 @@ import { getMe, kakaoLoginUrl } from "@/lib/api";
  * 기다려야 하고(WCAG 2.2.1 "시간 제한" 문제), 반대로 넘김이 없으면 이번 지적처럼
  * 못 보고 지나간다. 마지막 장에서는 탭을 먹지 않는다 — 로그인 버튼을 가로채면 안 된다.
  *
- * `<AuthGate />`가 로그아웃 상태를 감지하면 이 화면으로 보내고, 로그인된 사용자가
- * 이 주소로 오면 `/`로 돌려보낸다 — **이 화면은 로그아웃 상태에서만 보인다**
- * (시크릿 창으로 확인 가능).
+ * **9/19 — 인트로는 로그인 여부와 무관하게 돈다.** 그전엔 로그인돼 있으면 1·2번이
+ * 통째로 안 보이고 빈 배경만 지나갔다(`<AuthGate />`가 `/`로 돌려보내는 동안 인트로를
+ * 안 그렸다). 앱의 스플래시처럼 누구에게나 보여야 하는 화면이라, 이제 두 장을 다
+ * 재생하고 **마지막 장 직전에** 갈림길이 생긴다 — 로그아웃이면 3번(로그인 버튼),
+ * 로그인 상태면 곧장 `/`로 보낸다. 로그인한 사람에게 로그인 버튼을 보여줄 이유는 없다.
+ *
+ * 그래서 `<AuthGate />`의 "로그인 상태로 /login에 오면 /로" 규칙도 뺐다 — 인트로가
+ * 도는 도중에 화면을 낚아채면 안 되고, 나가는 판단은 이 화면이 직접 한다.
  *
  * 카카오 로그인 시작은 반드시 실제 `<a>` 네비게이션이어야 한다(fetch가 아니라) —
  * 브라우저가 카카오 로그인/동의 화면으로 이어지는 리다이렉트 체인을 직접 타야 하기 때문.
@@ -58,11 +64,15 @@ export default function LoginPage() {
   // 렌더 중에 부르는 게 React가 문서화한 사용법이다 — <link rel="preload">로 끌어올려진다.
   WELCOME_ASSETS.forEach((href) => preload(href, { as: "image" }));
 
+  const router = useRouter();
   const [stage, setStage] = useState(0);
-  // 로그인 여부가 정해지기 전에는 인트로를 그리지 않는다 (9/18 — "다른 화면이 번쩍한다").
-  // `<AuthGate />`는 로그인된 사용자를 이 주소에서 `/`로 돌려보내는데, 그 판단이
-  // 네트워크 왕복(`GET /api/auth/me`)이라 그 사이에 인트로가 한 번 그려졌다가
-  // 사라진다. 배포 환경에서는 그 왕복이 길어서 눈에 띈다.
+  /**
+   * 로그인 여부 (`null`이면 아직 확인 중).
+   *
+   * 인트로를 그릴지 말지가 아니라 **인트로가 끝난 뒤 어디로 갈지**를 정하는 값이다.
+   * 확인이 늦어져도 1·2번은 그대로 돌아간다 — 마지막 장으로 넘어가는 지점에서만
+   * 이 값을 기다린다(아래 넘김 effect).
+   */
   const [loggedOut, setLoggedOut] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -80,20 +90,37 @@ export default function LoginPage() {
     };
   }, []);
 
+  /** 마지막 장(로그인 버튼) 바로 앞인가 — 여기서 로그인 상태에 따라 길이 갈린다. */
+  const atLastIntroStage = stage === LAST_STAGE - 1;
+
   useEffect(() => {
     if (stage >= LAST_STAGE) return;
-    const timer = setTimeout(() => setStage((s) => s + 1), STAGE_DURATIONS[stage]);
+    // 마지막 장으로 넘어가려는데 아직 로그인 여부를 모르면 기다린다 — 그 사이 화면은
+    // 카피 장에 머문다. 값이 정해지면 이 effect가 다시 돌면서 이어서 넘어간다.
+    if (atLastIntroStage && loggedOut === null) return;
+
+    const timer = setTimeout(() => {
+      // 이미 로그인한 사람에게 로그인 버튼을 보여줄 이유가 없다 — 인트로만 보여주고
+      // 홈으로 보낸다(`replace`라 뒤로가기로 인트로에 다시 갇히지 않는다).
+      if (atLastIntroStage && loggedOut === false) {
+        router.replace("/");
+        return;
+      }
+      setStage((s) => s + 1);
+    }, STAGE_DURATIONS[stage]);
     return () => clearTimeout(timer);
-  }, [stage]);
+  }, [stage, atLastIntroStage, loggedOut, router]);
 
   const advance = () => {
-    if (stage < LAST_STAGE) setStage((s) => s + 1);
+    if (stage >= LAST_STAGE) return;
+    if (atLastIntroStage && loggedOut === false) {
+      router.replace("/");
+      return;
+    }
+    // 아직 확인 중이면 탭을 먹지 않는다 — 로그인한 사람에게 버튼이 번쩍이면 안 된다.
+    if (atLastIntroStage && loggedOut === null) return;
+    setStage((s) => s + 1);
   };
-
-  // 판단 중(혹은 로그인 상태)이면 배경만 깔아둔다 — 곧 `/`로 이동한다.
-  if (loggedOut !== true) {
-    return <div className="-mb-6 min-h-[100svh] bg-[#1a1917]" />;
-  }
 
   return (
     <div

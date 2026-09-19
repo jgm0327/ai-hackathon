@@ -19,8 +19,11 @@ import { isOnboardingSkipped } from "@/lib/onboardingSkip";
  *   1. 로그아웃 상태(getMe() -> null) + 현재 `/login`이 아니면 -> `/login`
  *   2. 로그인 + 프로필 미완성(job_field null) + "나중에 설정하기"로 스킵 안 함
  *      (`lib/onboardingSkip.ts`) + 현재 `/onboarding`이 아니면 -> `/onboarding`
- *   3. 로그인 + 프로필 완성 + 현재 `/login`이면 -> `/` (로그인 화면엔 되돌아갈 곳 없음)
- *   4. 그 외엔 아무 것도 하지 않는다.
+ *   3. 그 외엔 아무 것도 하지 않는다.
+ *
+ * **구현 노트 (9/19)**: 원래 규칙 3은 "로그인 + 현재 `/login`이면 -> `/`"였다. 그게
+ * 웰컴 인트로를 로그인 상태에서 못 보게 만들고 있어서(사용자 지적) 뺐다 —
+ * `/login`은 이제 인트로를 끝까지 재생한 뒤 스스로 `/`로 나간다.
  *
  * **구현 노트 (9/15, `/onboarding` 강제 이탈 버그 수정)**: 원래 규칙 3이 `/onboarding`도
  * 포함해서, 프로필을 이미 완성한 유저가 직군/연차나 퇴근 알림을 바꾸려고 `/onboarding`에
@@ -55,9 +58,10 @@ export function AuthGate() {
         return;
       }
 
-      if (pathname === "/login") {
-        router.replace("/");
-      }
+      // 9/19 — 예전엔 여기서 로그인된 사용자를 `/login`에서 `/`로 돌려보냈다. 그
+      // 때문에 웰컴 인트로(1·2번 장)가 로그인 상태에서는 통째로 안 보였다. 인트로는
+      // 앱의 스플래시처럼 누구에게나 보여야 하는 화면이라, 나가는 판단은
+      // `app/login/page.tsx`가 **인트로를 다 재생한 뒤에** 직접 한다.
     })();
 
     return () => {
