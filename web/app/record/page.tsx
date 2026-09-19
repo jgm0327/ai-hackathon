@@ -172,6 +172,21 @@ function RecordPageInner() {
     setTopic(searchParams.get("topic"));
   }, [searchParams]);
 
+  /**
+   * 홈의 마이크 버튼으로 들어온 경우 바로 녹음을 시작한다 (9/19 수정).
+   *
+   * 홈(3.0)의 마이크는 `/record?voice=1`로 보내는데 **이 파라미터를 아무도 읽지 않아서
+   * 그냥 기록 화면만 열리고 끝났다**(사용자 신고 — "마이크 버튼이 무반응"). 화면이
+   * 뜬 다음에 시작하므로 권한 팝업이 막히는 브라우저도 있을 수 있는데, 그때는
+   * `onerror`가 안내를 띄우고 사용자가 화면의 마이크를 한 번 더 누르면 된다.
+   */
+  useEffect(() => {
+    if (searchParams.get("voice") !== "1") return;
+    // 마운트 직후 컨트롤이 붙기 전에 부르면 아무 일도 안 일어난다 — 한 틱 넘긴다.
+    const timer = setTimeout(() => voiceControlsRef.current?.start(), 0);
+    return () => clearTimeout(timer);
+  }, [searchParams]);
+
   // 입력창 높이를 내용에 맞춘다 (9/18). 노션에서 가져온 본문이 4줄 창에 갇혀서
   // 스크롤해야만 읽히는 게 "우다닥 붙어서 보기 힘들다"의 절반이었다 — 한눈에
   // 들어오게 늘리고, 화면을 다 먹지 않게 상한에서 멈춘다.

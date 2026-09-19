@@ -3,8 +3,11 @@
 import Image from "next/image";
 import { MutableRefObject, useEffect, useRef, useState } from "react";
 
-/** 부모가 녹음을 멈출 수 있게 넘겨주는 핸들 (Figma 3.0-c의 정지 버튼이 쓴다). */
+/** 부모가 녹음을 켜고 끌 수 있게 넘겨주는 핸들.
+ *  `stop`은 3.0-c의 정지 버튼이, `start`는 홈의 마이크 버튼으로 들어온 경우
+ *  (`/record?voice=1`)가 쓴다. */
 export interface VoiceControls {
+  start: () => void;
   stop: () => void;
 }
 
@@ -56,6 +59,16 @@ export function VoiceInput({
   const [listening, setListening] = useState(false);
   const [interimText, setInterimText] = useState("");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  /**
+   * 정지를 누른 뒤 `onend`가 올 때까지의 짧은 구간 (9/19 신규).
+   *
+   * **왜 필요한가**: `recognition.stop()`은 즉시 끝나지 않는다 — 음성 인식 서비스가
+   * 마지막 결과를 돌려준 뒤에야 `onend`가 온다. 그 사이 화면을 녹음 상태로 두면
+   * 정지를 눌러도 아무 반응이 없는 것처럼 보인다(사용자 신고, 9/19). 그래서 화면은
+   * **누르는 즉시** 녹음 상태에서 빠져나오고, 실제 종료는 여기서 따로 기억한다 —
+   * 종료 전에 마이크를 다시 누르면 "recognition has already started"로 터진다.
+   */
+  const [stopping, setStopping] = useState(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
 
   useEffect(() => {
@@ -73,6 +86,14 @@ export function VoiceInput({
     };
   }, []);
 
+  // `onend`가 끝내 오지 않는 경우에 대비한 안전장치 — 안 풀면 마이크 버튼이 영원히
+  // 비활성으로 남는다. 정상 경로에서는 보통 1초 안에 onend가 와서 먼저 해제된다.
+  useEffect(() => {
+    if (!stopping) return;
+    const timer = setTimeout(() => setStopping(false), 5000);
+    return () => clearTimeout(timer);
+  }, [stopping]);
+
   // 상태를 부모에게도 같이 알린다 — setState와 콜백이 갈라지지 않게 한 곳에 묶는다.
   const beginListening = () => {
     setListening(true);
@@ -80,6 +101,7 @@ export function VoiceInput({
   };
   const endListening = () => {
     setListening(false);
+    setStopping(false);
     onListeningChange?.(false);
   };
   const pushInterim = (text: string) => {
@@ -87,19 +109,8 @@ export function VoiceInput({
     onInterimChange?.(text);
   };
 
-  /** 부모의 정지 버튼(3.0-c)이 쓰는 핸들. `stop()`은 onend를 타므로 그때까지 모인
-   *  텍스트가 정상 제출된다(abort()는 버려진다 — 그래서 abort를 쓰지 않는다).
-   *  렌더 중에 ref를 쓰면 안 되므로 effect에서 붙인다. */
-  useEffect(() => {
-    if (!controlsRef) return;
-    controlsRef.current = { stop: () => recognitionRef.current?.stop() };
-    return () => {
-      controlsRef.current = null;
-    };
-  }, [controlsRef]);
-
   const handleClick = () => {
-    if (disabled || listening) return;
+    if (disabled || listening || stopping) return;
 
     const RecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!RecognitionCtor) {
@@ -165,6 +176,34 @@ export function VoiceInput({
     recognition.start();
   };
 
+  /**
+   * 부모(3.0-c 정지 버튼 / 홈의 마이크로 들어온 경우)가 쓰는 핸들.
+   *
+   * 의존성 배열을 두지 않아 **매 렌더마다 최신 핸들러로 다시 붙는다** — 한 번만
+   * 붙이면 `listening`/`disabled` 같은 값이 첫 렌더 시점으로 굳어버린다.
+   */
+  useEffect(() => {
+    if (!controlsRef) return;
+    const ref = controlsRef;
+    ref.current = {
+      start: handleClick,
+      stop: () => {
+        // 화면은 **누르는 즉시** 녹음 상태에서 빠져나온다. `recognition.stop()`은
+        // 음성 인식 서비스가 마지막 결과를 돌려준 뒤에야 `onend`를 주기 때문에,
+        // 그걸 기다리면 정지를 눌러도 반응이 없는 것처럼 보인다(9/19 사용자 신고).
+        // `stop()`이라 그때까지 모인 텍스트는 정상 제출된다(abort()는 버려진다).
+        if (!recognitionRef.current) return;
+        setStopping(true);
+        setListening(false);
+        onListeningChange?.(false);
+        recognitionRef.current.stop();
+      },
+    };
+    return () => {
+      ref.current = null;
+    };
+  });
+
   if (!supported) {
     return (
       <p className="text-xs text-zinc-400">
@@ -182,7 +221,7 @@ export function VoiceInput({
         <button
           type="button"
           onClick={handleClick}
-          disabled={disabled || listening}
+          disabled={disabled || listening || stopping}
           aria-label={listening ? "듣고 있어요" : "음성 입력"}
           className="flex size-[44px] shrink-0 items-center justify-center rounded-full bg-[#ede9e2] transition-opacity active:opacity-80 disabled:opacity-50"
         >
