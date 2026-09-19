@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { AppIntro } from "@/components/AppIntro";
 import { AuthGate } from "@/components/AuthGate";
 import { ServiceWorkerRegistration } from "@/components/ServiceWorkerRegistration";
 import { TabBar } from "@/components/TabBar";
@@ -36,6 +37,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           우선)이 실제로 적용하는 색이다. 여기 className에 배경/글자색 클래스를 다시
           줘도 무시되므로(9/16 실측) 레이아웃 관련 클래스만 둔다. */}
       <body className="min-h-full flex flex-col">
+        {/* 앱을 열 때마다 도는 스플래시 인트로 (9/19) — 문서가 새로 뜰 때 한 번만
+            마운트되므로 탭 이동으로는 다시 돌지 않는다. `/login`에서는 그 화면이
+            같은 장면을 직접 재생하므로 뜨지 않는다. */}
+        <AppIntro />
         <AuthGate />
         <ServiceWorkerRegistration />
         <div className="mx-auto flex w-full max-w-md flex-1 flex-col">
