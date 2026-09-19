@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { BottomSheet } from "@/components/BottomSheet";
+import { stackTheme as t } from "@/components/stackTheme";
 import { setNotionToken as rememberNotionToken } from "@/lib/notionToken";
 import { Toast, useToast } from "@/components/Toast";
 import {
@@ -220,8 +221,15 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="flex min-h-full flex-col gap-4 bg-[#121212] px-5 pb-8">
-      <div className="flex items-center gap-[10px] pb-[6px] pt-[8px]">
+    /* 5.0 설정 (Figma `299:14444`, 9/19 구조 반영).
+       행을 회색 카드(`rounded-14 border bg-#1e1e1e`)로 감싸고 있었는데, 목업은
+       **화면 배경 위에 테두리 없이** 1px `line` 구분선으로만 나눈다. 그룹 사이만
+       16px 띄운다. 색도 목업 토큰(bg/ground · text/1 · text/3 · line)으로 맞췄다. */
+    <div
+      style={{ backgroundColor: t.screenBg, color: t.text }}
+      className="flex min-h-full flex-col gap-[16px] px-[22px] pt-[24px] pb-8"
+    >
+      <div className="flex items-center gap-[10px] pb-[6px]">
         <Link
           href="/"
           aria-label="뒤로"
@@ -229,89 +237,89 @@ export default function SettingsPage() {
         >
           <Image src="/icons/chevron-left.svg" alt="" width={20} height={20} aria-hidden />
         </Link>
-        <p className="text-[15px] font-bold text-[#f2f2f2]">설정</p>
+        <p className="text-[20px] font-bold leading-[32px]">설정</p>
       </div>
 
-      <div className="flex flex-col overflow-hidden rounded-[14px] border border-[#2e2e2e] bg-[#1e1e1e]">
+      <div className="flex flex-col">
         {/* 직무만 고치는 모드로 보낸다 — 그 전엔 최초 가입과 똑같이 1/4부터 시작해서
             알림 설정까지 다 거쳐야 끝났고, 중간에 나갈 길도 없었다(사용자 신고, 9/18).
             알림은 아래 자기 행이 따로 있다. */}
         <Link
           href="/onboarding?only=job"
-          className="flex items-center gap-2 px-4 py-[13px] transition-colors hover:bg-[#242424]"
+          className="flex items-center gap-[10px] px-[16px] py-[13px] transition-opacity active:opacity-70"
         >
-          <span className="text-[14px] text-[#f2f2f2]">직무 설정</span>
+          <span className="text-[16px] font-medium leading-[28px]">직무 설정</span>
           <div className="flex-1" />
-          <span className="text-[13px] text-[#a0a0a0]">{jobLabel(profile) ?? "설정하기"}</span>
-          <span className="text-[#5e5e5e]">›</span>
+          <span style={{ color: t.textMuted }} className="text-[12px] leading-[20px]">{jobLabel(profile) ?? "설정하기"}</span>
+          <Image src="/icons/chevron-right.svg" alt="" width={16} height={16} aria-hidden />
         </Link>
-        <div className="h-px w-full bg-[#2e2e2e]" />
+        <div style={{ backgroundColor: t.border }} className="h-px w-full" />
         {/* 알림만 고치는 모드로 보낸다 — 그 전엔 직무·목표직무·회사를 전부 다시
             거쳐야 했다(사용자 신고, 9/18). */}
         <Link
           href="/onboarding?only=notify"
-          className="flex items-center gap-2 px-4 py-[13px] transition-colors hover:bg-[#242424]"
+          className="flex items-center gap-[10px] px-[16px] py-[13px] transition-opacity active:opacity-70"
         >
-          <span className="text-[14px] text-[#f2f2f2]">알림</span>
+          <span className="text-[16px] font-medium leading-[28px]">알림</span>
           <div className="flex-1" />
-          <span className="text-[13px] text-[#a0a0a0]">
+          <span style={{ color: t.textMuted }} className="text-[12px] leading-[20px]">
             {leaveTime ? `매일 ${leaveTime}` : "꺼짐"}
           </span>
-          <span className="text-[#5e5e5e]">›</span>
+          <Image src="/icons/chevron-right.svg" alt="" width={16} height={16} aria-hidden />
         </Link>
-        <div className="h-px w-full bg-[#2e2e2e]" />
+        <div style={{ backgroundColor: t.border }} className="h-px w-full" />
         <button
           type="button"
           onClick={() => setNotionOpen(true)}
-          className="flex items-center gap-2 px-4 py-[13px] text-left transition-colors hover:bg-[#242424]"
+          className="flex items-center gap-[10px] px-[16px] py-[13px] text-left transition-opacity active:opacity-70"
         >
-          <span className="text-[14px] text-[#f2f2f2]">노션 연동</span>
+          <span className="text-[16px] font-medium leading-[28px]">노션 연동</span>
           <div className="flex-1" />
-          <span className="text-[13px] text-[#a0a0a0]">
+          <span style={{ color: t.textMuted }} className="text-[12px] leading-[20px]">
             {notionConn?.connected ? (notionConn.workspace_name ?? "연결됨") : "연결 안 됨"}
           </span>
-          <span className="text-[#5e5e5e]">›</span>
+          <Image src="/icons/chevron-right.svg" alt="" width={16} height={16} aria-hidden />
         </button>
-        <div className="h-px w-full bg-[#2e2e2e]" />
+        <div style={{ backgroundColor: t.border }} className="h-px w-full" />
         <Link
           href="/resume"
-          className="flex items-center gap-2 px-4 py-[13px] transition-colors hover:bg-[#242424]"
+          className="flex items-center gap-[10px] px-[16px] py-[13px] transition-opacity active:opacity-70"
         >
-          <span className="text-[14px] text-[#f2f2f2]">내 이력서</span>
+          <span className="text-[16px] font-medium leading-[28px]">내 이력서</span>
           <div className="flex-1" />
-          <span className="text-[13px] text-[#a0a0a0]">
+          <span style={{ color: t.textMuted }} className="text-[12px] leading-[20px]">
             {resumeRegistered == null ? "확인 중…" : resumeRegistered ? "등록됨" : "등록 안 됨"}
           </span>
-          <span className="text-[#5e5e5e]">›</span>
+          <Image src="/icons/chevron-right.svg" alt="" width={16} height={16} aria-hidden />
         </Link>
       </div>
 
       {/* 백업 (Figma 41:333 / 41:338) — 기록이 이 서비스 안에만 갇혀 있지 않다는 걸
           보여주는 장치. 불러오기는 LLM을 타지 않고 저장된 문장을 그대로 되살린다. */}
-      <div className="flex flex-col overflow-hidden rounded-[14px] border border-[#2e2e2e] bg-[#1e1e1e]">
+      <div className="flex flex-col">
         <button
           type="button"
           onClick={handleExportBackup}
           disabled={backupBusy !== null}
-          className="flex items-center gap-2 px-4 py-[13px] text-left transition-colors hover:bg-[#242424] disabled:opacity-50"
+          className="flex items-center gap-[10px] px-[16px] py-[13px] text-left transition-opacity active:opacity-70 disabled:opacity-50"
         >
-          <span className="text-[14px] text-[#f2f2f2]">백업 내보내기</span>
+          <span className="text-[16px] font-medium leading-[28px]">백업 내보내기</span>
           <div className="flex-1" />
-          <span className="text-[13px] text-[#a0a0a0]">
+          <span style={{ color: t.textMuted }} className="text-[12px] leading-[20px]">
             {backupBusy === "export" ? "내보내는 중…" : "JSON"}
           </span>
-          <span className="text-[#5e5e5e]">›</span>
+          <Image src="/icons/chevron-right.svg" alt="" width={16} height={16} aria-hidden />
         </button>
-        <div className="h-px w-full bg-[#2e2e2e]" />
+        <div style={{ backgroundColor: t.border }} className="h-px w-full" />
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
           disabled={backupBusy !== null}
-          className="flex items-center gap-2 px-4 py-[13px] text-left transition-colors hover:bg-[#242424] disabled:opacity-50"
+          className="flex items-center gap-[10px] px-[16px] py-[13px] text-left transition-opacity active:opacity-70 disabled:opacity-50"
         >
-          <span className="text-[14px] text-[#f2f2f2]">백업 불러오기</span>
+          <span className="text-[16px] font-medium leading-[28px]">백업 불러오기</span>
           <div className="flex-1" />
-          <span className="text-[#5e5e5e]">›</span>
+          <Image src="/icons/chevron-right.svg" alt="" width={16} height={16} aria-hidden />
         </button>
         <input
           ref={fileInputRef}
@@ -331,26 +339,28 @@ export default function SettingsPage() {
         <p className="rounded-lg bg-[#2a1614] px-3 py-2 text-sm text-[#f0645c]">{backupError}</p>
       )}
 
-      <div className="flex flex-col overflow-hidden rounded-[14px] border border-[#2e2e2e] bg-[#1e1e1e]">
+      <div className="flex flex-col">
         <button
           type="button"
           onClick={() => setAppInfoOpen(true)}
-          className="flex items-center gap-2 px-4 py-[13px] text-left transition-colors hover:bg-[#242424]"
+          className="flex items-center gap-[10px] px-[16px] py-[13px] text-left transition-opacity active:opacity-70"
         >
-          <span className="text-[14px] text-[#f2f2f2]">앱 정보</span>
+          <span className="text-[16px] font-medium leading-[28px]">앱 정보</span>
           <div className="flex-1" />
-          <span className="text-[#5e5e5e]">›</span>
+          <Image src="/icons/chevron-right.svg" alt="" width={16} height={16} aria-hidden />
         </button>
       </div>
 
-      <div className="flex flex-col overflow-hidden rounded-[14px] border border-[#2e2e2e] bg-[#1e1e1e]">
+      <div className="flex flex-col">
         <button
           type="button"
           onClick={handleLogout}
           disabled={loggingOut}
-          className="flex items-center px-4 py-[13px] text-left transition-colors hover:bg-[#242424] disabled:opacity-50"
+          className="flex items-center px-[16px] py-[13px] text-left transition-opacity active:opacity-70 disabled:opacity-50"
         >
-          <span className="text-[14px] text-[#f0645c]">{loggingOut ? "로그아웃 중…" : "로그아웃"}</span>
+          <span className="text-[16px] font-medium leading-[28px] text-[#e8736c]">
+            {loggingOut ? "로그아웃 중…" : "로그아웃"}
+          </span>
         </button>
       </div>
 

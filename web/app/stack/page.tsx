@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { BottomSheet } from "@/components/BottomSheet";
+import { Toast, useToast } from "@/components/Toast";
 import { ProjectSwitcher } from "@/components/ProjectSwitcher";
 import { SkeletonLine } from "@/components/Skeleton";
 import { stackTheme, stripColor } from "@/components/stackTheme";
@@ -202,6 +203,7 @@ function StackPageContent() {
   // 태그를 바꾼 뒤 카드 목록/역량 집계를 다시 부르기 위한 트리거. 값 자체엔 의미가
   // 없고, 아래 두 effect의 의존성으로만 쓰인다.
   const [reloadToken, setReloadToken] = useState(0);
+  const [toast, showToast] = useToast();
 
   useEffect(() => {
     let cancelled = false;
@@ -576,6 +578,16 @@ function StackPageContent() {
   const pagedUngrouped = groupedView
     ? ungrouped
     : ungrouped.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  /** 4.1-a 액션 시트의 [복사하기] — 그 기록의 문장을 클립보드로 (9/19 신규). */
+  const handleCopyCard = async (card: Card) => {
+    try {
+      await navigator.clipboard.writeText(card.refined_sentence);
+      showToast("클립보드에 복사했어요");
+    } catch {
+      // 클립보드 접근 실패(권한/비보안 컨텍스트) — 조용히 무시한다.
+    }
+  };
 
   const handleDelete = async (id: number) => {
     setDeletingId(id);
@@ -1283,57 +1295,113 @@ function StackPageContent() {
       </BottomSheet>
 
       {/* 카드 액션 시트 (Figma "4.1-a") */}
+      {/* 4.1-a 카드 액션 시트 (Figma `307:19531`, 9/19 구조 반영).
+          목업은 **어떤 기록에 대한 메뉴인지** 문장을 맨 위에 한 줄 보여주고, 메뉴는
+          문장 고치기 / 복사하기 / 삭제 세 개를 56px 행 + 구분선으로 둔다. [취소]는
+          메뉴 안이 아니라 아래 별도 버튼(50px)이다. 복사하기는 아예 없던 항목이다. */}
       <BottomSheet open={actionSheetCard !== null} onClose={() => setActionSheetCard(null)}>
-        <div className="flex flex-col">
-          <button
-            type="button"
-            onClick={() => {
-              const card = actionSheetCard;
-              setActionSheetCard(null);
-              if (card) startEditingTags(card);
-            }}
-            className="rounded-lg px-3 py-3 text-left text-sm text-[#f2f2f2] transition-colors hover:bg-[#262626]"
-          >
-            문장·태그 수정
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              const card = actionSheetCard;
-              setActionSheetCard(null);
-              setDeleteConfirmCard(card);
-            }}
-            className="rounded-lg px-3 py-3 text-left text-sm text-red-600 transition-colors hover:bg-[#262626]"
-          >
-            삭제
-          </button>
-          <div className="my-1 h-px bg-[#262626]" />
-          <button
-            type="button"
-            onClick={() => setActionSheetCard(null)}
-            className="rounded-lg px-3 py-3 text-left text-sm text-[#828282] transition-colors hover:bg-[#262626]"
-          >
-            취소
-          </button>
-        </div>
+        {actionSheetCard && (
+          <div className="flex flex-col">
+            <p
+              style={{ color: stackTheme.textSoft }}
+              className="line-clamp-1 text-[14px] leading-[24px]"
+            >
+              {actionSheetCard.refined_sentence}
+            </p>
+            <div className="mt-[20px] flex flex-col">
+              <button
+                type="button"
+                onClick={() => {
+                  const card = actionSheetCard;
+                  setActionSheetCard(null);
+                  if (card) startEditingTags(card);
+                }}
+                style={{ color: stackTheme.text }}
+                className="flex h-[56px] items-center text-left text-[14px] leading-[24px] transition-opacity active:opacity-70"
+              >
+                문장 고치기
+              </button>
+              <div style={{ backgroundColor: stackTheme.border }} className="h-px w-full" />
+              <button
+                type="button"
+                onClick={() => {
+                  const card = actionSheetCard;
+                  setActionSheetCard(null);
+                  if (card) void handleCopyCard(card);
+                }}
+                style={{ color: stackTheme.text }}
+                className="flex h-[56px] items-center text-left text-[14px] leading-[24px] transition-opacity active:opacity-70"
+              >
+                복사하기
+              </button>
+              <div style={{ backgroundColor: stackTheme.border }} className="h-px w-full" />
+              <button
+                type="button"
+                onClick={() => {
+                  const card = actionSheetCard;
+                  setActionSheetCard(null);
+                  setDeleteConfirmCard(card);
+                }}
+                className="flex h-[56px] items-center text-left text-[14px] leading-[24px] text-[#e8736c] transition-opacity active:opacity-70"
+              >
+                삭제
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActionSheetCard(null)}
+              style={{ borderColor: stackTheme.border, color: stackTheme.text }}
+              className="mt-[12px] flex h-[50px] items-center justify-center rounded-[8px] border text-[14px] font-medium transition-opacity active:opacity-70"
+            >
+              취소
+            </button>
+          </div>
+        )}
       </BottomSheet>
 
-      {/* 삭제 확인 (Figma "4.1-c") */}
-      <BottomSheet
-        open={deleteConfirmCard !== null}
-        onClose={() => setDeleteConfirmCard(null)}
-        title="이 기록을 삭제할까요?"
-      >
-        {deleteConfirmCard && (
-          <>
-            <p className="mb-4 line-clamp-2 text-sm text-[#828282]">
+      {/* 4.1-c 삭제 확인 (Figma `307:19628`, 9/19 구조 반영).
+          바텀시트로 올라왔는데 목업은 **화면 중앙 다이얼로그**(312 폭)다 — 되돌릴 수
+          없는 동작이라 화면 가운데서 한 번 막아 세우는 쪽이 맞다.
+
+          목업 둘째 줄은 "묶여 있는 기록 3개도 함께 사라져요"인데, 우리 삭제는 카드
+          한 장만 지운다(묶음은 저장되는 게 아니라 그때그때 계산된다 — CLAUDE.md 3장).
+          없는 동작을 경고하지 않도록 그 문장 대신 지울 기록을 그대로 보여준다. */}
+      {deleteConfirmCard && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center px-[39px]">
+          <button
+            type="button"
+            aria-label="닫기"
+            className="absolute inset-0 bg-black/60"
+            onClick={() => setDeleteConfirmCard(null)}
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="삭제 확인"
+            style={{ backgroundColor: stackTheme.cardBg }}
+            className="relative flex w-full max-w-[312px] flex-col rounded-[16px] px-[22px] py-[24px]"
+          >
+            <p style={{ color: stackTheme.text }} className="text-[20px] font-bold leading-[32px]">
+              이 기록을 지울까요?
+            </p>
+            <p
+              style={{ color: stackTheme.textSoft }}
+              className="mt-[20px] line-clamp-2 text-[14px] leading-[24px]"
+            >
               {deleteConfirmCard.refined_sentence}
             </p>
-            <div className="flex gap-2">
+            <p
+              style={{ color: stackTheme.textSoft }}
+              className="mt-[4px] text-[14px] leading-[24px]"
+            >
+              되돌릴 수 없어요.
+            </p>
+            <div className="mt-[36px] flex gap-[8px]">
               <button
                 type="button"
                 onClick={() => setDeleteConfirmCard(null)}
-                className="flex-1 rounded-xl border border-[#333] py-3 text-sm font-medium text-[#c8c8c8] transition-colors hover:bg-[#262626]"
+                style={{ borderColor: stackTheme.border, color: stackTheme.text }}
+                className="flex h-[50px] flex-1 items-center justify-center rounded-[8px] border text-[14px] font-medium transition-opacity active:opacity-70"
               >
                 취소
               </button>
@@ -1341,14 +1409,14 @@ function StackPageContent() {
                 type="button"
                 onClick={() => handleDelete(deleteConfirmCard.id)}
                 disabled={deletingId === deleteConfirmCard.id}
-                className="flex-1 rounded-xl bg-red-600 py-3 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:opacity-50"
+                className="flex h-[50px] flex-1 items-center justify-center rounded-[8px] bg-[#e8736c] text-[14px] font-bold text-black transition-opacity active:opacity-80 disabled:opacity-50"
               >
                 {deletingId === deleteConfirmCard.id ? "삭제 중…" : "삭제"}
               </button>
             </div>
-          </>
-        )}
-      </BottomSheet>
+          </div>
+        </div>
+      )}
 
       {/* 미분류 기록 묶기 검토 (Figma "4.2.1 범위 선택" 참고 — 다만 이름은 AI가
           안 짓고 사용자가 직접 입력한다) */}
@@ -1409,6 +1477,7 @@ function StackPageContent() {
           </div>
         )}
       </BottomSheet>
+      <Toast toast={toast} />
     </div>
   );
 }

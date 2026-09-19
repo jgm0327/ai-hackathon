@@ -53,7 +53,9 @@ function reminderSentence(leaveTime: string): string | null {
   return `퇴근 15분 전, ${meridiem} ${display}시 ${minute}분에 보낼게요`;
 }
 
-const TIME_PRESETS = ["18:00", "19:00"];
+/** 퇴근 시각 프리셋 (Figma 2.4 `299:11497` — 18:00 / 19:00 / 20:00 세 개다.
+ *  19:00 하나가 빠져 있어서 20시 퇴근인 사람은 매번 "직접 입력"을 거쳐야 했다). */
+const TIME_PRESETS = ["18:00", "19:00", "20:00"];
 
 function OnboardingPageInner() {
   const router = useRouter();
@@ -254,12 +256,12 @@ function OnboardingPageInner() {
         </div>
       )}
 
-      <p className="pt-3 text-[13px] text-[#828282]">{stepLabel}</p>
+      <p className="pt-3 text-[12px] font-medium leading-[20px] text-[#918c84]">{stepLabel}</p>
 
       {step === 1 && (
         <>
-          <h1 className="pt-3 text-[24px] font-bold tracking-[-0.4px]">어떤 일을 하세요?</h1>
-          <p className="pt-2 pb-4 text-[14px] text-[#a0a0a0]">하나만 골라주세요</p>
+          <h1 className="pt-3 text-[28px] font-bold leading-[40px] tracking-[-0.4px]">어떤 일을 하세요?</h1>
+          <p className="pt-2 pb-4 text-[14px] leading-[24px] text-[#bdb7ae]">하나만 골라주세요</p>
           <JobPicker
             multiple={false}
             selected={currentJob}
@@ -271,7 +273,7 @@ function OnboardingPageInner() {
 
       {step === 2 && (
         <>
-          <h1 className="pt-3 text-[24px] font-bold tracking-[-0.4px]">어디로 가고 싶으세요?</h1>
+          <h1 className="pt-3 text-[28px] font-bold leading-[40px] tracking-[-0.4px]">어디로 가고 싶으세요?</h1>
           <p className="pt-2 pb-4 text-[14px] text-[#a0a0a0]">여러 개 골라도 됩니다</p>
           <JobPicker
             multiple
@@ -296,7 +298,7 @@ function OnboardingPageInner() {
 
       {step === 3 && (
         <>
-          <h1 className="pt-3 text-[24px] font-bold tracking-[-0.4px]">
+          <h1 className="pt-3 text-[28px] font-bold leading-[40px] tracking-[-0.4px]">
             어디서 얼마나 일하셨어요?
           </h1>
           <p className="pt-2 text-[14px] leading-relaxed text-[#a0a0a0]">
@@ -344,7 +346,7 @@ function OnboardingPageInner() {
 
       {step === 4 && (
         <>
-          <h1 className="pt-3 text-[24px] font-bold tracking-[-0.4px]">언제 알려드릴까요?</h1>
+          <h1 className="pt-3 text-[28px] font-bold leading-[40px] tracking-[-0.4px]">언제 알려드릴까요?</h1>
 
           {push.status === "denied" ? (
             /* 2.4-b 알림 권한 거부 (Figma 268:5806) */

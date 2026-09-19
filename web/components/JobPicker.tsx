@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useMemo, useState } from "react";
 import {
   JOB_CATEGORIES,
@@ -52,14 +53,25 @@ export function JobPicker({ multiple, selected, onChange, onConfirm, confirmLabe
       {/* 목록은 페이지와 함께 스크롤한다 — 내부에 별도 스크롤 영역을 만들면 모바일에서
           주소창이 접혔다 펴질 때 높이가 튄다. 하단 바는 sticky로 따라붙는다. */}
       <div className="pb-6">
-        {/* 검색 (Figma 268:5841) — 직군 필터와 무관하게 전체에서 찾는다. */}
+        {/* 검색 (Figma 2.2-a `299:11545`) — 직군 필터와 무관하게 전체에서 찾는다.
+            9/19: 목업의 `icon/search` 18px가 빠져 있었다(입력창만 있었다). */}
+        <div className="relative">
+          <Image
+            src="/icons/search.svg"
+            alt=""
+            width={18}
+            height={18}
+            aria-hidden
+            className="pointer-events-none absolute left-[16px] top-1/2 -translate-y-1/2"
+          />
         <input
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="직무 검색"
-          className="w-full rounded-[12px] border border-[#2e2e2e] bg-[#1c1c1c] px-4 py-3 text-[14px] text-[#f2f2f2] placeholder:text-[#5e5e5e] focus:border-[#5e5e5e] focus:outline-none"
+          className="w-full rounded-[12px] border border-[#34322e] bg-[#2a2724] py-3 pl-[42px] pr-4 text-[14px] text-[#ede9e2] placeholder:text-[#918c84] focus:border-[#918c84] focus:outline-none"
         />
+        </div>
 
         {/* 직군 세그먼트 (Figma 268:5847) — 가로 스크롤. 검색 중엔 전체를 훑으므로 숨긴다. */}
         {!query.trim() && (
