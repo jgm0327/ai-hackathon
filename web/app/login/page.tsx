@@ -3,6 +3,7 @@
 import { preload } from "react-dom";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { markIntroSeen } from "@/components/AppIntro";
 import { CopyStage, INTRO_SHARD_ASSETS, LogoStage } from "@/components/WelcomeIntro";
 import { FIELD_ASSETS, WelcomeShapeField } from "@/components/WelcomeShapeField";
 import { getMe, kakaoLoginUrl } from "@/lib/api";
@@ -58,6 +59,12 @@ export default function LoginPage() {
    * 이 값을 기다린다(아래 넘김 effect).
    */
   const [loggedOut, setLoggedOut] = useState<boolean | null>(null);
+
+  // 이 화면이 인트로를 재생했으니 스플래시(`<AppIntro />`)는 이번 세션에 다시 돌
+  // 필요가 없다 — 로그인 직후 홈으로 넘어가면서 같은 장면을 또 보게 된다.
+  useEffect(() => {
+    markIntroSeen();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
