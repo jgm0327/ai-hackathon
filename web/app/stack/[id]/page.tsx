@@ -113,7 +113,7 @@ export default function CardDetailPage() {
   };
 
   return (
-    <div className="flex min-h-full flex-col gap-4 px-5 pb-8 pt-[8px] text-[#f2f2f2]">
+    <div className="flex flex-1 flex-col gap-4 px-5 pb-8 pt-[8px] text-[#f2f2f2]">
       <div className="flex items-center gap-[10px]">
         <button
           type="button"

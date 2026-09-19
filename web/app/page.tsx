@@ -122,12 +122,12 @@ export default function HomePage() {
   return (
     /* `-mb-6`은 레이아웃(`app/layout.tsx`의 `main`)이 주는 pb-6(24px)을 상쇄한다.
        이 화면은 맨 아래 크림 밴드가 탭바 구분선까지 그대로 이어져야 하는데
-       (Figma 314:21466), 그 여백이 남아 있으면 크림과 탭바 사이에 body 배경
-       (#141210)이 24px 띠로 보인다(9/18 실측: 크림 하단 582 / 탭바 상단 606).
+       (Figma 314:21466), 그 여백이 남아 있으면 크림과 탭바 사이에 body 배경이
+       24px 띠로 보인다(9/18 실측: 크림 하단 582 / 탭바 상단 606).
        로그인 화면(`app/login/page.tsx`)이 같은 이유로 같은 방식을 쓴다. */
     <div
       style={{ backgroundColor: t.homeBg, color: t.text }}
-      className="-mb-6 flex min-h-full flex-col"
+      className="-mb-6 flex flex-1 flex-col"
     >
       {/* Header (318:22973) — 9/18 개정으로 오른쪽에 설정 진입이 돌아왔다.
           홈 재설계(303:15859) 때 설정이 이 화면에서 빠졌고, 그 뒤 `/record`로

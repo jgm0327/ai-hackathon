@@ -227,7 +227,7 @@ export default function SettingsPage() {
        16px 띄운다. 색도 목업 토큰(bg/ground · text/1 · text/3 · line)으로 맞췄다. */
     <div
       style={{ backgroundColor: t.screenBg, color: t.text }}
-      className="flex min-h-full flex-col gap-[16px] px-[22px] pt-[24px] pb-8"
+      className="flex flex-1 flex-col gap-[16px] px-[22px] pt-[24px] pb-8"
     >
       <div className="flex items-center gap-[10px] pb-[6px]">
         <Link

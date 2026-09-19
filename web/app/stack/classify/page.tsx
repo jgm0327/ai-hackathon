@@ -103,7 +103,7 @@ export default function ClassifyPage() {
   return (
     <div
       style={{ backgroundColor: t.screenBg, color: t.text }}
-      className="flex min-h-full flex-col px-[22px] pt-[6px] pb-6"
+      className="flex flex-1 flex-col px-[22px] pt-[6px] pb-6"
     >
       {/* Header (301:15002) */}
       <div className="flex items-center gap-[10px] pb-[16px]">

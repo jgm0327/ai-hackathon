@@ -401,7 +401,7 @@ function RecordPageInner() {
   return (
     <div
       style={{ backgroundColor: t.screenBg, color: t.text }}
-      className="flex min-h-full flex-col px-[22px] pt-[2px] pb-3"
+      className="flex flex-1 flex-col px-[22px] pt-[2px] pb-3"
     >
       {/* Header (299:12225) */}
       <div className="flex items-center gap-[10px] pb-[16px]">

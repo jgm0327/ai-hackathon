@@ -104,7 +104,7 @@ export default function RecordsPage() {
   return (
     <div
       style={{ backgroundColor: t.screenBg, color: t.text }}
-      className="flex min-h-full flex-col px-[22px] pt-[2px] pb-6"
+      className="flex flex-1 flex-col px-[22px] pt-[2px] pb-6"
     >
       {/* Header */}
       <div className="flex items-center gap-[10px] pb-[16px]">

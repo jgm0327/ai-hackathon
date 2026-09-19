@@ -44,7 +44,13 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <AuthGate />
         <ServiceWorkerRegistration />
         <div className="mx-auto flex w-full max-w-md flex-1 flex-col">
-          <main className="flex-1 pb-6">{children}</main>
+          {/* 9/19 — `flex flex-col`이 붙어 있어야 페이지 루트가 `flex-1`로 남은
+              높이를 채운다. 예전엔 페이지들이 `min-h-full`(= height 100%)로 채웠는데,
+              퍼센트 높이는 부모 높이가 확정돼야 풀린다. iOS Safari는 flex-basis로
+              정해진 높이를 그 "확정된 높이"로 안 쳐주는 경우가 있어서 100%가 0으로
+              풀렸고, 그러면 화면 위쪽에 body 배경이 그대로 드러난다(아이폰에서만
+              상단에 빈 칸이 보인다는 신고, 9/19). flex로 채우면 그 계산이 사라진다. */}
+          <main className="flex flex-1 flex-col pb-6">{children}</main>
           <TabBar />
         </div>
       </body>

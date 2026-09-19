@@ -631,7 +631,7 @@ export default function ResumePage() {
   };
 
   return (
-    <div className="flex min-h-full flex-col gap-4 bg-[#121212] px-5 pb-8">
+    <div className="flex flex-1 flex-col gap-4 bg-[#121212] px-5 pb-8">
       <div className="flex items-center gap-[10px] pb-[6px] pt-[8px]">
         <Link
           href="/stack"
