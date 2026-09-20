@@ -17,8 +17,14 @@ export default function manifest(): MetadataRoute.Manifest {
     description: "퇴근 전 한 줄 메모를 이직 시 경력기술서로 바꿔주는 서비스",
     start_url: "/",
     display: "standalone",
-    background_color: "#fafafa",
-    theme_color: "#18181b",
+    /**
+     * 9/20 — 둘 다 화면 색과 달라서 맞췄다.
+     * `background_color`는 설치형 PWA를 실행할 때 첫 화면이 그려지기 전 깔리는 색인데
+     * 흰색(#fafafa)이라 어두운 앱 앞에 흰 화면이 한 번 번쩍였다. `theme_color`는
+     * 브라우저/OS가 앱 주변 영역을 칠하는 색이다(위 layout.tsx의 meta와 같은 값).
+     */
+    background_color: "#1a1917",
+    theme_color: "#1a1917",
     icons: [
       {
         src: "/icon.svg",

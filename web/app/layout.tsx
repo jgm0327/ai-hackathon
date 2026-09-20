@@ -25,6 +25,16 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
+  /**
+   * 9/20 — `<meta name="theme-color">`가 **아예 없었다.**
+   *
+   * 인앱 브라우저(카카오 등)와 모바일 크롬은 페이지 바깥의 자기 영역(주소창 주변,
+   * 상단 상태바 밑)을 칠할 때 이 값을 읽는다. 없으면 각자 기본값(보통 검정이나 흰색)
+   * 으로 칠해서, 화면 배경(#1a1917)과 다른 띠가 페이지 위에 남는다 — 아이폰 카카오
+   * 인앱 브라우저에서 상단에 빈 칸처럼 보인다는 신고가 이 띠로 보인다.
+   * 화면 배경과 같은 값을 주면 경계가 사라진다.
+   */
+  themeColor: "#1a1917",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
