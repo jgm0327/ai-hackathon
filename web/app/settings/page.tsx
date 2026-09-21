@@ -2,7 +2,6 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { BottomSheet } from "@/components/BottomSheet";
 import { stackTheme as t } from "@/components/stackTheme";
@@ -16,13 +15,13 @@ import {
   getProfile,
   getResumeDraft,
   importBackup,
-  logout,
   NotionConnection,
   disconnectNotion,
   getNotionConnection,
   listNotionPages,
   notionOAuthStartUrl,
 } from "@/lib/api";
+import { signOut } from "@/lib/signOut";
 import { useProjects } from "@/lib/useProjects";
 
 /** 내려받을 파일 이름 — "career-log-backup-2026-09-18.json". */
@@ -62,7 +61,6 @@ function jobLabel(profile: Profile | null): string | null {
  * 보여준다 — CLAUDE.md 2.2, 없는 사실을 지어내지 않는다)와 알림 시각 표시뿐이다.
  */
 export default function SettingsPage() {
-  const router = useRouter();
   const { currentProject } = useProjects();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [leaveTime, setLeaveTime] = useState<string | null>(null);
@@ -209,15 +207,10 @@ export default function SettingsPage() {
   const handleLogout = async () => {
     if (loggingOut) return;
     setLoggingOut(true);
-    try {
-      await logout();
-    } catch {
-      // 세션이 이미 만료됐어도 서버가 204(멱등)를 주지만, 네트워크 실패 등으로
-      // 여기서 예외가 나도 로컬에서는 로그아웃된 것처럼 로그인 화면으로 보낸다 —
-      // 어차피 쿠키가 유효하지 않으면 다음 요청에서 401로 다시 걸러진다.
-    } finally {
-      router.replace("/login");
-    }
+    // 서버 세션 삭제 + 브라우저에 남은 데이터 정리 + 문서 교체까지 `signOut()`이 한다.
+    // 특히 **문서를 통째로 새로 띄우는 것**이 중요하다 — 클라이언트 라우팅으로만
+    // 나가면 메모리 캐시에 앞사람 기록이 남는다(`lib/signOut.ts` 주석 참고).
+    await signOut();
   };
 
   return (

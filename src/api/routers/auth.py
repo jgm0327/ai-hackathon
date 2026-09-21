@@ -98,5 +98,16 @@ def logout(request: Request) -> Response:
     # 응답 자체에 delete_cookie를 걸어야 해서, 데코레이터의 status_code=204에
     # 기대는 대신 Response 객체를 직접 만들어 반환한다.
     response = Response(status_code=204)
-    response.delete_cookie(SESSION_COOKIE_NAME, path="/")
+    # **설정할 때와 같은 속성으로 지워야 한다** (9/21). Starlette의 delete_cookie는
+    # 기본값이 `secure=False`/`httponly=False`인데, 브라우저에 따라 원래 쿠키와 속성이
+    # 다른 Set-Cookie를 무시하거나 별개 쿠키로 취급한다 — 특히 HTTPS에서 Secure로
+    # 심어둔 쿠키를 non-Secure로 지우려 할 때 iOS Safari·인앱 브라우저에서 말썽이
+    # 보고된다. path/secure/httponly/samesite를 로그인 때와 똑같이 맞춰 준다.
+    response.delete_cookie(
+        SESSION_COOKIE_NAME,
+        path="/",
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="lax",
+    )
     return response
