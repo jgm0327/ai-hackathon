@@ -1,0 +1,92 @@
+# Fluent Bit 설정 — Pingbell 로그 수집 연동
+#
+# 이 VM은 career-log-api / career-log-web을 systemd로 띄우고 있어서(deploy/systemd/*.service),
+# 로그가 파일이 아니라 journald로 간다 - 그래서 tail이 아니라 systemd input을 쓴다.
+#
+# ⚠️ 이 설정은 Pingbell이 이 VM에서 인터넷으로 접근 가능한 곳에 떠 있어야 동작한다
+#    (로컬 개발 머신에서만 docker compose로 띄운 상태라면 이 VM이 못 닿는다 -
+#    Pingbell을 공개 호스트에 배포하거나, 최소한 터널(ngrok/Cloudflare Tunnel)로
+#    열어둬야 한다).
+#
+# 사용법:
+#   1. 아래 플레이스홀더 치환:
+#      <PINGBELL_HOST> / <PINGBELL_PORT> - Pingbell이 실제로 떠 있는 호스트/포트
+#      <API_MONITOR_ID> / <API_KEY_API>  - career-log-api용 Pingbell Monitor id / 로그 수집 API 키
+#      <WEB_MONITOR_ID> / <API_KEY_WEB>  - career-log-web용 Pingbell Monitor id / 로그 수집 API 키
+#      (API 키는 Pingbell에 로그인해 POST /api/monitors/{monitorId}/api-keys 로 발급)
+#
+#   2. Fluent Bit 설치(Ubuntu, 공식 스크립트 - apt 저장소 등록 + fluent-bit.service까지 같이 설치됨):
+#        curl https://raw.githubusercontent.com/fluent/fluent-bit/master/install.sh | sh
+#
+#   3. 이 파일을 /etc/fluent-bit/fluent-bit.conf 로 복사(기존 파일은 백업해둘 것)
+#
+#   4. journald 접근 권한 필요 - fluent-bit 계정을 systemd-journal 그룹에 추가:
+#        sudo usermod -aG systemd-journal fluent-bit
+#
+#   5. 적용 + 확인:
+#        sudo systemctl restart fluent-bit
+#        sudo systemctl status fluent-bit
+#        journalctl -u fluent-bit -f   # 에러 없이 나가는지 확인
+#
+#   6. RAM이 빠듯한 VM이다(OCI AMD Micro, 977MB - deploy/README.md 참고). 설치 후
+#      `free -h`로 여유 메모리를 한 번 확인할 것 - Fluent Bit 자체는 가볍지만
+#      (보통 수십 MB), 이미 여유가 없는 이 VM에서는 그래도 체크하는 게 안전하다.
+
+[SERVICE]
+    Flush        5
+    Log_Level    info
+
+# --- career-log-api (FastAPI) ---
+[INPUT]
+    Name              systemd
+    Tag               pingbell.monitor-api
+    Systemd_Filter    _SYSTEMD_UNIT=career-log-api.service
+    # 재시작할 때마다 저널 전체를 다시 읽지 않고 새로 쌓이는 것부터만 보낸다 -
+    # 안 그러면 최초 기동 시 과거 로그가 한 번에 몰려서 rate limit(분당 60건)에 걸린다.
+    Read_From_Tail    On
+
+[FILTER]
+    # Pingbell 자신이 5~10초 간격으로 찌르는 /api/health 요청의 uvicorn 접근 로그가
+    # 계속 섞여 들어오면 실제 로그를 찾기 어려워진다 - 제외한다.
+    Name     grep
+    Match    pingbell.monitor-api
+    Exclude  MESSAGE /api/health
+
+[FILTER]
+    # journald의 필드명은 MESSAGE(대문자)인데, Pingbell 수집 API는 ndjson에서
+    # "log" 또는 "message"(소문자) 필드만 인식한다 - 그대로 보내면 전부 무시된다.
+    Name     modify
+    Match    pingbell.monitor-api
+    Rename   MESSAGE message
+
+[OUTPUT]
+    Name    http
+    Match   pingbell.monitor-api
+    Host    <PINGBELL_HOST>
+    Port    <PINGBELL_PORT>
+    URI     /api/v1/monitors/<API_MONITOR_ID>/logs
+    Format  json_lines
+    tls     On
+    Header  Authorization Bearer <API_KEY_API>
+
+# --- career-log-web (Next.js) ---
+[INPUT]
+    Name              systemd
+    Tag               pingbell.monitor-web
+    Systemd_Filter    _SYSTEMD_UNIT=career-log-web.service
+    Read_From_Tail    On
+
+[FILTER]
+    Name     modify
+    Match    pingbell.monitor-web
+    Rename   MESSAGE message
+
+[OUTPUT]
+    Name    http
+    Match   pingbell.monitor-web
+    Host    <PINGBELL_HOST>
+    Port    <PINGBELL_PORT>
+    URI     /api/v1/monitors/<WEB_MONITOR_ID>/logs
+    Format  json_lines
+    tls     On
+    Header  Authorization Bearer <API_KEY_WEB>

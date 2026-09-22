@@ -9,6 +9,7 @@
 - `systemd/career-log-api.service` — uvicorn(FastAPI)을 상주 프로세스로 등록
 - `systemd/career-log-web.service` — Next.js standalone 서버를 상주 프로세스로 등록
 - `update-web.sh` — 미리 빌드된 프론트 산출물을 받아서 교체 (9/18 신설)
+- `fluent-bit.conf.example` — Pingbell(외부 모니터링/로그 수집 도구)로 이 VM의 로그를 보내는 설정 (9/21 신설, 6절 참고)
 
 ## 프론트 빌드는 VM에서 하지 않는다 (9/18)
 
@@ -101,8 +102,35 @@ curl -I https://<YOUR_DOMAIN>/service-worker.js  # 루트에서 200으로 서빙
 음성 입력, PWA 설치, 푸시 알림 수신을 확인한다 — 이 부분은 VM과 실기기가 있어야만
 할 수 있는, 사람이 직접 해야 하는 검증이다.
 
+## 6. (선택) Pingbell 로그 수집 연동
+
+배포 검증/헬스체크와는 별개로, Pingbell(외부 모니터링 도구)에 이 VM의 로그를 보내
+장애 발생 시 자동 분석에 쓰게 하려면 Fluent Bit를 붙인다. 자세한 설정과 왜 tail이
+아니라 systemd input을 쓰는지는 `fluent-bit.conf.example` 파일 상단 주석 참고.
+
+**전제조건 (가장 먼저 확인할 것)**: Pingbell이 이 VM에서 인터넷으로 접근 가능해야
+한다. Pingbell을 개발자 로컬 머신에서 docker compose로만 띄운 상태라면 이 VM이
+접근할 수 없다 - Pingbell을 공개 호스트에 배포하거나 터널(ngrok/Cloudflare Tunnel
+등)로 열어둬야 먼저 진행할 수 있다.
+
+```bash
+curl https://raw.githubusercontent.com/fluent/fluent-bit/master/install.sh | sh
+
+sudo cp /opt/app/deploy/fluent-bit.conf.example /etc/fluent-bit/fluent-bit.conf
+# 파일 안의 <PINGBELL_HOST>/<PINGBELL_PORT>/<*_MONITOR_ID>/<API_KEY_*> 치환
+
+sudo usermod -aG systemd-journal fluent-bit
+sudo systemctl restart fluent-bit
+sudo systemctl status fluent-bit
+journalctl -u fluent-bit -f   # 에러 없이 나가는지 확인
+free -h                       # RAM이 빠듯한 VM이므로(아래 "프론트 빌드는..." 절 참고) 여유 확인
+```
+
 ## 아직 못 채운 것
 - 실제 도메인/VM 접속 정보 — 사용자가 제공해야 진행 가능
 - 위 파일들은 한 번도 실제 VM에 적용해본 적이 없다 — **최초 적용 시 오탈자/경로
   문제가 있을 수 있으니, 그대로 신뢰하지 말고 각 단계마다 상태를 확인할 것**
   (`systemctl status`, `nginx -t`, `curl`로 검증하며 진행)
+- `fluent-bit.conf.example`도 실제 VM에 적용해본 적이 없다 - 위와 같은 이유로 단계별
+  상태 확인이 필요하다. journald 필드명(`MESSAGE`)이 Fluent Bit/systemd 버전에
+  따라 다를 수 있으니, 적용 후 실제로 로그가 넘어가는지 Pingbell 쪽에서 확인할 것.

@@ -13,3 +13,5 @@ data/app.db
 data/photos/
 # 배포 운영 노트 — 서버 경로/도메인/방화벽 등 이 환경에만 해당하는 내용이라 커밋하지 않는다
 DEPLOY-OCI.local.md
+# 실제 Pingbell 로그 수집 API 키가 채워진 파일 — deploy/fluent-bit.conf.example만 커밋한다
+deploy/fluent-bit.conf
