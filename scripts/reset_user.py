@@ -29,10 +29,17 @@ from src.config import settings  # noqa: E402
 TABLES = [
     "sessions",
     # 9/23 — 푸시 구독/설정이 Upstash에서 SQLite로 옮겨와 평범한 유저 스코프 테이블이
-    # 됐다. 그전엔 아래 _delete_push_subscription()이 따로 처리했는데, 저장소 키가
+    # 됐다. 그전엔 _delete_push_subscription()이 따로 처리했는데, 저장소 키가
     # sha256(endpoint)라 `str(user_id)`로는 **애초에 한 건도 못 찾았다**(무해한 no-op).
     "push_subscriptions",
     "push_settings",
+    # 9/23 — 아래 셋이 빠져 있었다. `users` 행까지 지우면서 이것들만 남으면 **주인 없는
+    # 행**이 되고, 다음 로그인 때 같은 kakao_id로 새 user_id가 발급되므로 영영 안 보이는
+    # 채로 남는다. notion_connections는 특히 **노션 액세스 토큰**을 들고 있어서,
+    # "내 정보를 지운다"는 목적에서 빠뜨리면 안 되는 항목이다.
+    "card_photos",  # cards보다 먼저 — 파일 삭제를 위해 아래에서 경로를 먼저 읽는다
+    "saved_resumes",
+    "notion_connections",
     "cards",
     "resume_drafts",
     "master_resume_drafts",
@@ -41,6 +48,25 @@ TABLES = [
     "projects",
     "users",
 ]
+
+
+def _delete_photo_files(stored_names: list[str], dry_run: bool) -> None:
+    """기록에 첨부된 사진 파일을 디스크에서 지운다 (9/23 신규).
+
+    DB 행만 지우면 이미지 바이트는 그대로 남는다. 백업 내보내기에도 안 잡히고
+    화면에도 안 보이는 파일이라, 한 번 놓치면 발견될 일이 없다.
+    """
+    photo_dir = Path(settings.photo_dir)
+    print(f"  {'사진 파일':22s}  {len(stored_names)}개  ({photo_dir})")
+    if dry_run:
+        return
+    for name in stored_names:
+        target = photo_dir / name
+        try:
+            target.unlink(missing_ok=True)
+        except OSError as exc:
+            # 파일 하나가 안 지워져도 나머지 삭제를 막지 않는다 — DB는 이미 커밋됐다.
+            print(f"    사진 삭제 실패({name}): {exc}", file=sys.stderr)
 
 
 def main() -> int:
@@ -81,6 +107,15 @@ def main() -> int:
         print(f"user_id={uid} 없음", file=sys.stderr)
         return 1
 
+    # 사진은 DB에 메타만 있고 바이트는 디스크에 있다(`settings.photo_dir`). 행을 지우기
+    # **전에** 파일명을 읽어둬야 한다 — 지운 뒤에는 어느 파일이 이 유저 것이었는지
+    # 알 방법이 없어 디스크에 고아 파일이 영영 남는다.
+    photo_names = [
+        r[0] for r in conn.execute(
+            "SELECT stored_name FROM card_photos WHERE user_id = ?", (uid,)
+        )
+    ]
+
     for table in TABLES:
         col = "id" if table == "users" else "user_id"
         n = conn.execute(f"SELECT COUNT(*) FROM {table} WHERE {col} = ?", (uid,)).fetchone()[0]
@@ -89,6 +124,8 @@ def main() -> int:
             conn.execute(f"DELETE FROM {table} WHERE {col} = ?", (uid,))
     if not args.dry_run:
         conn.commit()
+
+    _delete_photo_files(photo_names, args.dry_run)
 
     print()
     if args.dry_run:
