@@ -187,6 +187,40 @@ class Profile:
 
 
 @dataclass
+class PushSubscription:
+    """웹 푸시 구독 하나 = **기기 하나** (9/23 신규).
+
+    endpoint는 브라우저가 발급하고 그 브라우저로만 배달되므로, 한 계정이 기기 수만큼
+    행을 갖는다. 알림을 켤지/언제 보낼지는 여기가 아니라 `PushSettings`(계정당 1행)에
+    있다 — 예전 구조(Upstash)는 둘을 한 레코드에 섞어 둬서 기기마다 설정이 어긋났다.
+    """
+
+    id: int
+    user_id: int
+    endpoint: str
+    p256dh: str
+    auth: str
+    created_at: str
+
+
+@dataclass
+class PushSettings:
+    """퇴근 알림 설정 — **계정당 1행** (9/23 신규).
+
+    기기와 무관하게 따라다녀야 하는 값들이다. 새 기기에서 로그인하면 알림 권한만 한 번
+    허용받으면 되고 시각을 다시 고를 필요가 없다.
+
+    `last_sent_date`도 여기 있다 — "오늘 이미 보냈다"는 기기가 아니라 사람 기준이라야
+    기기 3대에 3번 가지 않는다.
+    """
+
+    enabled: bool = False
+    leave_time: str = "18:00"
+    skip_weekends: bool = True  # Figma 온보딩 4/4는 켜진 상태가 기본
+    last_sent_date: str | None = None
+
+
+@dataclass
 class Company:
     """유저가 온보딩에서 입력한 재직 이력 한 건 (9/18 신규).
 
@@ -366,6 +400,44 @@ def init_db() -> None:
                 user_id    INTEGER PRIMARY KEY REFERENCES users(id),
                 content    TEXT NOT NULL,
                 updated_at TEXT NOT NULL
+            )
+            """
+        )
+        # 9/23 신규 — 퇴근 알림. 그전까지 구독은 Upstash Redis 해시 하나에
+        # sha256(endpoint)를 키로 들어 있었고 **로그인 유저와 연결고리가 없었다**
+        # (push 라우터만 `get_current_user`로 못 옮겨간 채 남아 있었다). 그래서
+        # 기기마다 별개 유저 취급이 돼 설정이 어긋나고, 로그아웃해도 구독이 남아
+        # "설정은 꺼짐인데 알림은 계속 오는" 상태가 만들어졌다(사용자 신고).
+        #
+        # Upstash를 쓴 원래 이유는 Streamlit 앱(쓰는 쪽)과 GitHub Actions 워크플로
+        # (읽는 쪽)가 다른 프로세스라 파일시스템을 공유 못 해서였는데, 9/17에
+        # 스케줄러가 FastAPI 앱 안으로 들어오면서 그 전제가 사라졌다.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS push_subscriptions (
+                id         INTEGER PRIMARY KEY,
+                user_id    INTEGER NOT NULL REFERENCES users(id),
+                endpoint   TEXT NOT NULL UNIQUE,
+                p256dh     TEXT NOT NULL,
+                auth       TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id)"
+        )
+        # 설정을 profile에 컬럼으로 붙이지 않은 이유: `save_profile()`이 넘겨받은 값으로
+        # 전체를 덮어쓰는 구조라, 온보딩에서 직무만 고쳐 저장해도 알림 설정이 같이
+        # 날아갈 수 있다(같은 함수에서 연차가 조용히 지워졌던 전례가 주석으로 남아 있다).
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS push_settings (
+                user_id        INTEGER PRIMARY KEY REFERENCES users(id),
+                enabled        INTEGER NOT NULL DEFAULT 0,
+                leave_time     TEXT    NOT NULL DEFAULT '18:00',
+                skip_weekends  INTEGER NOT NULL DEFAULT 1,
+                last_sent_date TEXT
             )
             """
         )
@@ -1226,6 +1298,168 @@ def save_profile(
                     for i, c in enumerate(companies)
                 ],
             )
+
+
+# ---------------------------------------------------------------------------
+# 퇴근 알림 — 구독(기기 단위) + 설정(계정 단위). 9/23 신규.
+# ---------------------------------------------------------------------------
+
+
+def save_push_subscription(
+    user_id: int, endpoint: str, p256dh: str, auth: str, now: str
+) -> None:
+    """이 기기의 구독을 계정에 붙인다(endpoint 기준 upsert).
+
+    **endpoint가 UNIQUE인 게 핵심이다.** 같은 브라우저에서 다른 계정으로 로그인하면
+    브라우저는 같은 endpoint를 다시 내주는데, 예전 구조(endpoint 해시가 곧 유저)에서는
+    앞사람 설정을 덮어쓰면서도 그게 누구 것인지 알 수 없었다. 여기서는 소유자가 새
+    유저로 옮겨간다 — 기기 하나는 마지막에 로그인한 사람의 것이다.
+    """
+    init_db()
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(endpoint) DO UPDATE SET
+                user_id = excluded.user_id,
+                p256dh = excluded.p256dh,
+                auth = excluded.auth
+            """,
+            (user_id, endpoint, p256dh, auth, now),
+        )
+
+
+def list_push_subscriptions(user_id: int) -> list[PushSubscription]:
+    """그 계정에 붙은 기기 전부."""
+    init_db()
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM push_subscriptions WHERE user_id = ? ORDER BY id",
+            (user_id,),
+        ).fetchall()
+    return [_row_to_push_subscription(r) for r in rows]
+
+
+def delete_push_subscription(endpoint: str, user_id: int | None = None) -> None:
+    """기기 하나의 구독을 지운다. 없어도 조용히 무시한다(멱등).
+
+    `user_id`를 주면 그 유저 것만 지운다(사용자가 자기 기기를 끄는 경우). 생략하면
+    endpoint만으로 지운다 — 발송이 410 Gone을 받았을 때는 그 endpoint가 죽었다는
+    사실만 알 뿐 소유자를 따질 이유가 없다.
+    """
+    init_db()
+    with _connect() as conn:
+        if user_id is None:
+            conn.execute("DELETE FROM push_subscriptions WHERE endpoint = ?", (endpoint,))
+        else:
+            conn.execute(
+                "DELETE FROM push_subscriptions WHERE endpoint = ? AND user_id = ?",
+                (endpoint, user_id),
+            )
+
+
+def delete_push_subscriptions_for_user(user_id: int) -> int:
+    """그 계정의 기기 구독을 전부 지운다. 지운 개수를 반환한다.
+
+    설정에서 알림을 끄면 이걸 부른다 — 끄기는 **계정 단위 동작**이라 지금 보고 있는
+    기기 하나만 멈추면 나머지 기기에서 계속 온다.
+    """
+    init_db()
+    with _connect() as conn:
+        cur = conn.execute("DELETE FROM push_subscriptions WHERE user_id = ?", (user_id,))
+        return cur.rowcount
+
+
+def get_push_settings(user_id: int) -> PushSettings:
+    """알림 설정. 한 번도 켠 적이 없으면 기본값(꺼짐)을 반환한다 — get_profile과 같은 패턴."""
+    init_db()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM push_settings WHERE user_id = ?", (user_id,)
+        ).fetchone()
+    if row is None:
+        return PushSettings()
+    return _row_to_push_settings(row)
+
+
+def save_push_settings(
+    user_id: int, enabled: bool, leave_time: str, skip_weekends: bool
+) -> None:
+    """알림 설정을 저장한다(계정당 1행, upsert).
+
+    `last_sent_date`는 건드리지 않는다 — 시각을 고쳤다고 오늘 이미 보낸 사실이
+    없어지지는 않는다. 다만 **끌 때는 비운다**: 껐다가 같은 날 다시 켜면 그날 알림을
+    받을 수 있어야 한다.
+    """
+    init_db()
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO push_settings (user_id, enabled, leave_time, skip_weekends)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                enabled = excluded.enabled,
+                leave_time = excluded.leave_time,
+                skip_weekends = excluded.skip_weekends,
+                last_sent_date = CASE WHEN excluded.enabled = 0 THEN NULL
+                                      ELSE push_settings.last_sent_date END
+            """,
+            (user_id, 1 if enabled else 0, leave_time, 1 if skip_weekends else 0),
+        )
+
+
+def mark_push_sent(user_id: int, date_str: str) -> None:
+    """오늘 이 유저에게 퇴근 알림을 보냈다고 기록한다(기기가 아니라 사람 기준)."""
+    init_db()
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE push_settings SET last_sent_date = ? WHERE user_id = ?",
+            (date_str, user_id),
+        )
+
+
+def list_push_recipients() -> list[tuple[int, PushSettings, list[PushSubscription]]]:
+    """알림이 켜져 있고 기기가 하나 이상 붙어 있는 유저 전부. 스케줄러가 순회한다.
+
+    기기가 없는데 enabled인 행(마지막 기기를 끈 직후 등)은 보낼 곳이 없으니 아예
+    내보내지 않는다 — 스케줄러에서 빈 목록을 다시 거르지 않아도 되게.
+    """
+    init_db()
+    with _connect() as conn:
+        setting_rows = conn.execute("SELECT * FROM push_settings WHERE enabled = 1").fetchall()
+        sub_rows = conn.execute("SELECT * FROM push_subscriptions ORDER BY id").fetchall()
+
+    by_user: dict[int, list[PushSubscription]] = {}
+    for r in sub_rows:
+        by_user.setdefault(r["user_id"], []).append(_row_to_push_subscription(r))
+
+    out = []
+    for row in setting_rows:
+        subs = by_user.get(row["user_id"], [])
+        if subs:
+            out.append((row["user_id"], _row_to_push_settings(row), subs))
+    return out
+
+
+def _row_to_push_subscription(row: sqlite3.Row) -> PushSubscription:
+    return PushSubscription(
+        id=row["id"],
+        user_id=row["user_id"],
+        endpoint=row["endpoint"],
+        p256dh=row["p256dh"],
+        auth=row["auth"],
+        created_at=row["created_at"],
+    )
+
+
+def _row_to_push_settings(row: sqlite3.Row) -> PushSettings:
+    return PushSettings(
+        enabled=bool(row["enabled"]),
+        leave_time=row["leave_time"],
+        skip_weekends=bool(row["skip_weekends"]),
+        last_sent_date=row["last_sent_date"],
+    )
 
 
 def load_seed_cards(user_id: int, path: str = "data/seed_cards.json") -> None:

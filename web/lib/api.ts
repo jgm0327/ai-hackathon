@@ -97,11 +97,29 @@ export interface HealthStatus {
 export interface PushSubscriptionPayload {
   endpoint: string;
   keys: { p256dh: string; auth: string };
-  /** "HH:MM" — 발송 시각 계산에 쓴다 (9/13 계약에 추가된 필드). */
+  /** "HH:MM" — 발송 시각 계산에 쓴다 (9/13 계약에 추가된 필드).
+   * 9/23부터 서버가 형식을 검사한다("09:00" 처럼 두 자리로 채울 것). */
   leave_time: string;
   /** 9/18 신규 — 주말엔 보내지 않는다 (Figma 온보딩 4/4 "주말에는 쉬어요").
    * 서버 기본값이 false라 안 보내도 기존 동작(매일 발송) 그대로다. */
   skip_weekends?: boolean;
+}
+
+/**
+ * 퇴근 알림 설정 — **계정 단위** (9/23 신규).
+ *
+ * 그전까지 이 값은 서버에 되읽는 GET이 없어서 화면이 localStorage로 대신 보여줬다.
+ * 로그아웃이 그 키를 지우면서 "화면엔 꺼짐인데 알림은 계속 오는" 상태가 만들어졌다.
+ *
+ * `device_count`는 이 계정에 등록된 브라우저 수다. 웹푸시 구독은 브라우저마다 따로라
+ * **이 기기에서도 받는 중인지**는 서버가 알 수 없고, 프론트가
+ * `pushManager.getSubscription()`으로 따로 확인한다.
+ */
+export interface PushSettings {
+  enabled: boolean;
+  leave_time: string;
+  skip_weekends: boolean;
+  device_count: number;
 }
 
 export interface UpdateProjectPatch {
@@ -854,19 +872,38 @@ export function getVapidPublicKey(): Promise<string> {
 }
 
 /** 같은 `endpoint`로 다시 호출하면 서버에서 upsert된다 — 별도 "이미 구독됨" 분기 불필요. */
-export function subscribePush(payload: PushSubscriptionPayload): Promise<void> {
-  return request<void>("/push/subscribe", {
+export function subscribePush(payload: PushSubscriptionPayload): Promise<PushSettings> {
+  return request<PushSettings>("/push/subscribe", {
     method: "POST",
     body: JSON.stringify(payload),
   });
 }
 
-/** 존재하지 않는 구독을 지워도 204(멱등) — 호출부에서 별도 예외 처리 불필요. */
-export function unsubscribePush(endpoint: string): Promise<void> {
-  return request<void>("/push/subscribe", {
-    method: "DELETE",
-    body: JSON.stringify({ endpoint }),
+/** 설정 화면이 읽는 값. 한 번도 켠 적이 없으면 꺼짐 기본값이 온다. */
+export function getPushSettings(): Promise<PushSettings> {
+  return request<PushSettings>("/push/settings");
+}
+
+/** 시각·주말만 고친다(이미 구독된 기기에서). 이걸로는 알림이 켜지지 않는다. */
+export function updatePushSettings(payload: {
+  leave_time: string;
+  skip_weekends: boolean;
+}): Promise<PushSettings> {
+  return request<PushSettings>("/push/settings", {
+    method: "PUT",
+    body: JSON.stringify(payload),
   });
+}
+
+/**
+ * 알림 끄기 — **이 계정의 기기 전부**. 구독이 없어도 조용히 성공한다(멱등).
+ *
+ * 9/23까지는 endpoint를 실어 보내 그 기기 하나만 지웠는데, 정작 이걸 호출하는 화면이
+ * 하나도 없어서 실제로는 한 번도 불린 적이 없었다. 지금은 계정 단위로 끈다 — 보고 있는
+ * 기기만 멈추면 다른 기기에서 계속 온다.
+ */
+export function unsubscribePush(): Promise<PushSettings> {
+  return request<PushSettings>("/push/subscribe", { method: "DELETE" });
 }
 
 // ---------------------------------------------------------------------------

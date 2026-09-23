@@ -19,7 +19,10 @@ import { logout } from "@/lib/api";
  */
 const CLEAR_PREFIXES = [
   "career-log:", // 입력 중이던 메모 초안, 인트로 표시 등
-  "careerlog:", // 퇴근 알림 시각 등 (초기 코드가 쓰던 접두사)
+  // 9/23 — 알림 설정은 더 이상 localStorage에 없다(서버가 갖는다). 이 접두사를 지우는
+  // 것이 **표시만 꺼진 것처럼 보이게 만든 원인**이었다 — 화면이 이 키로 알림 상태를
+  // 판단했기 때문이다. 이제는 남아 있는 옛 키를 치우는 의미만 있다.
+  "careerlog:", // 초기 코드가 쓰던 접두사 (지금은 잔여 키 정리용)
 ];
 
 function clearLocalData(storage: Storage): void {

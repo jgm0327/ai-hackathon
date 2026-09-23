@@ -493,6 +493,11 @@ class PushKeys(BaseModel):
     auth: str = Field(max_length=MAX_TOKEN)
 
 
+# "HH:MM" — 프론트의 시각 칩과 <input type="time"> 둘 다 이 형식으로 보낸다.
+# 형식이 깨지면 발송 루프가 그 유저를 통째로 건너뛰므로 입력 단계에서 막는다.
+LEAVE_TIME_PATTERN = r"^([01]\d|2[0-3]):[0-5]\d$"
+
+
 class PushSubscribeRequest(BaseModel):
     """docs/05-api-contract.md 7장 + 추가 필드.
 
@@ -500,18 +505,45 @@ class PushSubscribeRequest(BaseModel):
     (`push_sender.send_due_reminders()`)에는 "몇 시에 보낼지"(leave_time)가 필요하다.
     계약 문서 "변경 규칙"이 허용하는 범위(추가는 자유롭다)에서 필드를 더했다 —
     Track C에 공유 필요.
+
+    9/23 — `leave_time`/`skip_weekends`는 이 구독(기기)이 아니라 **계정**에 저장된다.
+    기기 등록과 설정 저장이 한 요청에 같이 오는 건 화면이 그렇게 생겼기 때문이다
+    (온보딩 4/4에서 시각을 고르고 "시작하기"를 누르면 권한 요청과 저장이 한 번에 난다).
     """
 
     endpoint: str = Field(max_length=2_000)
     keys: PushKeys
-    leave_time: str = Field(max_length=16)  # "HH:MM"
+    leave_time: str = Field(pattern=LEAVE_TIME_PATTERN)
     # 9/18 신규 — Figma 온보딩 4/4 "주말에는 쉬어요". 기본값 False라 기존 프론트가
     # 이 필드를 안 보내도 동작이 그대로다.
     skip_weekends: bool = False
 
 
-class PushUnsubscribeRequest(BaseModel):
-    endpoint: str = Field(max_length=2_000)
+class PushSettingsUpdateRequest(BaseModel):
+    """시각/주말만 고치는 경로 (9/23 신규) — 이미 구독된 기기에서 값만 바꿀 때.
+
+    `enabled`는 여기서 못 바꾼다. 켜는 건 브라우저 권한과 구독 생성이 필요해서
+    `POST /push/subscribe`로만 되고, 끄는 건 `DELETE /push/subscribe`다.
+    """
+
+    leave_time: str = Field(pattern=LEAVE_TIME_PATTERN)
+    skip_weekends: bool = False
+
+
+class PushSettingsResponse(BaseModel):
+    """설정 화면이 읽는 값 (9/23 신규).
+
+    그전까지 화면은 이 값을 **localStorage에서** 읽었다. 서버에 되읽는 GET이 없어서
+    그랬는데, 그 탓에 로그아웃으로 localStorage가 비면 실제로는 구독이 살아 있는데도
+    화면에는 "꺼짐"으로 보였다(사용자 신고, 9/23).
+    """
+
+    enabled: bool
+    leave_time: str
+    skip_weekends: bool
+    # 이 계정에 붙어 있는 기기 수. 웹푸시 구독은 브라우저마다 따로라 "이 기기에서도
+    # 받는 중인지"는 프론트가 `pushManager.getSubscription()`으로 따로 확인한다.
+    device_count: int
 
 
 class VapidPublicKeyResponse(BaseModel):

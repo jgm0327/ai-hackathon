@@ -57,6 +57,14 @@ function reminderSentence(leaveTime: string): string | null {
  *  19:00 하나가 빠져 있어서 20시 퇴근인 사람은 매번 "직접 입력"을 거쳐야 했다). */
 const TIME_PRESETS = ["18:00", "19:00", "20:00"];
 
+/**
+ * 나가면서 알림에 무엇을 할지.
+ *  - "save" 켜거나(권한 요청) 이미 켜져 있으면 값만 갱신
+ *  - "off"  이 계정의 모든 기기에서 끈다
+ *  - "none" 손대지 않는다 (직무만 고치고 나가는 경로 등)
+ */
+type PushAction = "save" | "off" | "none";
+
 function OnboardingPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -181,11 +189,16 @@ function OnboardingPageInner() {
    * 작은 "저장했습니다." 메시지만 띄웠는데, 버튼이 화면 하단에 붙어 있어서 그 메시지가
    * 보이지 않았고 결과가 "시작하기를 눌러도 무반응"이었다(사용자 신고, 9/18).
    */
-  const finish = async (withPush: boolean, companiesOverride?: Company[]) => {
-    if (withPush) {
+  const finish = async (pushAction: PushAction, companiesOverride?: Company[]) => {
+    if (pushAction === "save") {
       // 권한 요청은 반드시 이 클릭 핸들러 안에서 시작해야 한다(lib/usePushSubscription.ts).
       // 거부돼도 온보딩 자체는 계속 진행한다 — 알림은 필수가 아니다.
-      await push.subscribe();
+      // 이미 켜져 있으면 권한 요청 없이 시각·주말만 갱신된다.
+      await push.save();
+    } else if (pushAction === "off") {
+      // 9/23 — 그전엔 "알림 끄고 저장"이 **아무것도 끄지 않았다**. 프로필만 저장하고
+      // 화면을 옮겼을 뿐이라 서버 구독이 그대로 남아 알림이 계속 왔다(사용자 신고).
+      await push.unsubscribe();
     }
     const ok = await persist(companiesOverride);
     if (!ok) return;
@@ -321,7 +334,7 @@ function OnboardingPageInner() {
               바로 저장하고 설정으로 돌아간다(9/18). */}
           <button
             type="button"
-            onClick={() => (lastJobStep ? finish(false) : setStep(4))}
+            onClick={() => (lastJobStep ? finish("none") : setStep(4))}
             disabled={saving}
             className="mt-6 w-full rounded-[12px] bg-accent py-4 text-[15px] font-semibold text-accent-foreground transition-colors hover:bg-[#ff7a2e] disabled:opacity-40"
           >
@@ -333,7 +346,7 @@ function OnboardingPageInner() {
               setCompanies([]);
               // 지울 목록을 인자로 넘긴다 — setCompanies는 다음 렌더에 반영되므로
               // 바로 저장하면 예전 목록이 그대로 올라간다(persist 주석 참고).
-              if (lastJobStep) finish(false, []);
+              if (lastJobStep) finish("none", []);
               else setStep(4);
             }}
             disabled={saving}
@@ -453,8 +466,8 @@ function OnboardingPageInner() {
 
           <button
             type="button"
-            onClick={() => finish(push.status !== "denied" && push.status !== "subscribed")}
-            disabled={saving || push.status === "subscribing"}
+            onClick={() => finish(push.status === "denied" ? "none" : "save")}
+            disabled={saving || push.status === "subscribing" || push.status === "loading"}
             className="mt-6 w-full rounded-[12px] bg-accent py-4 text-[15px] font-semibold text-accent-foreground transition-colors hover:bg-[#ff7a2e] disabled:opacity-40"
           >
             {saving || push.status === "subscribing"
@@ -463,17 +476,22 @@ function OnboardingPageInner() {
                 ? "저장"
                 : "시작하기"}
           </button>
+          {/* 켜져 있으면 진짜로 끄고, 아니면 그냥 건너뛴다 — 라벨과 동작을 맞춘다.
+              그전엔 어느 경우든 `finish(false)`라 "알림 끄고 저장"이 아무것도 끄지
+              않았다(9/23 수정). */}
           <button
             type="button"
-            onClick={() => finish(false)}
-            disabled={saving}
+            onClick={() => finish(push.enabled ? "off" : "none")}
+            disabled={saving || push.status === "loading"}
             className="pt-3 text-center text-[13px] text-[#828282] underline underline-offset-2 disabled:opacity-40"
           >
-            {notifyOnly
+            {push.enabled
               ? "알림 끄고 저장"
-              : hasExistingProfile
+              : notifyOnly
                 ? "알림 없이 저장"
-                : "알림 없이 시작하기"}
+                : hasExistingProfile
+                  ? "알림 없이 저장"
+                  : "알림 없이 시작하기"}
           </button>
         </>
       )}

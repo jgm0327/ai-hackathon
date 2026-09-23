@@ -84,11 +84,11 @@ class Settings:
     vapid_private_key: str = os.getenv("VAPID_PRIVATE_KEY", "")
     vapid_public_key: str = os.getenv("VAPID_PUBLIC_KEY", "")
     vapid_contact_email: str = os.getenv("VAPID_CONTACT_EMAIL", "mailto:example@example.com")
-    # 구독 데이터 저장소. 배포된 Streamlit 앱(쓰기)과 GitHub Actions(읽기)가 서로 다른
-    # 프로세스라 파일시스템을 공유 못 하므로 Upstash Redis(REST API, 무료)를 공용
-    # 저장소로 쓴다. 비어있으면 로컬 JSON 파일로 자동 폴백(로컬 개발용).
-    upstash_redis_rest_url: str = os.getenv("UPSTASH_REDIS_REST_URL", "")
-    upstash_redis_rest_token: str = os.getenv("UPSTASH_REDIS_REST_TOKEN", "")
+    # (9/23) 구독 저장소 설정이 여기 있었다 — Upstash Redis. 배포된 Streamlit 앱(쓰기)과
+    # GitHub Actions 워크플로(읽기)가 다른 프로세스라 파일시스템을 공유 못 해서 외부
+    # key-value 저장소가 필요했는데, 9/17에 스케줄러가 FastAPI 앱 안으로 들어오면서
+    # 쓰는 쪽과 읽는 쪽이 같은 프로세스가 됐다. 이제 나머지 데이터와 같은 SQLite에
+    # 두고(`push_subscriptions`/`push_settings`) 유저와 FK로 묶는다.
     # 카드/프로젝트 영속 저장(SQLite). OCI VM 로컬 디스크는 재시작해도 유지되므로
     # 별도 클라우드 DB 불필요 (CLAUDE.md P0 1순위, 9/13 피벗).
     db_path: str = os.getenv("DB_PATH", "data/app.db")

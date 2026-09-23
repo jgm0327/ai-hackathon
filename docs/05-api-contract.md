@@ -738,32 +738,95 @@ Web Speech API가 실기기에서 동작하면 **이 엔드포인트는 불필�
 
 ## 7. 웹푸시
 
+> **9/23 전면 개정 — 파괴적 변경.** 이 절의 엔드포인트는 전부 **로그인이 필요**해졌고
+> (그전까지 push만 인증 밖에 있었다), 저장소가 Upstash Redis에서 앱 SQLite로 옮겨왔다.
+> `DELETE`의 요청 본문이 없어졌고 응답 형태도 바뀌었다. 배경은 이 절 끝의 "왜 바꿨나".
+
+**두 층으로 나뉜다.**
+
+| | 어디에 | 무엇 | 누가 진실인가 |
+|---|---|---|---|
+| 계정 단위 | `push_settings` (유저당 1행) | 켬/끔, 퇴근 시각, 주말 제외 | 서버 |
+| 기기 단위 | `push_subscriptions` (유저당 N행) | endpoint + keys | 브라우저 |
+
+웹푸시 구독은 브라우저가 발급하고 그 브라우저로만 배달되므로 **기기 단위는 없앨 수
+없다** — 새 기기에서는 권한 허용을 한 번 더 받아야 한다. 대신 시각·주말 설정은 계정에
+있어서 다시 고를 필요가 없다. "이 기기가 구독 중인지"는 서버가 알 수 없으므로 프론트가
+`pushManager.getSubscription()`으로 직접 확인한다.
+
 ### `GET /api/push/vapid-public-key` (9/13 추가)
 ```jsonc
 { "public_key": "..." }
 ```
 프론트가 `pushManager.subscribe({ applicationServerKey: ... })`에 쓸 공개키.
-VAPID_PUBLIC_KEY가 서버에 설정 안 돼 있으면 503.
+VAPID_PUBLIC_KEY가 서버에 설정 안 돼 있으면 503. **이 하나만 로그인 없이 부를 수 있다**
+— 값 자체에 유저 정보가 없다.
+
+### `GET /api/push/settings` (9/23 신규)
+```jsonc
+{ "enabled": true, "leave_time": "18:00", "skip_weekends": true, "device_count": 2 }
+```
+설정 화면이 읽는 값. 한 번도 켠 적 없으면 `{enabled:false, leave_time:"18:00",
+skip_weekends:true, device_count:0}`. **기기가 0대면 `enabled`는 false로 온다** — 보낼
+곳이 없는 상태를 "켜짐"이라고 말하지 않는다(발송 루프도 같은 기준으로 대상을 고른다).
+
+이 GET이 없어서 생긴 버그가 이번 개정의 출발점이다. 아래 "왜 바꿨나" 참고.
 
 ### `POST /api/push/subscribe`
 ```jsonc
 // 요청 — leave_time은 9/13 추가 필드(계약 초안엔 없었음). 발송 시각 계산
-// (push_sender.send_due_reminders())에 필수라서 추가함. Track C에 공유 완료.
+// (push_sender.send_due_reminders())에 필수라서 추가함.
 { "endpoint": "https://fcm.googleapis.com/...",
   "keys": { "p256dh": "...", "auth": "..." },
-  "leave_time": "18:00",
-  "skip_weekends": true }   // 9/18 신규 — 토·일엔 보내지 않는다. 생략하면 false(매일 발송)
+  "leave_time": "18:00",     // "HH:MM", 두 자리로 채울 것("9:00"은 422)
+  "skip_weekends": true }    // 9/18 신규 — 토·일엔 보내지 않는다. 생략하면 false(매일 발송)
 ```
-응답 201. 로그인이 없으므로 `endpoint`를 해시해 구독 구분용 id로 쓴다 — 같은
-구독으로 다시 호출하면 upsert된다. 기존 Upstash 저장소 그대로 씀
-(`docs/06-migration.md` 참조).
+응답 **201 + `PushSettings`**(위 GET과 같은 형태). 이 기기를 로그인 유저에게 붙이고
+알림을 켠다. 같은 endpoint로 다시 호출하면 upsert된다 — 기기 목록이 불어나지 않는다.
 
-### `DELETE /api/push/subscribe`
+`leave_time`/`skip_weekends`는 **이 기기가 아니라 계정에** 저장된다. 기기 등록과 설정
+저장이 한 요청에 같이 오는 건 화면이 그렇게 생겼기 때문이다(온보딩 4/4에서 시각을
+고르고 "시작하기"를 누르면 권한 요청과 저장이 한 번에 난다).
+
+### `PUT /api/push/settings` (9/23 신규)
 ```jsonc
 // 요청
-{ "endpoint": "https://fcm.googleapis.com/..." }
+{ "leave_time": "17:00", "skip_weekends": true }
 ```
-응답 204. 존재하지 않는 구독을 지워도 204(멱등).
+응답 200 + `PushSettings`. 시각·주말만 고친다 — **이걸로는 알림이 켜지지 않는다**
+(켜려면 브라우저 권한과 구독 생성이 필요하므로 `POST /push/subscribe`뿐이다).
+
+이 경로가 없어서, 이미 구독 중인 사람이 화면에서 시각을 바꿔도 서버엔 아무것도 가지
+않고 계속 옛 시각에 알림이 왔다.
+
+### `DELETE /api/push/subscribe`
+요청 본문 없음. 응답 200 + `PushSettings`(항상 `enabled:false, device_count:0`).
+
+**끄기는 계정 단위다 — 이 계정의 기기를 전부 지운다.** 보고 있는 기기 하나만 멈추면
+다른 기기에서 계속 오고, 그게 이번에 신고받은 증상이었다. 구독이 없어도 200(멱등).
+
+퇴근 시각은 남겨둔다(다시 켤 때 처음부터 고르지 않게), `last_sent_date`는 비운다
+(껐다가 같은 날 다시 켜면 그날 알림을 받을 수 있어야 한다).
+
+### 왜 바꿨나 (9/23)
+
+사용자 신고: **"설정에 알림이 꺼짐으로 되어 있는데 알림이 계속 온다."**
+
+원인은 세 겹이었고 전부 이 절의 설계에서 나왔다.
+
+1. **push만 로그인 밖에 있었다.** 9/13에 "인증 없는 단일 유저 데모" 전제로 만들어
+   `sha256(endpoint)`를 user_id 자리에 썼는데, 9/14에 카카오 로그인이 들어올 때
+   다른 라우터는 전부 `get_current_user`로 옮겨가고 여기만 남았다. 결과적으로 설정이
+   계정이 아니라 브라우저에 붙어서, 한 계정에 `17:42 / 18:00 / 18:00` 세 벌이 쌓였다.
+2. **상태를 되읽는 GET이 없었다.** 그래서 설정 화면이 `localStorage`를 대신 봤는데,
+   로그아웃이 그 키를 지우면서(`web/lib/signOut.ts`) 서버 구독이 살아 있는데도 화면은
+   "꺼짐"이 됐다. 표시와 실제가 서로를 참조하지 않는 구조였다.
+3. **끄는 경로가 실질적으로 없었다.** `DELETE`는 있었지만 이를 호출하는 화면이 하나도
+   없어서 **한 번도 불린 적이 없었다.** 온보딩의 "알림 끄고 저장"은 프로필만 저장하고
+   나갔다.
+
+여기에 만료 구독 정리도 없어서(410 Gone을 받아도 `print`만 했다) 아무도 소유하지 않는
+고아 구독이 쌓였다. 지금은 `send_push()`가 404/410이면 그 행을 지운다.
 
 ---
 

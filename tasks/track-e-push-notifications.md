@@ -10,6 +10,21 @@
 > 추가(테스트 포함). 로그인이 없어 endpoint 해시를 user_id로 씀. 프론트(Next.js)
 > 이식은 아직 — `docs/06-migration.md` 1장 기준으로 진행 예정.
 
+> **9/23 — 저장소와 인증이 바뀌었다. 이 문서 아래쪽의 Upstash 관련 항목은 전부 폐기됐다.**
+> 사용자가 "설정은 꺼짐인데 알림이 계속 온다"고 신고해 원인을 찾아 걷어냈다.
+> - 구독이 **앱 SQLite**로 옮겨왔다 — `push_subscriptions`(기기 단위, `user_id` FK) +
+>   `push_settings`(계정 단위: 켬/끔·퇴근 시각·주말 제외·마지막 발송일).
+>   `src/push/subscription_store.py`와 `tests/test_subscription_store.py`는 삭제됐고
+>   `UPSTASH_*` 환경변수도 더 이상 읽지 않는다. Upstash가 필요했던 이유(쓰는 프로세스와
+>   읽는 프로세스가 달랐다)는 9/17에 스케줄러가 앱 안으로 들어오면서 사라졌다.
+> - `.github/workflows/send-reminder.yml`도 지웠다 — 데이터가 서버 디스크에 있어
+>   GitHub 러너에서는 애초에 읽을 수 없다.
+> - 엔드포인트가 전부 **로그인 필요**로 바뀌었고 `GET`/`PUT /api/push/settings`가 생겼다.
+>   자세한 계약과 배경은 `docs/05-api-contract.md` 7장.
+>
+> 아래 본문에서 여전히 유효한 것: Tier 1/Tier 2 구분, VAPID 키 생성 절차, 권한 요청을
+> 클릭 핸들러 안에서 해야 한다는 제약, iOS 제약 메모.
+
 이 트랙은 **선택 기능**이다. 메인 4개 트랙(A/B/C/D)의 완료 기준을 해치면서까지
 투입하지 않는다. 반드시 `docs/04-push-notifications.md`를 먼저 읽을 것.
 

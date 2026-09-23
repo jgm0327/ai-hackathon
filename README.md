@@ -57,8 +57,7 @@ onboarding-hackathon/
 │   │   ├── schemas.py         # Pydantic 요청/응답 모델
 │   │   └── routers/           # cards / projects / resume / jds / notion / push / health
 │   ├── push/                  # 퇴근 알림 Tier 2 (선택) — Track E
-│   │   ├── subscription_store.py
-│   │   └── push_sender.py
+│   │   └── push_sender.py     # 구독은 SQLite에 있다(9/23) — subscription_store.py 삭제됨
 │   └── frontend/              # (레거시) Streamlit — 이식 완료 전 폴백용, 신규 개발 금지
 │       ├── app.py
 │       └── components/

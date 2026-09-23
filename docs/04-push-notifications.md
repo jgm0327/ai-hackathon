@@ -1,5 +1,17 @@
 # 푸시 알림 아키텍처 (Track E — 선택 기능)
 
+> **⚠️ 이 문서는 9/13 피벗 이전(Streamlit + Streamlit Cloud) 기준이다.** 아래 Tier 2의
+> 트리거 논의와 저장소 설명은 **현재 구현과 다르다.** 지금 상태는 이렇다.
+>
+> | 이 문서가 말하는 것 | 현재 (9/23) |
+> |---|---|
+> | 트리거: GitHub Actions 스케줄 워크플로 | FastAPI 앱 내부 스케줄러 (`src/api/scheduler.py`, 1분 주기). 무료 러너 스케줄 지연이 심해 9/17에 옮겼고, 워크플로 파일은 9/23에 지웠다 |
+> | 저장소: `src/push/subscription_store.py` (Upstash Redis) | 앱 SQLite — `push_subscriptions`(기기 단위) + `push_settings`(계정 단위). 그 파일은 9/23에 삭제됐다 |
+> | 구독 구분: endpoint 해시 | 로그인 유저 `user_id` FK |
+>
+> **API 계약과 설계 근거는 `docs/05-api-contract.md` 7장이 최신 진실이다.** 아래 본문은
+> Tier 1/Tier 2 구분과 VAPID 키 생성 절차를 참고할 때만 읽을 것.
+
 ## 결론부터
 "퇴근 15분 전 알림"은 구현 난이도가 크게 다른 두 단계로 나뉜다. 해커톤 일정상
 **Tier 1을 기본으로 하고, Tier 2는 시간이 남을 때만 시도**하는 것을 권장한다.

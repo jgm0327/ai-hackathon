@@ -16,8 +16,10 @@ import {
   getResumeDraft,
   importBackup,
   NotionConnection,
+  PushSettings,
   disconnectNotion,
   getNotionConnection,
+  getPushSettings,
   listNotionPages,
   notionOAuthStartUrl,
 } from "@/lib/api";
@@ -42,8 +44,6 @@ function parseBackupFile(text: string): Pick<BackupFile, "projects" | "cards"> {
   return { projects: parsed.projects, cards: parsed.cards };
 }
 
-const LEAVE_TIME_STORAGE_KEY = "careerlog:leaveTime";
-
 function jobLabel(profile: Profile | null): string | null {
   if (!profile?.job_field) return null;
   const detail = profile.job_detail ?? profile.job_field;
@@ -63,7 +63,11 @@ function jobLabel(profile: Profile | null): string | null {
 export default function SettingsPage() {
   const { currentProject } = useProjects();
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [leaveTime, setLeaveTime] = useState<string | null>(null);
+  // 알림 상태는 **서버에서** 읽는다. 9/23까지는 localStorage("careerlog:leaveTime") 하나만
+  // 봤는데, 로그아웃이 그 키를 지우면서(lib/signOut.ts) 서버 구독이 살아 있는데도 화면엔
+  // "꺼짐"으로 보였다 — 사용자가 "꺼져 있는데 알림이 온다"고 신고한 그 상태다.
+  // 노션 연결 상태를 localStorage 플래그에서 서버 조회로 옮긴 것과 같은 수정이다.
+  const [push, setPush] = useState<PushSettings | null>(null);
   // 노션 연결 상태는 **서버에서** 읽는다. 예전엔 localStorage 플래그를 봤는데,
   // 한 번 성공한 흔적이 남아서 실제로는 연결이 없어도 "연결됨"으로 보였다(9/18 버그).
   const [notionConn, setNotionConn] = useState<NotionConnection | null>(null);
@@ -93,12 +97,9 @@ export default function SettingsPage() {
     getNotionConnection()
       .then(setNotionConn)
       .catch(() => {}); // 실패하면 "연결 안 됨"으로 보일 뿐이다
-    try {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setLeaveTime(localStorage.getItem(LEAVE_TIME_STORAGE_KEY));
-    } catch {
-      // localStorage 접근 불가 — 값 없이 기본 표시로 진행
-    }
+    getPushSettings()
+      .then(setPush)
+      .catch(() => {}); // 실패하면 값 없이 "—"로 보일 뿐이다
   }, []);
 
   useEffect(() => {
@@ -256,7 +257,7 @@ export default function SettingsPage() {
           <span className="text-[16px] font-medium leading-[28px]">알림</span>
           <div className="flex-1" />
           <span style={{ color: t.textMuted }} className="text-[12px] leading-[20px]">
-            {leaveTime ? `매일 ${leaveTime}` : "꺼짐"}
+            {push === null ? "" : push.enabled ? `매일 ${push.leave_time}` : "꺼짐"}
           </span>
           <Image src="/icons/chevron-right.svg" alt="" width={16} height={16} aria-hidden />
         </Link>
